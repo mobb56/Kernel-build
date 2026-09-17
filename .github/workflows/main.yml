@@ -8,95 +8,65 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-
-      # -------------------------------------------------------
-      # Checkout the BUILD repository
-      # -------------------------------------------------------
       - name: Checkout build repository
         uses: actions/checkout@v4
 
-      # -------------------------------------------------------
-      # Checkout the actual Motorola kernel source
-      # -------------------------------------------------------
       - name: Checkout Motorola kernel source
         uses: actions/checkout@v4
         with:
           repository: mobb56/Moto-g9-kernel
+          token: ${{ secrets.KERNEL_BUILD }}
           path: kernel
           fetch-depth: 1
           submodules: recursive
 
-      # -------------------------------------------------------
-      # Dependencies
-      # -------------------------------------------------------
-      - name: Install build dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
-
           sudo apt-get install -y \
-            bc \
-            bison \
-            flex \
-            libssl-dev \
-            libelf-dev \
-            libdw-dev \
+            bc bison flex \
+            libssl-dev libelf-dev libdw-dev \
             gcc-aarch64-linux-gnu \
-            clang \
-            llvm \
-            lld \
-            make \
-            cpio \
-            kmod \
-            rsync \
-            python3 \
-            zip \
-            unzip
+            clang llvm lld \
+            make cpio kmod rsync \
+            python3 zip unzip
 
-      # -------------------------------------------------------
-      # Inspect kernel source
-      # -------------------------------------------------------
-      - name: Inspect kernel source
+      - name: Inspect kernel tree
         shell: bash
         run: |
           set -e
-
-          echo "======================================"
-          echo "KERNEL SOURCE"
-          echo "======================================"
-
           cd "$GITHUB_WORKSPACE/kernel"
 
+          echo "Kernel source:"
           pwd
+
+          echo
+          echo "Top-level files:"
           ls -la
 
           echo
-          echo "Kernel Makefile:"
-          test -f Makefile && echo "FOUND" || echo "MISSING"
+          echo "ARM64 directory:"
+          ls -la arch/arm64 || true
 
           echo
-          echo "Architecture:"
-          ls -la arch/arm64 2>/dev/null || true
+          echo "Available configurations:"
+          find arch/arm64/configs \
+            -maxdepth 1 \
+            -type f \
+            -printf '%f\n' 2>/dev/null | sort || true
 
           echo
-          echo "ARM64 configs:"
-          ls -la arch/arm64/configs 2>/dev/null || true
-
-          echo
-          echo "Searching for cebu:"
+          echo "cebu-related files:"
           find . \
             -type f \
             -iname '*cebu*' \
             -not -path './.git/*' \
             -print | head -100
 
-      # -------------------------------------------------------
-      # Find cebu configuration
-      # -------------------------------------------------------
-      - name: Find cebu configuration
+      - name: Locate cebu defconfig
         shell: bash
         run: |
           set -e
-
           cd "$GITHUB_WORKSPACE/kernel"
 
           echo "Searching for cebu defconfig..."
@@ -104,25 +74,13 @@ jobs:
           find arch/arm64/configs \
             -maxdepth 1 \
             -type f \
-            -iname '*cebu*' \
-            -print || true
-
-          echo
-          echo "All Motorola-related configs:"
-
-          find arch/arm64/configs \
-            -maxdepth 1 \
-            -type f \
             \( \
-              -iname '*motorola*' \
+              -iname '*cebu*' \
+              -o -iname '*motorola*' \
               -o -iname '*sm6125*' \
-              -o -iname '*cebu*' \
             \) \
             -print || true
 
-      # -------------------------------------------------------
-      # Create NetHunter configuration
-      # -------------------------------------------------------
       - name: Create NetHunter configuration
         shell: bash
         run: |
@@ -131,7 +89,6 @@ jobs:
           mkdir -p build
 
           cat > build/nethunter.config <<'EOF'
-
           # Bluetooth
           CONFIG_BT=y
           CONFIG_BT_BREDR=y
@@ -144,7 +101,7 @@ jobs:
           CONFIG_BT_HCIUART=y
           CONFIG_BT_HCIUART_H4=y
 
-          # USB Gadget
+          # USB gadget / HID
           CONFIG_USB_GADGET=y
           CONFIG_USB_CONFIGFS=y
           CONFIG_USB_CONFIGFS_F_HID=y
@@ -167,19 +124,12 @@ jobs:
           CONFIG_NETFILTER=y
           CONFIG_NETFILTER_XTABLES=y
           CONFIG_NF_CONNTRACK=y
-
           EOF
 
-          echo "NetHunter configuration created."
-
-      # -------------------------------------------------------
-      # Configure kernel
-      # -------------------------------------------------------
       - name: Configure kernel
         shell: bash
         run: |
           set -e
-
           cd "$GITHUB_WORKSPACE/kernel"
 
           export ARCH=arm64
@@ -187,20 +137,11 @@ jobs:
 
           mkdir -p out
 
-          echo "Searching Makefile for defconfig targets..."
-
-          grep -Rni \
-            "cebu_defconfig\|sm6125_defconfig\|motorola_defconfig" \
-            arch/arm64/configs \
-            2>/dev/null || true
-
-          echo
-          echo "Available configuration files:"
+          echo "Available defconfigs:"
           find arch/arm64/configs \
             -maxdepth 1 \
             -type f \
-            -printf '%f\n' \
-            | sort
+            -printf '%f\n' | sort
 
           echo
           echo "Attempting cebu_defconfig..."
@@ -210,9 +151,6 @@ jobs:
             ARCH=arm64 \
             LLVM=1 \
             cebu_defconfig
-
-          echo
-          echo "Merging NetHunter configuration..."
 
           ./scripts/kconfig/merge_config.sh \
             -O out \
@@ -225,42 +163,32 @@ jobs:
             LLVM=1 \
             olddefconfig
 
-      # -------------------------------------------------------
-      # Verify configuration
-      # -------------------------------------------------------
-      - name: Verify configuration
+      - name: Verify NetHunter configuration
         shell: bash
         run: |
           cd "$GITHUB_WORKSPACE/kernel"
 
-          echo "========== Bluetooth =========="
-
+          echo "===== Bluetooth ====="
           grep -E \
             'CONFIG_BT=|CONFIG_BT_HIDP=|CONFIG_BT_HCIVHCI=|CONFIG_BT_HCIUART=|CONFIG_BT_HCIUART_H4=' \
             out/.config || true
 
           echo
-          echo "========== USB HID =========="
-
+          echo "===== USB HID ====="
           grep -E \
             'CONFIG_USB_GADGET=|CONFIG_USB_CONFIGFS=|CONFIG_USB_CONFIGFS_F_HID=' \
             out/.config || true
 
           echo
-          echo "========== Wireless =========="
-
+          echo "===== Wireless ====="
           grep -E \
             'CONFIG_WLAN=|CONFIG_CFG80211=|CONFIG_MAC80211=' \
             out/.config || true
 
-      # -------------------------------------------------------
-      # Build
-      # -------------------------------------------------------
       - name: Build kernel
         shell: bash
         run: |
           set -e
-
           cd "$GITHUB_WORKSPACE/kernel"
 
           export ARCH=arm64
@@ -274,16 +202,13 @@ jobs:
             Image \
             dtbs
 
-      # -------------------------------------------------------
-      # Collect output
-      # -------------------------------------------------------
-      - name: Collect kernel
+      - name: Collect artifacts
         shell: bash
         run: |
           set -e
-
           cd "$GITHUB_WORKSPACE/kernel"
 
+          rm -rf artifacts
           mkdir -p artifacts
 
           if [ -f out/arch/arm64/boot/Image ]; then
@@ -302,14 +227,9 @@ jobs:
 
           cp out/.config artifacts/kernel.config
 
-          echo
-          echo "========== ARTIFACTS =========="
+          echo "===== BUILD ARTIFACTS ====="
+          ls -lh artifacts/
 
-          ls -lh artifacts
-
-      # -------------------------------------------------------
-      # Upload
-      # -------------------------------------------------------
       - name: Upload kernel artifacts
         uses: actions/upload-artifact@v4
         with:
