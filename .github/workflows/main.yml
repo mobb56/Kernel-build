@@ -9,9 +9,9 @@ jobs:
 
     steps:
 
-      # ------------------------------------------------------------
-      # 1. Install build dependencies
-      # ------------------------------------------------------------
+      # ============================================================
+      # 1. Install dependencies
+      # ============================================================
       - name: Install dependencies
         run: |
           set -e
@@ -39,9 +39,9 @@ jobs:
             xz-utils \
             zip
 
-      # ------------------------------------------------------------
+      # ============================================================
       # 2. Setup LLVM 14
-      # ------------------------------------------------------------
+      # ============================================================
       - name: Setup LLVM
         run: |
           set -e
@@ -51,9 +51,9 @@ jobs:
           /usr/lib/llvm-14/bin/clang --version
           /usr/lib/llvm-14/bin/ld.lld --version
 
-      # ------------------------------------------------------------
+      # ============================================================
       # 3. Checkout official LineageOS kernel
-      # ------------------------------------------------------------
+      # ============================================================
       - name: Checkout LineageOS SM6225 kernel
         uses: actions/checkout@v4
         with:
@@ -62,9 +62,9 @@ jobs:
           path: kernel
           fetch-depth: 1
 
-      # ------------------------------------------------------------
+      # ============================================================
       # 4. Checkout cebu device tree
-      # ------------------------------------------------------------
+      # ============================================================
       - name: Checkout cebu device tree
         uses: actions/checkout@v4
         with:
@@ -73,9 +73,9 @@ jobs:
           path: device/motorola/cebu
           fetch-depth: 1
 
-      # ------------------------------------------------------------
-      # 5. Checkout SM6225 common device tree
-      # ------------------------------------------------------------
+      # ============================================================
+      # 5. Checkout SM6225 common tree
+      # ============================================================
       - name: Checkout SM6225 common device tree
         uses: actions/checkout@v4
         with:
@@ -84,9 +84,9 @@ jobs:
           path: device/motorola/sm6225-common
           fetch-depth: 1
 
-      # ------------------------------------------------------------
-      # 6. Verify source trees
-      # ------------------------------------------------------------
+      # ============================================================
+      # 6. Verify source
+      # ============================================================
       - name: Verify source
         working-directory: kernel
         run: |
@@ -116,9 +116,19 @@ jobs:
 
           test -f arch/arm64/configs/vendor/bengal-perf_defconfig
           test -f scripts/kconfig/merge_config.sh
-          test -f drivers/clk/qcom/clk-debug.c
+          test -f drivers/sensors/Kconfig
+          test -f drivers/sensors/Makefile
+          test -f drivers/sensors/sensors_class.c
 
           echo "Required kernel files found."
+
+          echo
+          echo "========================================"
+          echo "Checking sensors configuration"
+          echo "========================================"
+
+          grep -n "SENSORS_CLASS" drivers/sensors/Kconfig
+          grep -n "sensors_class" drivers/sensors/Makefile
 
           echo
           echo "========================================"
@@ -129,9 +139,9 @@ jobs:
             "$GITHUB_WORKSPACE/device/motorola/cebu/BoardConfig.mk" \
             || true
 
-      # ------------------------------------------------------------
-      # 7. Clean source tree
-      # ------------------------------------------------------------
+      # ============================================================
+      # 7. Clean source
+      # ============================================================
       - name: Clean kernel source
         working-directory: kernel
         run: |
@@ -148,9 +158,9 @@ jobs:
 
           echo "Kernel source cleaned."
 
-      # ------------------------------------------------------------
-      # 8. Locate cebu-specific kernel config
-      # ------------------------------------------------------------
+      # ============================================================
+      # 8. Locate cebu kernel config
+      # ============================================================
       - name: Locate cebu kernel configuration
         run: |
           set -e
@@ -167,21 +177,23 @@ jobs:
             echo "CEBU_CONFIG=$CEBU_CONFIG" >> "$GITHUB_ENV"
           else
             echo "::warning::cebu-default.config was not found in the checked-out public trees."
-            echo "The build will continue using the SM6225 Bengal base configuration."
+            echo "Continuing with the SM6225 Bengal base configuration."
           fi
 
-      # ------------------------------------------------------------
-      # 9. Create NetHunter configuration fragment
-      # ------------------------------------------------------------
+      # ============================================================
+      # 9. Create NetHunter configuration
+      # ============================================================
       - name: Create NetHunter config
         working-directory: kernel
         run: |
           set -e
 
           cat > nethunter.config <<'EOF'
-          # --------------------------------------------------------
+
+          # ========================================================
           # Bluetooth
-          # --------------------------------------------------------
+          # ========================================================
+
           CONFIG_BT=y
           CONFIG_BT_BREDR=y
           CONFIG_BT_RFCOMM=y
@@ -191,9 +203,10 @@ jobs:
           CONFIG_BT_HCIUART=y
           CONFIG_BT_HCIUART_H4=y
 
-          # --------------------------------------------------------
-          # TTY / input / HID
-          # --------------------------------------------------------
+          # ========================================================
+          # TTY / INPUT / HID
+          # ========================================================
+
           CONFIG_TTY=y
           CONFIG_INPUT=y
           CONFIG_HID=y
@@ -202,18 +215,20 @@ jobs:
           CONFIG_UHID=y
           CONFIG_HIDRAW=y
 
-          # --------------------------------------------------------
-          # USB gadget / HID / networking
-          # --------------------------------------------------------
+          # ========================================================
+          # USB Gadget
+          # ========================================================
+
           CONFIG_USB_GADGET=y
           CONFIG_USB_CONFIGFS=y
           CONFIG_USB_CONFIGFS_F_HID=y
           CONFIG_USB_CONFIGFS_NCM=y
           CONFIG_USB_CONFIGFS_F_FS=y
 
-          # --------------------------------------------------------
+          # ========================================================
           # Networking
-          # --------------------------------------------------------
+          # ========================================================
+
           CONFIG_PACKET=y
           CONFIG_NETFILTER=y
           CONFIG_NETFILTER_XTABLES=y
@@ -221,25 +236,34 @@ jobs:
           CONFIG_TUN=y
           CONFIG_VETH=y
 
-          # --------------------------------------------------------
+          # ========================================================
           # Wireless framework
-          # --------------------------------------------------------
+          # ========================================================
+
           CONFIG_CFG80211=y
           CONFIG_RFKILL=y
 
-          # --------------------------------------------------------
-          # Qualcomm / Motorola sensor support
-          # --------------------------------------------------------
-          CONFIG_SENSORS_CLASS=y
+          # ========================================================
+          # Motorola sensor class
+          #
+          # This is deliberately a module. The Motorola sensor
+          # drivers reference sensors_classdev_register() and
+          # sensors_classdev_unregister().
+          # ========================================================
+
+          CONFIG_SENSORS_CLASS=m
+
           EOF
 
-          echo "Created nethunter.config:"
-          echo
+          echo "========================================"
+          echo "NetHunter configuration"
+          echo "========================================"
+
           cat nethunter.config
 
-      # ------------------------------------------------------------
+      # ============================================================
       # 10. Configure base Bengal kernel
-      # ------------------------------------------------------------
+      # ============================================================
       - name: Configure base kernel
         working-directory: kernel
         run: |
@@ -253,9 +277,9 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             vendor/bengal-perf_defconfig
 
-      # ------------------------------------------------------------
-      # 11. Merge cebu configuration
-      # ------------------------------------------------------------
+      # ============================================================
+      # 11. Apply cebu configuration
+      # ============================================================
       - name: Apply cebu configuration
         if: env.CEBU_CONFIG != ''
         working-directory: kernel
@@ -268,9 +292,9 @@ jobs:
             out/.config \
             "$CEBU_CONFIG"
 
-      # ------------------------------------------------------------
-      # 12. Merge NetHunter configuration
-      # ------------------------------------------------------------
+      # ============================================================
+      # 12. Apply NetHunter configuration
+      # ============================================================
       - name: Apply NetHunter configuration
         working-directory: kernel
         run: |
@@ -282,9 +306,9 @@ jobs:
             out/.config \
             nethunter.config
 
-      # ------------------------------------------------------------
+      # ============================================================
       # 13. Resolve Kconfig dependencies
-      # ------------------------------------------------------------
+      # ============================================================
       - name: Finalize configuration
         working-directory: kernel
         run: |
@@ -298,9 +322,9 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             olddefconfig
 
-      # ------------------------------------------------------------
-      # 14. Verify required options
-      # ------------------------------------------------------------
+      # ============================================================
+      # 14. Verify final configuration
+      # ============================================================
       - name: Verify NetHunter configuration
         working-directory: kernel
         run: |
@@ -316,11 +340,28 @@ jobs:
               echo "OK: ${OPTION}=y"
             else
               echo "FAIL: ${OPTION} is NOT built-in"
-              grep -E "^# ${OPTION} is not set$|^${OPTION}=" "$CONFIG" || true
+              grep -E \
+                "^# ${OPTION} is not set$|^${OPTION}=" \
+                "$CONFIG" || true
               FAILED=1
             fi
           }
 
+          check_m() {
+            OPTION="$1"
+
+            if grep -q "^${OPTION}=m$" "$CONFIG"; then
+              echo "OK: ${OPTION}=m"
+            else
+              echo "FAIL: ${OPTION} is NOT a module"
+              grep -E \
+                "^# ${OPTION} is not set$|^${OPTION}=" \
+                "$CONFIG" || true
+              FAILED=1
+            fi
+          }
+
+          echo
           echo "========================================"
           echo "Bluetooth"
           echo "========================================"
@@ -349,7 +390,7 @@ jobs:
 
           echo
           echo "========================================"
-          echo "USB gadget"
+          echo "USB Gadget"
           echo "========================================"
 
           check_y CONFIG_USB_GADGET
@@ -380,24 +421,26 @@ jobs:
 
           echo
           echo "========================================"
-          echo "Sensors"
+          echo "Motorola Sensors"
           echo "========================================"
 
-          check_y CONFIG_SENSORS_CLASS
+          check_m CONFIG_SENSORS_CLASS
 
           echo
           echo "========================================"
 
           if [ "$FAILED" -ne 0 ]; then
+            echo
             echo "CONFIGURATION VERIFICATION FAILED"
             exit 1
           fi
 
-          echo "ALL REQUIRED NETHUNTER OPTIONS ARE ENABLED."
+          echo
+          echo "ALL REQUIRED CONFIGURATION OPTIONS PASSED."
 
-      # ------------------------------------------------------------
+      # ============================================================
       # 15. Save final config
-      # ------------------------------------------------------------
+      # ============================================================
       - name: Save final kernel config
         working-directory: kernel
         run: |
@@ -407,9 +450,9 @@ jobs:
 
           echo "Final kernel configuration saved."
 
-      # ------------------------------------------------------------
+      # ============================================================
       # 16. Clean source generated files
-      # ------------------------------------------------------------
+      # ============================================================
       - name: Clean source generated files
         working-directory: kernel
         run: |
@@ -420,11 +463,11 @@ jobs:
           rm -rf arch/arm64/include/generated
 
           echo "Source generated files cleaned."
-          echo "out/ configuration preserved."
+          echo "out/ preserved."
 
-      # ------------------------------------------------------------
+      # ============================================================
       # 17. Build kernel Image
-      # ------------------------------------------------------------
+      # ============================================================
       - name: Build kernel Image
         working-directory: kernel
         run: |
@@ -439,9 +482,9 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             Image
 
-      # ------------------------------------------------------------
-      # 18. Build kernel modules
-      # ------------------------------------------------------------
+      # ============================================================
+      # 18. Build modules
+      # ============================================================
       - name: Build kernel modules
         working-directory: kernel
         run: |
@@ -456,5 +499,222 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             modules
 
-      # ------------------------------------------------------------
-      # 19. Collect build artifacts
+      # ============================================================
+      # 19. Verify sensors_class.ko exists
+      # ============================================================
+      - name: Verify sensor module
+        working-directory: kernel
+        run: |
+          set -e
+
+          echo "Searching for sensors_class.ko..."
+
+          SENSOR_MODULE="$(find out \
+            -type f \
+            -name "sensors_class.ko" \
+            -print -quit)"
+
+          if [ -z "$SENSOR_MODULE" ]; then
+            echo
+            echo "ERROR: sensors_class.ko was not produced."
+            echo
+            echo "CONFIG_SENSORS_CLASS:"
+            grep "^CONFIG_SENSORS_CLASS=" out/.config || true
+            exit 1
+          fi
+
+          echo
+          echo "Found:"
+          echo "$SENSOR_MODULE"
+
+          ls -lh "$SENSOR_MODULE"
+
+      # ============================================================
+      # 20. Collect artifacts
+      # ============================================================
+      - name: Collect artifacts
+        working-directory: kernel
+        run: |
+          set -e
+
+          rm -rf "$GITHUB_WORKSPACE/artifact"
+
+          mkdir -p \
+            "$GITHUB_WORKSPACE/artifact/modules/vendor/lib/modules"
+
+          # Kernel image
+          cp \
+            out/arch/arm64/boot/Image \
+            "$GITHUB_WORKSPACE/artifact/Image"
+
+          # Final configuration
+          cp \
+            out/kernel.config \
+            "$GITHUB_WORKSPACE/artifact/kernel.config"
+
+          # NetHunter fragment
+          cp \
+            nethunter.config \
+            "$GITHUB_WORKSPACE/artifact/nethunter.config"
+
+          # Sensor class module
+          SENSOR_MODULE="$(find out \
+            -type f \
+            -name "sensors_class.ko" \
+            -print -quit)"
+
+          cp \
+            "$SENSOR_MODULE" \
+            "$GITHUB_WORKSPACE/artifact/modules/vendor/lib/modules/sensors_class.ko"
+
+          echo
+          echo "========================================"
+          echo "Artifact contents"
+          echo "========================================"
+
+          find \
+            "$GITHUB_WORKSPACE/artifact" \
+            -type f \
+            -printf '%P\n' \
+            | sort
+
+          echo
+          echo "========================================"
+          echo "Kernel Image"
+          echo "========================================"
+
+          ls -lh \
+            "$GITHUB_WORKSPACE/artifact/Image"
+
+          echo
+          echo "========================================"
+          echo "Sensor module"
+          echo "========================================"
+
+          ls -lh \
+            "$GITHUB_WORKSPACE/artifact/modules/vendor/lib/modules/sensors_class.ko"
+
+      # ============================================================
+      # 21. Upload raw kernel artifact
+      # ============================================================
+      - name: Upload kernel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: moto-g9-power-cebu-nethunter-kernel
+          path: artifact
+          if-no-files-found: error
+          retention-days: 30
+
+      # ============================================================
+      # 22. Clone AnyKernel3
+      # ============================================================
+      - name: Prepare AnyKernel3
+        run: |
+          set -e
+
+          rm -rf AnyKernel3
+
+          git clone \
+            --depth=1 \
+            https://github.com/osm0sis/AnyKernel3.git \
+            AnyKernel3
+
+          # Kernel image
+          cp \
+            "$GITHUB_WORKSPACE/artifact/Image" \
+            AnyKernel3/Image
+
+          # Replace modules directory
+          rm -rf AnyKernel3/modules
+
+          mkdir -p \
+            AnyKernel3/modules/vendor/lib/modules
+
+          # Sensor class module
+          cp \
+            "$GITHUB_WORKSPACE/artifact/modules/vendor/lib/modules/sensors_class.ko" \
+            AnyKernel3/modules/vendor/lib/modules/sensors_class.ko
+
+          # ========================================================
+          # AnyKernel3 installer
+          # ========================================================
+
+          cat > AnyKernel3/anykernel.sh <<'EOF'
+          properties() { '
+          kernel.string=Moto G9 Power cebu NetHunter Kernel
+          do.devicecheck=1
+          do.modules=1
+          do.systemless=0
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=cebu
+          device.name2=
+          supported.versions=
+          supported.patchlevels=
+          supported.vendorpatchlevels=
+          '; }
+
+          BLOCK=boot
+          IS_SLOT_DEVICE=auto
+          RAMDISK_COMPRESSION=auto
+          PATCH_VBMETA_FLAG=auto
+
+          . tools/ak3-core.sh
+
+          dump_boot
+          write_boot
+          EOF
+
+          echo
+          echo "========================================"
+          echo "AnyKernel3 configuration"
+          echo "========================================"
+
+          cat AnyKernel3/anykernel.sh
+
+          echo
+          echo "========================================"
+          echo "AnyKernel3 modules"
+          echo "========================================"
+
+          find \
+            AnyKernel3/modules \
+            -type f \
+            -printf '%P\n' \
+            | sort
+
+      # ============================================================
+      # 23. Build flashable ZIP
+      # ============================================================
+      - name: Build AnyKernel3 flashable ZIP
+        run: |
+          set -e
+
+          cd AnyKernel3
+
+          zip -r9 \
+            "$GITHUB_WORKSPACE/moto-g9-power-cebu-nethunter-flashable.zip" \
+            . \
+            -x ".git/*" \
+            -x ".github/*"
+
+          cd "$GITHUB_WORKSPACE"
+
+          echo
+          echo "========================================"
+          echo "Flashable ZIP"
+          echo "========================================"
+
+          ls -lh \
+            moto-g9-power-cebu-nethunter-flashable.zip
+
+      # ============================================================
+      # 24. Upload flashable ZIP
+      # ============================================================
+      - name: Upload flashable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: moto-g9-power-cebu-nethunter-flashable
+          path: moto-g9-power-cebu-nethunter-flashable.zip
+          if-no-files-found: error
+          retention-days: 30
