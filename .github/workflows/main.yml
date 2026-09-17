@@ -1,4 +1,4 @@
-name: Build cebu NetHunter Kernel
+name: Build Moto G9 Power NetHunter Kernel
 
 on:
   workflow_dispatch:
@@ -8,88 +8,108 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout build repository
-        uses: actions/checkout@v4
 
-      - name: Checkout Motorola kernel source
-        uses: actions/checkout@v4
-        with:
-          repository: mobb56/Moto-g9-kernel
-          token: ${{ secrets.KERNEL_BUILD }}
-          path: kernel
-          fetch-depth: 1
-          submodules: recursive
-
+      # ---------------------------------------------------------
+      # 1. Install build dependencies
+      # ---------------------------------------------------------
       - name: Install dependencies
         run: |
           sudo apt-get update
+
           sudo apt-get install -y \
-            bc bison flex \
-            libssl-dev libelf-dev libdw-dev \
+            bc \
+            bison \
+            build-essential \
+            clang-14 \
+            cpio \
+            flex \
             gcc-aarch64-linux-gnu \
-            clang llvm lld \
-            make cpio kmod rsync \
-            python3 zip unzip
+            git \
+            libelf-dev \
+            libncurses-dev \
+            libssl-dev \
+            lld-14 \
+            llvm-14 \
+            python3 \
+            rsync \
+            unzip \
+            wget \
+            xz-utils \
+            zip
 
-      - name: Inspect kernel tree
-        shell: bash
+      # ---------------------------------------------------------
+      # 2. Checkout Motorola SM6225 kernel
+      # ---------------------------------------------------------
+      - name: Checkout LineageOS kernel
+        uses: actions/checkout@v4
+        with:
+          repository: LineageOS/android_kernel_motorola_sm6225
+          ref: lineage-23.2
+          path: kernel
+          fetch-depth: 1
+
+      # ---------------------------------------------------------
+      # 3. Checkout cebu device tree
+      # ---------------------------------------------------------
+      - name: Checkout cebu device tree
+        uses: actions/checkout@v4
+        with:
+          repository: LineageOS/android_device_motorola_cebu
+          ref: lineage-23.2
+          path: device/motorola/cebu
+          fetch-depth: 1
+
+      # ---------------------------------------------------------
+      # 4. Checkout SM6225 common device tree
+      # ---------------------------------------------------------
+      - name: Checkout SM6225 common tree
+        uses: actions/checkout@v4
+        with:
+          repository: LineageOS/android_device_motorola_sm6225-common
+          ref: lineage-23.2
+          path: device/motorola/sm6225-common
+          fetch-depth: 1
+
+      # ---------------------------------------------------------
+      # 5. Verify the source trees
+      # ---------------------------------------------------------
+      - name: Verify source
         run: |
-          set -e
-          cd "$GITHUB_WORKSPACE/kernel"
+          echo "Kernel:"
+          git -C kernel rev-parse --short HEAD
 
-          echo "Kernel source:"
-          pwd
+          echo "Device:"
+          git -C device/motorola/cebu rev-parse --short HEAD
 
-          echo
-          echo "Top-level files:"
-          ls -la
-
-          echo
-          echo "ARM64 directory:"
-          ls -la arch/arm64 || true
+          echo "Common:"
+          git -C device/motorola/sm6225-common rev-parse --short HEAD
 
           echo
-          echo "Available configurations:"
-          find arch/arm64/configs \
-            -maxdepth 1 \
-            -type f \
-            -printf '%f\n' 2>/dev/null | sort || true
+          echo "Kernel Makefile:"
+          test -f kernel/Makefile
 
           echo
-          echo "cebu-related files:"
-          find . \
-            -type f \
-            -iname '*cebu*' \
-            -not -path './.git/*' \
-            -print | head -100
+          echo "Bengal defconfig:"
+          test -f kernel/arch/arm64/configs/vendor/bengal-perf_defconfig
 
-      - name: Locate cebu defconfig
-        shell: bash
+          echo
+          echo "Kernel configuration:"
+          grep -n "TARGET_KERNEL_CONFIG" \
+            device/motorola/cebu/BoardConfig.mk || true
+
+          grep -n "TARGET_KERNEL_CONFIG" \
+            device/motorola/sm6225-common/BoardConfigCommon.mk || true
+
+      # ---------------------------------------------------------
+      # 6. Create NetHunter configuration fragment
+      # ---------------------------------------------------------
+      - name: Create NetHunter config
         run: |
-          set -e
-          cd "$GITHUB_WORKSPACE/kernel"
+          cat > kernel/nethunter.config <<'EOF'
 
-          echo "Searching for cebu defconfig..."
-
-          find arch/arm64/configs \
-            -maxdepth 1 \
-            -type f \
-            \( \
-              -iname '*cebu*' \
-              -o -iname '*motorola*' \
-              -o -iname '*sm6125*' \
-            \) \
-            -print || true
-
-      - name: Create NetHunter configuration
-        shell: bash
-        run: |
-          cd "$GITHUB_WORKSPACE/kernel"
-
-          mkdir -p build
-
-          cat > build/nethunter.config <<'EOF'
-          # Bluetooth
+          #
+          # Bluetooth HID / VHCI
+          #
           CONFIG_BT=y
           CONFIG_BT_BREDR=y
           CONFIG_BT_RFCOMM=y
@@ -97,80 +117,97 @@ jobs:
           CONFIG_BT_HIDP=y
           CONFIG_BT_HCIVHCI=y
 
+          #
           # Bluetooth HCI UART
+          #
           CONFIG_BT_HCIUART=y
           CONFIG_BT_HCIUART_H4=y
 
-          # USB gadget / HID
+          #
+          # USB Gadget
+          #
           CONFIG_USB_GADGET=y
           CONFIG_USB_CONFIGFS=y
           CONFIG_USB_CONFIGFS_F_HID=y
 
+          #
           # USB networking
-          CONFIG_USB_CONFIGFS_ACM=y
+          #
           CONFIG_USB_CONFIGFS_NCM=y
-          CONFIG_USB_CONFIGFS_ECM=y
-          CONFIG_USB_CONFIGFS_RNDIS=y
+          CONFIG_USB_CONFIGFS_F_FS=y
 
-          # Wireless framework
-          CONFIG_WLAN=y
-          CONFIG_CFG80211=y
-          CONFIG_MAC80211=y
+          #
+          # Input / userspace HID
+          #
+          CONFIG_INPUT_EVDEV=y
+          CONFIG_INPUT_UINPUT=y
+          CONFIG_UHID=y
+          CONFIG_HIDRAW=y
 
-          # Packet sockets
+          #
+          # Networking
+          #
           CONFIG_PACKET=y
-
-          # Netfilter
           CONFIG_NETFILTER=y
           CONFIG_NETFILTER_XTABLES=y
           CONFIG_NF_CONNTRACK=y
+          CONFIG_TUN=y
+          CONFIG_VETH=y
+
+          #
+          # Wireless framework
+          #
+          CONFIG_CFG80211=y
+          CONFIG_RFKILL=y
+
           EOF
 
+          echo "NetHunter fragment:"
+          cat kernel/nethunter.config
+
+      # ---------------------------------------------------------
+      # 7. Configure kernel
+      # ---------------------------------------------------------
       - name: Configure kernel
-        shell: bash
+        working-directory: kernel
+        env:
+          ARCH: arm64
+          CROSS_COMPILE: aarch64-linux-gnu-
+          LLVM: "1"
+          LLVM_IAS: "1"
         run: |
-          set -e
-          cd "$GITHUB_WORKSPACE/kernel"
-
-          export ARCH=arm64
-          export LLVM=1
-
-          mkdir -p out
-
-          echo "Available defconfigs:"
-          find arch/arm64/configs \
-            -maxdepth 1 \
-            -type f \
-            -printf '%f\n' | sort
+          make O=out \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            vendor/bengal-perf_defconfig
 
           echo
-          echo "Attempting cebu_defconfig..."
+          echo "Applying NetHunter configuration..."
 
-          make \
-            O=out \
-            ARCH=arm64 \
-            LLVM=1 \
-            cebu_defconfig
-
-          ./scripts/kconfig/merge_config.sh \
-            -O out \
+          scripts/kconfig/merge_config.sh \
+            -m \
             out/.config \
-            build/nethunter.config
+            nethunter.config
 
-          make \
-            O=out \
+          echo
+          echo "Running olddefconfig..."
+
+          make O=out \
             ARCH=arm64 \
             LLVM=1 \
+            LLVM_IAS=1 \
             olddefconfig
 
-      - name: Verify NetHunter configuration
-        shell: bash
+      # ---------------------------------------------------------
+      # 8. Verify important options
+      # ---------------------------------------------------------
+      - name: Verify kernel configuration
+        working-directory: kernel
         run: |
-          cd "$GITHUB_WORKSPACE/kernel"
-
           echo "===== Bluetooth ====="
           grep -E \
-            'CONFIG_BT=|CONFIG_BT_HIDP=|CONFIG_BT_HCIVHCI=|CONFIG_BT_HCIUART=|CONFIG_BT_HCIUART_H4=' \
+            'CONFIG_BT=|CONFIG_BT_BREDR=|CONFIG_BT_RFCOMM=|CONFIG_BT_HIDP=|CONFIG_BT_HCIVHCI=' \
             out/.config || true
 
           echo
@@ -180,58 +217,80 @@ jobs:
             out/.config || true
 
           echo
-          echo "===== Wireless ====="
+          echo "===== Networking ====="
           grep -E \
-            'CONFIG_WLAN=|CONFIG_CFG80211=|CONFIG_MAC80211=' \
+            'CONFIG_PACKET=|CONFIG_NETFILTER=|CONFIG_TUN=|CONFIG_VETH=' \
             out/.config || true
 
+          echo
+          echo "===== Wireless ====="
+          grep -E \
+            'CONFIG_CFG80211=|CONFIG_RFKILL=' \
+            out/.config || true
+
+          echo
+          echo "===== Qualcomm WLAN ====="
+          grep -E \
+            'CONFIG_CLD_LL_CORE=|CONFIG_CNSS_GENL=|CONFIG_ICNSS=' \
+            out/.config || true
+
+      # ---------------------------------------------------------
+      # 9. Build kernel
+      # ---------------------------------------------------------
       - name: Build kernel
-        shell: bash
+        working-directory: kernel
+        env:
+          ARCH: arm64
+          CROSS_COMPILE: aarch64-linux-gnu-
+          LLVM: "1"
+          LLVM_IAS: "1"
         run: |
-          set -e
-          cd "$GITHUB_WORKSPACE/kernel"
-
-          export ARCH=arm64
-          export LLVM=1
-
-          make \
-            -j"$(nproc)" \
+          make -j"$(nproc)" \
             O=out \
             ARCH=arm64 \
             LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
             Image \
-            dtbs
+            dtbs \
+            modules
 
-      - name: Collect artifacts
-        shell: bash
+      # ---------------------------------------------------------
+      # 10. Collect output
+      # ---------------------------------------------------------
+      - name: Collect kernel artifacts
         run: |
-          set -e
-          cd "$GITHUB_WORKSPACE/kernel"
-
-          rm -rf artifacts
           mkdir -p artifacts
 
-          if [ -f out/arch/arm64/boot/Image ]; then
-            cp out/arch/arm64/boot/Image artifacts/
+          cp kernel/out/arch/arm64/boot/Image \
+            artifacts/Image
+
+          if [ -f kernel/out/arch/arm64/boot/Image.gz ]; then
+            cp kernel/out/arch/arm64/boot/Image.gz \
+              artifacts/Image.gz
           fi
 
-          find out/arch/arm64/boot \
+          find kernel/out/arch/arm64/boot/dts \
             -type f \
-            -name '*.dtb' \
+            \( -name "*.dtb" -o -name "*.dtbo" \) \
             -exec cp {} artifacts/ \; || true
 
-          find out/arch/arm64/boot \
-            -type f \
-            -name '*.dtbo' \
-            -exec cp {} artifacts/ \; || true
+          cp kernel/out/.config \
+            artifacts/kernel.config
 
-          cp out/.config artifacts/kernel.config
+          cp kernel/nethunter.config \
+            artifacts/nethunter.config
 
-          echo "===== BUILD ARTIFACTS ====="
-          ls -lh artifacts/
+          echo
+          echo "===== ARTIFACTS ====="
+          ls -lh artifacts
 
+      # ---------------------------------------------------------
+      # 11. Upload build
+      # ---------------------------------------------------------
       - name: Upload kernel artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: cebu-nethunter-kernel
-          path: kernel/artifacts/*
+          name: moto-g9-power-cebu-nethunter-kernel
+          path: artifacts/
+          if-no-files-found: error
