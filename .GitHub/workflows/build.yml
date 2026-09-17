@@ -1,0 +1,368 @@
+name: Build cebu NetHunter Kernel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+
+      # ---------------------------------------------------------
+      # Checkout
+      # ---------------------------------------------------------
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      # ---------------------------------------------------------
+      # Dependencies
+      # ---------------------------------------------------------
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            bc \
+            bison \
+            flex \
+            libssl-dev \
+            libelf-dev \
+            libdw-dev \
+            gcc-aarch64-linux-gnu \
+            clang \
+            llvm \
+            lld \
+            make \
+            cpio \
+            kmod \
+            rsync \
+            python3 \
+            unzip \
+            zip
+
+      # ---------------------------------------------------------
+      # Find actual kernel source directory
+      # ---------------------------------------------------------
+      - name: Find kernel source
+        shell: bash
+        run: |
+          set -e
+
+          echo "Repository:"
+          pwd
+
+          echo
+          echo "Searching for kernel trees..."
+
+          KERNEL_DIR=""
+
+          # First check repository root
+          if [ -f "Makefile" ] && [ -d "arch" ] && [ -d "scripts" ]; then
+              KERNEL_DIR="$PWD"
+          else
+              # Look for a nested Linux kernel tree
+              while IFS= read -r makefile; do
+                  dir="$(dirname "$makefile")"
+
+                  if [ -d "$dir/arch" ] &&
+                     [ -d "$dir/scripts" ] &&
+                     [ -f "$dir/Kconfig" ]; then
+                      KERNEL_DIR="$PWD/${dir#./}"
+                      break
+                  fi
+              done < <(find . -name Makefile -not -path './.git/*')
+          fi
+
+          if [ -z "$KERNEL_DIR" ]; then
+              echo "::error::Could not find Linux kernel source tree."
+              echo
+              echo "Repository contents:"
+              find . -maxdepth 3 -type f | head -200
+              exit 1
+          fi
+
+          echo "Kernel source found:"
+          echo "$KERNEL_DIR"
+
+          echo "KERNEL_DIR=$KERNEL_DIR" >> "$GITHUB_ENV"
+
+      # ---------------------------------------------------------
+      # Inspect source tree
+      # ---------------------------------------------------------
+      - name: Inspect kernel tree
+        shell: bash
+        run: |
+          set -e
+
+          cd "$KERNEL_DIR"
+
+          echo "================================"
+          echo "Kernel directory"
+          echo "================================"
+          pwd
+
+          echo
+          echo "================================"
+          echo "ARM64 directory"
+          echo "================================"
+          ls -la arch/arm64 || true
+
+          echo
+          echo "================================"
+          echo "Config directory"
+          echo "================================"
+          ls -la arch/arm64/configs || true
+
+          echo
+          echo "================================"
+          echo "cebu configurations"
+          echo "================================"
+          find arch/arm64/configs \
+            -maxdepth 1 \
+            -type f \
+            -iname '*cebu*' \
+            -print || true
+
+      # ---------------------------------------------------------
+      # Find appropriate defconfig
+      # ---------------------------------------------------------
+      - name: Find cebu defconfig
+        shell: bash
+        run: |
+          set -e
+
+          cd "$KERNEL_DIR"
+
+          DEFCONFIG=""
+
+          for f in \
+            arch/arm64/configs/*cebu* \
+            arch/arm64/configs/*Cebu* \
+            arch/arm64/configs/*motorola* \
+            arch/arm64/configs/*motorola*cebu*; do
+
+              if [ -f "$f" ]; then
+                  DEFCONFIG="$(basename "$f")"
+                  break
+              fi
+          done
+
+          if [ -z "$DEFCONFIG" ]; then
+              echo "::warning::No cebu-specific defconfig found."
+
+              echo
+              echo "Available ARM64 configurations:"
+              find arch/arm64/configs \
+                -maxdepth 1 \
+                -type f \
+                -printf '%f\n' | sort
+
+              exit 1
+          fi
+
+          echo "Found configuration: $DEFCONFIG"
+
+          # Remove .config suffix if present
+          DEFCONFIG="${DEFCONFIG%.config}"
+
+          echo "DEFCONFIG=$DEFCONFIG" >> "$GITHUB_ENV"
+
+      # ---------------------------------------------------------
+      # Create NetHunter configuration fragment
+      # ---------------------------------------------------------
+      - name: Create NetHunter configuration
+        shell: bash
+        run: |
+          cd "$KERNEL_DIR"
+
+          mkdir -p build
+
+          cat > build/nethunter.config <<'EOF'
+          #
+          # NetHunter configuration fragment
+          #
+
+          # Bluetooth
+          CONFIG_BT=y
+          CONFIG_BT_BREDR=y
+          CONFIG_BT_RFCOMM=y
+          CONFIG_BT_RFCOMM_TTY=y
+          CONFIG_BT_HIDP=y
+          CONFIG_BT_HCIVHCI=y
+
+          # Bluetooth HCI UART
+          CONFIG_BT_HCIUART=y
+          CONFIG_BT_HCIUART_H4=y
+
+          # USB gadget
+          CONFIG_USB_GADGET=y
+          CONFIG_USB_CONFIGFS=y
+          CONFIG_USB_CONFIGFS_F_HID=y
+
+          # USB networking
+          CONFIG_USB_CONFIGFS_ACM=y
+          CONFIG_USB_CONFIGFS_NCM=y
+          CONFIG_USB_CONFIGFS_ECM=y
+          CONFIG_USB_CONFIGFS_RNDIS=y
+
+          # Wireless framework
+          CONFIG_WLAN=y
+          CONFIG_CFG80211=y
+          CONFIG_MAC80211=y
+
+          # Packet sockets
+          CONFIG_PACKET=y
+
+          # Netfilter
+          CONFIG_NETFILTER=y
+          CONFIG_NETFILTER_XTABLES=y
+          CONFIG_NF_CONNTRACK=y
+          EOF
+
+          echo "Created:"
+          cat build/nethunter.config
+
+      # ---------------------------------------------------------
+      # Configure kernel
+      # ---------------------------------------------------------
+      - name: Configure kernel
+        shell: bash
+        run: |
+          set -e
+
+          cd "$KERNEL_DIR"
+
+          export ARCH=arm64
+          export LLVM=1
+
+          echo "Using defconfig: $DEFCONFIG"
+
+          mkdir -p out
+
+          make O=out \
+            ARCH=arm64 \
+            LLVM=1 \
+            "$DEFCONFIG"
+
+          echo
+          echo "Merging NetHunter configuration..."
+
+          ./scripts/kconfig/merge_config.sh \
+            -O out \
+            out/.config \
+            build/nethunter.config
+
+          make O=out \
+            ARCH=arm64 \
+            LLVM=1 \
+            olddefconfig
+
+      # ---------------------------------------------------------
+      # Verify configuration
+      # ---------------------------------------------------------
+      - name: Verify configuration
+        shell: bash
+        run: |
+          cd "$KERNEL_DIR"
+
+          echo "================================"
+          echo "Bluetooth"
+          echo "================================"
+
+          grep -E \
+            'CONFIG_BT=|CONFIG_BT_HIDP=|CONFIG_BT_HCIVHCI=|CONFIG_BT_HCIUART=|CONFIG_BT_HCIUART_H4=' \
+            out/.config || true
+
+          echo
+          echo "================================"
+          echo "USB HID"
+          echo "================================"
+
+          grep -E \
+            'CONFIG_USB_GADGET=|CONFIG_USB_CONFIGFS=|CONFIG_USB_CONFIGFS_F_HID=' \
+            out/.config || true
+
+          echo
+          echo "================================"
+          echo "Wireless"
+          echo "================================"
+
+          grep -E \
+            'CONFIG_WLAN=|CONFIG_CFG80211=|CONFIG_MAC80211=' \
+            out/.config || true
+
+      # ---------------------------------------------------------
+      # Build kernel
+      # ---------------------------------------------------------
+      - name: Build kernel
+        shell: bash
+        run: |
+          set -e
+
+          cd "$KERNEL_DIR"
+
+          export ARCH=arm64
+          export LLVM=1
+
+          echo "Starting kernel compilation..."
+
+          make -j"$(nproc)" \
+            O=out \
+            ARCH=arm64 \
+            LLVM=1 \
+            Image \
+            dtbs
+
+      # ---------------------------------------------------------
+      # Collect output
+      # ---------------------------------------------------------
+      - name: Collect kernel
+        shell: bash
+        run: |
+          set -e
+
+          cd "$KERNEL_DIR"
+
+          rm -rf artifacts
+          mkdir -p artifacts
+
+          # Kernel image
+          if [ -f out/arch/arm64/boot/Image ]; then
+              cp out/arch/arm64/boot/Image artifacts/
+          fi
+
+          # DTBs
+          find out/arch/arm64/boot \
+            -type f \
+            -name '*.dtb' \
+            -exec cp {} artifacts/ \; || true
+
+          # DTBOs
+          find out/arch/arm64/boot \
+            -type f \
+            -name '*.dtbo' \
+            -exec cp {} artifacts/ \; || true
+
+          # Configuration used for build
+          cp out/.config artifacts/kernel.config
+
+          echo
+          echo "================================"
+          echo "Build artifacts"
+          echo "================================"
+
+          ls -lh artifacts/
+
+      # ---------------------------------------------------------
+      # Upload artifacts
+      # ---------------------------------------------------------
+      - name: Upload kernel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cebu-nethunter-kernel
+          path: |
+            ${{ env.KERNEL_DIR }}/artifacts/*
