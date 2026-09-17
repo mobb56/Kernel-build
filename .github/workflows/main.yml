@@ -9,6 +9,9 @@ jobs:
 
     steps:
 
+      # =========================================================
+      # 1. Install dependencies
+      # =========================================================
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -34,17 +37,23 @@ jobs:
             xz-utils \
             zip
 
+      # =========================================================
+      # 2. Make LLVM 14 available
+      # =========================================================
       - name: Setup LLVM environment
         run: |
           echo "/usr/lib/llvm-14/bin" >> "$GITHUB_PATH"
 
-          echo "LLVM:"
+          echo "===== CLANG ====="
           /usr/lib/llvm-14/bin/clang --version
 
           echo
-          echo "LLD:"
+          echo "===== LLD ====="
           /usr/lib/llvm-14/bin/ld.lld --version
 
+      # =========================================================
+      # 3. Checkout official LineageOS kernel
+      # =========================================================
       - name: Checkout LineageOS kernel
         uses: actions/checkout@v4
         with:
@@ -53,6 +62,9 @@ jobs:
           path: kernel
           fetch-depth: 1
 
+      # =========================================================
+      # 4. Checkout cebu device tree
+      # =========================================================
       - name: Checkout cebu device tree
         uses: actions/checkout@v4
         with:
@@ -61,6 +73,9 @@ jobs:
           path: device/motorola/cebu
           fetch-depth: 1
 
+      # =========================================================
+      # 5. Checkout common SM6225 device tree
+      # =========================================================
       - name: Checkout SM6225 common tree
         uses: actions/checkout@v4
         with:
@@ -69,35 +84,68 @@ jobs:
           path: device/motorola/sm6225-common
           fetch-depth: 1
 
+      # =========================================================
+      # 6. Verify source
+      # =========================================================
       - name: Verify source
         run: |
-          echo "===== Kernel ====="
+          echo "===== KERNEL ====="
           git -C kernel rev-parse --short HEAD
 
           echo
-          echo "===== Cebu device tree ====="
+          echo "===== CEBU DEVICE ====="
           git -C device/motorola/cebu rev-parse --short HEAD
 
           echo
-          echo "===== Common tree ====="
+          echo "===== SM6225 COMMON ====="
           git -C device/motorola/sm6225-common rev-parse --short HEAD
 
           echo
-          echo "===== Defconfig ====="
-          test -f kernel/arch/arm64/configs/vendor/bengal-perf_defconfig
-          echo "vendor/bengal-perf_defconfig found"
+          echo "===== KERNEL MAKEFILE ====="
+          test -f kernel/Makefile
+          echo "Kernel Makefile found."
 
           echo
-          echo "===== Cebu BoardConfig ====="
+          echo "===== BENGAL DEFCONFIG ====="
+          test -f kernel/arch/arm64/configs/vendor/bengal-perf_defconfig
+          echo "vendor/bengal-perf_defconfig found."
+
+          echo
+          echo "===== CEBU BOARD CONFIG ====="
           grep -n "TARGET_KERNEL_CONFIG" \
             device/motorola/cebu/BoardConfig.mk || true
 
-      - name: Create NetHunter config
+      # =========================================================
+      # 7. Clean kernel source BEFORE configuring
+      # =========================================================
+      - name: Clean kernel source
+        working-directory: kernel
         run: |
-          cat > kernel/nethunter.config <<'EOF'
+          echo "Running mrproper..."
+
+          make mrproper
+
+          echo
+          echo "Checking source tree..."
+
+          test ! -f .config
+          test ! -d include/config
+          test ! -d arch/arm64/include/generated
+
+          echo "Kernel source tree is clean."
+
+      # =========================================================
+      # 8. Create NetHunter configuration
+      # =========================================================
+      - name: Create NetHunter config
+        working-directory: kernel
+        run: |
+          cat > nethunter.config <<'EOF'
 
           #
+          # =====================================================
           # Bluetooth
+          # =====================================================
           #
           CONFIG_BT=y
           CONFIG_BT_BREDR=y
@@ -109,20 +157,26 @@ jobs:
           CONFIG_BT_HCIUART_H4=y
 
           #
+          # =====================================================
           # USB Gadget / HID
+          # =====================================================
           #
           CONFIG_USB_GADGET=y
           CONFIG_USB_CONFIGFS=y
           CONFIG_USB_CONFIGFS_F_HID=y
 
           #
+          # =====================================================
           # USB networking
+          # =====================================================
           #
           CONFIG_USB_CONFIGFS_NCM=y
           CONFIG_USB_CONFIGFS_F_FS=y
 
           #
-          # HID / input
+          # =====================================================
+          # HID / userspace input
+          # =====================================================
           #
           CONFIG_INPUT_EVDEV=y
           CONFIG_INPUT_UINPUT=y
@@ -130,7 +184,9 @@ jobs:
           CONFIG_HIDRAW=y
 
           #
+          # =====================================================
           # Networking
+          # =====================================================
           #
           CONFIG_PACKET=y
           CONFIG_NETFILTER=y
@@ -140,13 +196,21 @@ jobs:
           CONFIG_VETH=y
 
           #
+          # =====================================================
           # Wireless framework
+          # =====================================================
           #
           CONFIG_CFG80211=y
           CONFIG_RFKILL=y
 
           EOF
 
+          echo "===== NETHUNTER CONFIG ====="
+          cat nethunter.config
+
+      # =========================================================
+      # 9. Configure kernel
+      # =========================================================
       - name: Configure kernel
         working-directory: kernel
         env:
@@ -154,64 +218,88 @@ jobs:
           LLVM: "1"
           LLVM_IAS: "1"
         run: |
-          echo "Using:"
+          echo "===== TOOLCHAIN ====="
           which clang
           which ld.lld
+
           clang --version
           ld.lld --version
 
           echo
-          echo "Creating base configuration..."
+          echo "===== BASE DEFCONFIG ====="
 
-          make O=out \
+          make \
             ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
             vendor/bengal-perf_defconfig
 
           echo
-          echo "Merging NetHunter configuration..."
+          echo "===== MERGING NETHUNTER CONFIG ====="
 
           scripts/kconfig/merge_config.sh \
             -m \
-            out/.config \
+            .config \
             nethunter.config
 
           echo
-          echo "Finalizing configuration..."
+          echo "===== FINALIZING CONFIG ====="
 
-          make O=out \
+          make \
             ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
             olddefconfig
 
+      # =========================================================
+      # 10. Verify configuration
+      # =========================================================
       - name: Verify kernel configuration
         working-directory: kernel
         run: |
-          echo "===== Bluetooth ====="
+          echo "========================================"
+          echo "Bluetooth"
+          echo "========================================"
+
           grep -E \
-            'CONFIG_BT=|CONFIG_BT_BREDR=|CONFIG_BT_RFCOMM=|CONFIG_BT_HIDP=|CONFIG_BT_HCIVHCI=' \
-            out/.config || true
+            'CONFIG_BT=|CONFIG_BT_BREDR=|CONFIG_BT_RFCOMM=|CONFIG_BT_HIDP=|CONFIG_BT_HCIVHCI=|CONFIG_BT_HCIUART=' \
+            .config || true
 
           echo
-          echo "===== USB HID ====="
+          echo "========================================"
+          echo "USB Gadget / HID"
+          echo "========================================"
+
           grep -E \
             'CONFIG_USB_GADGET=|CONFIG_USB_CONFIGFS=|CONFIG_USB_CONFIGFS_F_HID=' \
-            out/.config || true
+            .config || true
 
           echo
-          echo "===== Networking ====="
+          echo "========================================"
+          echo "Networking"
+          echo "========================================"
+
           grep -E \
-            'CONFIG_PACKET=|CONFIG_NETFILTER=|CONFIG_TUN=|CONFIG_VETH=' \
-            out/.config || true
+            'CONFIG_PACKET=|CONFIG_NETFILTER=|CONFIG_NF_CONNTRACK=|CONFIG_TUN=|CONFIG_VETH=' \
+            .config || true
 
           echo
-          echo "===== Wireless ====="
+          echo "========================================"
+          echo "Wireless"
+          echo "========================================"
+
           grep -E \
             'CONFIG_CFG80211=|CONFIG_RFKILL=' \
-            out/.config || true
+            .config || true
 
+          echo
+          echo "========================================"
+          echo "Configuration complete"
+          echo "========================================"
+
+      # =========================================================
+      # 11. Build kernel
+      # =========================================================
       - name: Build kernel
         working-directory: kernel
         env:
@@ -219,8 +307,11 @@ jobs:
           LLVM: "1"
           LLVM_IAS: "1"
         run: |
+          echo "========================================"
+          echo "BUILDING KERNEL"
+          echo "========================================"
+
           make -j"$(nproc)" \
-            O=out \
             ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
@@ -228,28 +319,43 @@ jobs:
             dtbs \
             modules
 
+      # =========================================================
+      # 12. Collect artifacts
+      # =========================================================
       - name: Collect kernel artifacts
         run: |
           mkdir -p artifacts
 
-          cp kernel/out/arch/arm64/boot/Image \
+          echo "Copying kernel image..."
+
+          cp kernel/arch/arm64/boot/Image \
             artifacts/Image
 
-          find kernel/out/arch/arm64/boot/dts \
+          echo "Copying DTBs..."
+
+          find kernel/arch/arm64/boot/dts \
             -type f \
             \( -name "*.dtb" -o -name "*.dtbo" \) \
             -exec cp {} artifacts/ \; || true
 
-          cp kernel/out/.config \
+          echo "Copying configuration..."
+
+          cp kernel/.config \
             artifacts/kernel.config
 
           cp kernel/nethunter.config \
             artifacts/nethunter.config
 
           echo
-          echo "===== BUILD OUTPUT ====="
+          echo "========================================"
+          echo "BUILD ARTIFACTS"
+          echo "========================================"
+
           ls -lh artifacts
 
+      # =========================================================
+      # 13. Upload artifacts
+      # =========================================================
       - name: Upload kernel artifacts
         uses: actions/upload-artifact@v4
         with:
