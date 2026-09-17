@@ -14,6 +14,8 @@ jobs:
       # =========================================================
       - name: Install dependencies
         run: |
+          set -e
+
           sudo apt-get update
 
           sudo apt-get install -y \
@@ -42,6 +44,8 @@ jobs:
       # =========================================================
       - name: Setup LLVM
         run: |
+          set -e
+
           echo "/usr/lib/llvm-14/bin" >> "$GITHUB_PATH"
 
           echo "===== CLANG ====="
@@ -92,21 +96,21 @@ jobs:
           set -e
 
           echo "========================================"
-          echo "KERNEL"
+          echo "KERNEL SOURCE"
           echo "========================================"
 
           git -C kernel rev-parse --short HEAD
 
           echo
           echo "========================================"
-          echo "CEBU"
+          echo "CEBU DEVICE TREE"
           echo "========================================"
 
           git -C device/motorola/cebu rev-parse --short HEAD
 
           echo
           echo "========================================"
-          echo "COMMON"
+          echo "COMMON DEVICE TREE"
           echo "========================================"
 
           git -C device/motorola/sm6225-common rev-parse --short HEAD
@@ -128,7 +132,7 @@ jobs:
           echo "FOUND"
 
           echo
-          echo "Cebu kernel configuration:"
+          echo "Cebu BoardConfig kernel settings:"
 
           grep -n \
             "TARGET_KERNEL_CONFIG" \
@@ -150,17 +154,17 @@ jobs:
           rm -rf arch/arm64/include/generated
 
           echo
-          echo "Source tree clean."
+          echo "SOURCE TREE CLEAN."
 
       # =========================================================
-      # Find cebu configuration
+      # Locate cebu configuration
       # =========================================================
       - name: Locate cebu configuration
         run: |
           set -e
 
           echo "========================================"
-          echo "SEARCHING FOR CEBU CONFIG"
+          echo "SEARCHING FOR CEBU DEFAULT CONFIG"
           echo "========================================"
 
           CEBU_CONFIG="$(
@@ -177,7 +181,7 @@ jobs:
             echo "CEBU_CONFIG=$CEBU_CONFIG" >> "$GITHUB_ENV"
 
             echo
-            echo "Found:"
+            echo "FOUND:"
             echo "$CEBU_CONFIG"
 
           else
@@ -185,7 +189,12 @@ jobs:
             echo "CEBU_CONFIG=" >> "$GITHUB_ENV"
 
             echo
+            echo "WARNING:"
             echo "cebu-default.config was not found."
+            echo
+            echo "The public cebu BoardConfig references:"
+            echo "vendor/ext_config/cebu-default.config"
+            echo
             echo "Continuing with Bengal base configuration."
 
           fi
@@ -215,7 +224,7 @@ jobs:
           CONFIG_BT_HCIUART=y
           CONFIG_BT_HCIUART_H4=y
 
-          # Required dependencies
+          # Bluetooth dependencies
           CONFIG_TTY=y
           CONFIG_INPUT=y
           CONFIG_HID=y
@@ -226,9 +235,8 @@ jobs:
 
           CONFIG_USB_GADGET=y
           CONFIG_USB_CONFIGFS=y
-          CONFIG_USB_CONFIGFS_F_HID=y
 
-          # USB networking
+          CONFIG_USB_CONFIGFS_F_HID=y
           CONFIG_USB_CONFIGFS_NCM=y
           CONFIG_USB_CONFIGFS_F_FS=y
 
@@ -246,6 +254,7 @@ jobs:
           # =====================================================
 
           CONFIG_PACKET=y
+
           CONFIG_NETFILTER=y
           CONFIG_NETFILTER_XTABLES=y
           CONFIG_NF_CONNTRACK=y
@@ -264,13 +273,13 @@ jobs:
 
           echo
           echo "========================================"
-          echo "NETHUNTER CONFIG"
+          echo "NETHUNTER CONFIGURATION"
           echo "========================================"
 
           cat nethunter.config
 
       # =========================================================
-      # Base configuration
+      # Base kernel configuration
       # =========================================================
       - name: Configure base kernel
         working-directory: kernel
@@ -302,11 +311,10 @@ jobs:
           ls -lh out/.config
 
       # =========================================================
-      # Apply cebu configuration
+      # Merge cebu configuration
       #
-      # -m is intentional here.
-      # It merges the fragment without running another
-      # configuration pass. olddefconfig is run afterward.
+      # -m = merge only
+      # -O out = write merged configuration to out/.config
       # =========================================================
       - name: Apply cebu configuration
         working-directory: kernel
@@ -316,30 +324,37 @@ jobs:
           if [ -n "$CEBU_CONFIG" ]; then
 
             echo "========================================"
-            echo "APPLYING CEBU CONFIGURATION"
+            echo "MERGING CEBU CONFIGURATION"
             echo "========================================"
 
             echo "$CEBU_CONFIG"
 
             scripts/kconfig/merge_config.sh \
               -m \
+              -O out \
               out/.config \
               "$CEBU_CONFIG"
 
             test -f out/.config
 
+            echo
+            echo "Cebu configuration merged."
+
           else
 
             echo "========================================"
-            echo "CEBU CONFIG NOT FOUND"
+            echo "CEBU CONFIGURATION NOT AVAILABLE"
             echo "========================================"
 
-            echo "Continuing with Bengal configuration."
+            echo "Using Bengal configuration."
 
           fi
 
       # =========================================================
-      # Apply NetHunter configuration
+      # Merge NetHunter configuration
+      #
+      # -m = merge only
+      # -O out = write merged configuration to out/.config
       # =========================================================
       - name: Apply NetHunter configuration
         working-directory: kernel
@@ -347,11 +362,12 @@ jobs:
           set -e
 
           echo "========================================"
-          echo "APPLYING NETHUNTER CONFIGURATION"
+          echo "MERGING NETHUNTER CONFIGURATION"
           echo "========================================"
 
           scripts/kconfig/merge_config.sh \
             -m \
+            -O out \
             out/.config \
             nethunter.config
 
@@ -359,7 +375,7 @@ jobs:
 
           echo
           echo "========================================"
-          echo "CONFIG AFTER MERGE"
+          echo "CONFIGURATION AFTER MERGE"
           echo "========================================"
 
           grep -E \
@@ -367,7 +383,7 @@ jobs:
             out/.config || true
 
       # =========================================================
-      # Finalize configuration
+      # Finalize Kconfig
       # =========================================================
       - name: Finalize configuration
         working-directory: kernel
@@ -378,6 +394,10 @@ jobs:
           CROSS_COMPILE: aarch64-linux-gnu-
         run: |
           set -e
+
+          echo "========================================"
+          echo "RUNNING OLDDEFCONFIG"
+          echo "========================================"
 
           make \
             O=out \
@@ -407,7 +427,7 @@ jobs:
           set -e
 
           echo "========================================"
-          echo "VERIFYING NETHUNTER OPTIONS"
+          echo "VERIFYING REQUIRED NETHUNTER OPTIONS"
           echo "========================================"
 
           required=(
@@ -474,7 +494,7 @@ jobs:
           fi
 
           echo "========================================"
-          echo "ALL REQUIRED OPTIONS ARE BUILT-IN"
+          echo "ALL REQUIRED NETHUNTER OPTIONS ARE BUILT-IN"
           echo "========================================"
 
       # =========================================================
@@ -485,7 +505,7 @@ jobs:
         run: |
           set -e
 
-          echo "Removing generated files from source tree..."
+          echo "Removing generated source files..."
 
           rm -f .config
 
@@ -494,7 +514,9 @@ jobs:
           rm -rf arch/arm64/include/generated
 
           echo
-          echo "Checking source tree..."
+          echo "========================================"
+          echo "SOURCE TREE CHECK"
+          echo "========================================"
 
           if [ -f .config ]; then
             echo "ERROR: .config still exists"
@@ -507,7 +529,7 @@ jobs:
           fi
 
           if [ -d arch/arm64/include/generated ]; then
-            echo "ERROR: arch/arm64/include/generated still exists"
+            echo "ERROR: generated directory still exists"
             exit 1
           fi
 
@@ -519,9 +541,9 @@ jobs:
           ls -lh out/.config
 
       # =========================================================
-      # Build ONLY kernel Image
+      # Build kernel Image
       #
-      # NO dtbs target.
+      # Intentionally NO dtbs target.
       # =========================================================
       - name: Build kernel Image
         working-directory: kernel
@@ -555,7 +577,7 @@ jobs:
             out/arch/arm64/boot/Image
 
       # =========================================================
-      # Build modules separately
+      # Build kernel modules
       # =========================================================
       - name: Build kernel modules
         working-directory: kernel
@@ -566,6 +588,10 @@ jobs:
           CROSS_COMPILE: aarch64-linux-gnu-
         run: |
           set -e
+
+          echo "========================================"
+          echo "BUILDING KERNEL MODULES"
+          echo "========================================"
 
           make -j"$(nproc)" \
             O=out \
@@ -612,7 +638,7 @@ jobs:
             -exec ls -lh {} \;
 
       # =========================================================
-      # Create AnyKernel3 package
+      # Prepare AnyKernel3
       # =========================================================
       - name: Prepare AnyKernel3
         shell: bash
@@ -639,7 +665,6 @@ jobs:
 
           test -f AnyKernel3/Image
 
-          echo
           ls -lh AnyKernel3/Image
 
           echo
@@ -682,57 +707,4 @@ jobs:
           chmod 755 AnyKernel3/anykernel.sh
 
           echo
-          echo "========================================"
-          echo "CREATING FLASHABLE ZIP"
-          echo "========================================"
-
-          rm -rf AnyKernel3/.git
-
-          cd AnyKernel3
-
-          zip -r9 \
-            ../Moto-G9-Power-cebu-NetHunter-Kernel.zip \
-            . \
-            -x "README.md" \
-            -x ".git/*"
-
-          cd ..
-
-          test -f \
-            Moto-G9-Power-cebu-NetHunter-Kernel.zip
-
-          echo
-          echo "========================================"
-          echo "FLASHABLE ZIP CREATED"
-          echo "========================================"
-
-          ls -lh \
-            Moto-G9-Power-cebu-NetHunter-Kernel.zip
-
-          echo
-          echo "========================================"
-          echo "ZIP CONTENTS"
-          echo "========================================"
-
-          unzip -l \
-            Moto-G9-Power-cebu-NetHunter-Kernel.zip
-
-      # =========================================================
-      # Upload original kernel artifacts
-      # =========================================================
-      - name: Upload kernel artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: moto-g9-power-cebu-nethunter-kernel
-          path: artifacts/
-          if-no-files-found: error
-
-      # =========================================================
-      # Upload flashable ZIP
-      # =========================================================
-      - name: Upload flashable kernel ZIP
-        uses: actions/upload-artifact@v4
-        with:
-          name: moto-g9-power-cebu-nethunter-flashable
-          path: Moto-G9-Power-cebu-NetHunter-Kernel.zip
-          if-no-files-found: error
+          echo "===============
