@@ -157,6 +157,8 @@ jobs:
       # =========================================================
       - name: Locate cebu configuration
         run: |
+          set -e
+
           echo "========================================"
           echo "SEARCHING FOR CEBU CONFIG"
           echo "========================================"
@@ -171,17 +173,21 @@ jobs:
           )"
 
           if [ -n "$CEBU_CONFIG" ]; then
+
             echo "CEBU_CONFIG=$CEBU_CONFIG" >> "$GITHUB_ENV"
 
             echo
             echo "Found:"
             echo "$CEBU_CONFIG"
+
           else
+
             echo "CEBU_CONFIG=" >> "$GITHUB_ENV"
 
             echo
             echo "cebu-default.config was not found."
             echo "Continuing with Bengal base configuration."
+
           fi
 
       # =========================================================
@@ -195,32 +201,27 @@ jobs:
           cat > nethunter.config <<'EOF'
 
           # =====================================================
-          # Bluetooth core
+          # Bluetooth
           # =====================================================
 
           CONFIG_BT=y
           CONFIG_BT_BREDR=y
 
-          # Bluetooth protocols
           CONFIG_BT_RFCOMM=y
           CONFIG_BT_RFCOMM_TTY=y
           CONFIG_BT_HIDP=y
           CONFIG_BT_HCIVHCI=y
 
-          # Bluetooth HCI UART
           CONFIG_BT_HCIUART=y
           CONFIG_BT_HCIUART_H4=y
 
-          # =====================================================
-          # Required Bluetooth dependencies
-          # =====================================================
-
+          # Required dependencies
           CONFIG_TTY=y
           CONFIG_INPUT=y
           CONFIG_HID=y
 
           # =====================================================
-          # USB gadget
+          # USB Gadget
           # =====================================================
 
           CONFIG_USB_GADGET=y
@@ -232,7 +233,7 @@ jobs:
           CONFIG_USB_CONFIGFS_F_FS=y
 
           # =====================================================
-          # HID / input
+          # HID / Input
           # =====================================================
 
           CONFIG_INPUT_EVDEV=y
@@ -278,7 +279,6 @@ jobs:
           LLVM: "1"
           LLVM_IAS: "1"
           CROSS_COMPILE: aarch64-linux-gnu-
-          KCONFIG_CONFIG: out/.config
         run: |
           set -e
 
@@ -295,15 +295,21 @@ jobs:
           test -f out/.config
 
           echo
-          echo "Base configuration generated."
+          echo "========================================"
+          echo "BASE CONFIGURATION CREATED"
+          echo "========================================"
+
+          ls -lh out/.config
 
       # =========================================================
       # Apply cebu configuration
+      #
+      # -m is intentional here.
+      # It merges the fragment without running another
+      # configuration pass. olddefconfig is run afterward.
       # =========================================================
       - name: Apply cebu configuration
         working-directory: kernel
-        env:
-          KCONFIG_CONFIG: out/.config
         run: |
           set -e
 
@@ -316,6 +322,7 @@ jobs:
             echo "$CEBU_CONFIG"
 
             scripts/kconfig/merge_config.sh \
+              -m \
               out/.config \
               "$CEBU_CONFIG"
 
@@ -324,24 +331,18 @@ jobs:
           else
 
             echo "========================================"
-            echo "NO CEBU CONFIGURATION FOUND"
+            echo "CEBU CONFIG NOT FOUND"
             echo "========================================"
 
-            echo "Using Bengal configuration."
+            echo "Continuing with Bengal configuration."
 
           fi
 
       # =========================================================
       # Apply NetHunter configuration
-      #
-      # IMPORTANT:
-      # Do NOT use merge_config.sh -m here.
-      # The -m option means merge-only and skips Kconfig.
       # =========================================================
       - name: Apply NetHunter configuration
         working-directory: kernel
-        env:
-          KCONFIG_CONFIG: out/.config
         run: |
           set -e
 
@@ -350,6 +351,7 @@ jobs:
           echo "========================================"
 
           scripts/kconfig/merge_config.sh \
+            -m \
             out/.config \
             nethunter.config
 
@@ -357,7 +359,7 @@ jobs:
 
           echo
           echo "========================================"
-          echo "CONFIG AFTER NETHUNTER MERGE"
+          echo "CONFIG AFTER MERGE"
           echo "========================================"
 
           grep -E \
@@ -405,7 +407,7 @@ jobs:
           set -e
 
           echo "========================================"
-          echo "VERIFYING REQUIRED NETHUNTER OPTIONS"
+          echo "VERIFYING NETHUNTER OPTIONS"
           echo "========================================"
 
           required=(
@@ -442,8 +444,11 @@ jobs:
           for option in "${required[@]}"; do
 
             if grep -q "^${option}=y$" out/.config; then
+
               echo "OK: ${option}=y"
+
             else
+
               echo "FAIL: ${option} is NOT built-in"
 
               grep \
@@ -451,6 +456,7 @@ jobs:
                 out/.config || true
 
               failed=1
+
             fi
 
           done
@@ -458,11 +464,13 @@ jobs:
           echo
 
           if [ "$failed" -ne 0 ]; then
+
             echo "========================================"
             echo "CONFIGURATION VERIFICATION FAILED"
             echo "========================================"
 
             exit 1
+
           fi
 
           echo "========================================"
@@ -631,6 +639,7 @@ jobs:
 
           test -f AnyKernel3/Image
 
+          echo
           ls -lh AnyKernel3/Image
 
           echo
@@ -693,7 +702,10 @@ jobs:
             Moto-G9-Power-cebu-NetHunter-Kernel.zip
 
           echo
-          echo "Flashable ZIP:"
+          echo "========================================"
+          echo "FLASHABLE ZIP CREATED"
+          echo "========================================"
+
           ls -lh \
             Moto-G9-Power-cebu-NetHunter-Kernel.zip
 
