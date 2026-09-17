@@ -9,9 +9,6 @@ jobs:
 
     steps:
 
-      # ---------------------------------------------------------
-      # 1. Install build dependencies
-      # ---------------------------------------------------------
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -37,9 +34,17 @@ jobs:
             xz-utils \
             zip
 
-      # ---------------------------------------------------------
-      # 2. Checkout Motorola SM6225 kernel
-      # ---------------------------------------------------------
+      - name: Setup LLVM environment
+        run: |
+          echo "/usr/lib/llvm-14/bin" >> "$GITHUB_PATH"
+
+          echo "LLVM:"
+          /usr/lib/llvm-14/bin/clang --version
+
+          echo
+          echo "LLD:"
+          /usr/lib/llvm-14/bin/ld.lld --version
+
       - name: Checkout LineageOS kernel
         uses: actions/checkout@v4
         with:
@@ -48,9 +53,6 @@ jobs:
           path: kernel
           fetch-depth: 1
 
-      # ---------------------------------------------------------
-      # 3. Checkout cebu device tree
-      # ---------------------------------------------------------
       - name: Checkout cebu device tree
         uses: actions/checkout@v4
         with:
@@ -59,9 +61,6 @@ jobs:
           path: device/motorola/cebu
           fetch-depth: 1
 
-      # ---------------------------------------------------------
-      # 4. Checkout SM6225 common device tree
-      # ---------------------------------------------------------
       - name: Checkout SM6225 common tree
         uses: actions/checkout@v4
         with:
@@ -70,45 +69,35 @@ jobs:
           path: device/motorola/sm6225-common
           fetch-depth: 1
 
-      # ---------------------------------------------------------
-      # 5. Verify the source trees
-      # ---------------------------------------------------------
       - name: Verify source
         run: |
-          echo "Kernel:"
+          echo "===== Kernel ====="
           git -C kernel rev-parse --short HEAD
 
-          echo "Device:"
+          echo
+          echo "===== Cebu device tree ====="
           git -C device/motorola/cebu rev-parse --short HEAD
 
-          echo "Common:"
+          echo
+          echo "===== Common tree ====="
           git -C device/motorola/sm6225-common rev-parse --short HEAD
 
           echo
-          echo "Kernel Makefile:"
-          test -f kernel/Makefile
-
-          echo
-          echo "Bengal defconfig:"
+          echo "===== Defconfig ====="
           test -f kernel/arch/arm64/configs/vendor/bengal-perf_defconfig
+          echo "vendor/bengal-perf_defconfig found"
 
           echo
-          echo "Kernel configuration:"
+          echo "===== Cebu BoardConfig ====="
           grep -n "TARGET_KERNEL_CONFIG" \
             device/motorola/cebu/BoardConfig.mk || true
 
-          grep -n "TARGET_KERNEL_CONFIG" \
-            device/motorola/sm6225-common/BoardConfigCommon.mk || true
-
-      # ---------------------------------------------------------
-      # 6. Create NetHunter configuration fragment
-      # ---------------------------------------------------------
       - name: Create NetHunter config
         run: |
           cat > kernel/nethunter.config <<'EOF'
 
           #
-          # Bluetooth HID / VHCI
+          # Bluetooth
           #
           CONFIG_BT=y
           CONFIG_BT_BREDR=y
@@ -116,15 +105,11 @@ jobs:
           CONFIG_BT_RFCOMM_TTY=y
           CONFIG_BT_HIDP=y
           CONFIG_BT_HCIVHCI=y
-
-          #
-          # Bluetooth HCI UART
-          #
           CONFIG_BT_HCIUART=y
           CONFIG_BT_HCIUART_H4=y
 
           #
-          # USB Gadget
+          # USB Gadget / HID
           #
           CONFIG_USB_GADGET=y
           CONFIG_USB_CONFIGFS=y
@@ -137,7 +122,7 @@ jobs:
           CONFIG_USB_CONFIGFS_F_FS=y
 
           #
-          # Input / userspace HID
+          # HID / input
           #
           CONFIG_INPUT_EVDEV=y
           CONFIG_INPUT_UINPUT=y
@@ -162,20 +147,22 @@ jobs:
 
           EOF
 
-          echo "NetHunter fragment:"
-          cat kernel/nethunter.config
-
-      # ---------------------------------------------------------
-      # 7. Configure kernel
-      # ---------------------------------------------------------
       - name: Configure kernel
         working-directory: kernel
         env:
           ARCH: arm64
-          CROSS_COMPILE: aarch64-linux-gnu-
           LLVM: "1"
           LLVM_IAS: "1"
         run: |
+          echo "Using:"
+          which clang
+          which ld.lld
+          clang --version
+          ld.lld --version
+
+          echo
+          echo "Creating base configuration..."
+
           make O=out \
             ARCH=arm64 \
             LLVM=1 \
@@ -183,7 +170,7 @@ jobs:
             vendor/bengal-perf_defconfig
 
           echo
-          echo "Applying NetHunter configuration..."
+          echo "Merging NetHunter configuration..."
 
           scripts/kconfig/merge_config.sh \
             -m \
@@ -191,7 +178,7 @@ jobs:
             nethunter.config
 
           echo
-          echo "Running olddefconfig..."
+          echo "Finalizing configuration..."
 
           make O=out \
             ARCH=arm64 \
@@ -199,9 +186,6 @@ jobs:
             LLVM_IAS=1 \
             olddefconfig
 
-      # ---------------------------------------------------------
-      # 8. Verify important options
-      # ---------------------------------------------------------
       - name: Verify kernel configuration
         working-directory: kernel
         run: |
@@ -228,20 +212,10 @@ jobs:
             'CONFIG_CFG80211=|CONFIG_RFKILL=' \
             out/.config || true
 
-          echo
-          echo "===== Qualcomm WLAN ====="
-          grep -E \
-            'CONFIG_CLD_LL_CORE=|CONFIG_CNSS_GENL=|CONFIG_ICNSS=' \
-            out/.config || true
-
-      # ---------------------------------------------------------
-      # 9. Build kernel
-      # ---------------------------------------------------------
       - name: Build kernel
         working-directory: kernel
         env:
           ARCH: arm64
-          CROSS_COMPILE: aarch64-linux-gnu-
           LLVM: "1"
           LLVM_IAS: "1"
         run: |
@@ -250,25 +224,16 @@ jobs:
             ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
             Image \
             dtbs \
             modules
 
-      # ---------------------------------------------------------
-      # 10. Collect output
-      # ---------------------------------------------------------
       - name: Collect kernel artifacts
         run: |
           mkdir -p artifacts
 
           cp kernel/out/arch/arm64/boot/Image \
             artifacts/Image
-
-          if [ -f kernel/out/arch/arm64/boot/Image.gz ]; then
-            cp kernel/out/arch/arm64/boot/Image.gz \
-              artifacts/Image.gz
-          fi
 
           find kernel/out/arch/arm64/boot/dts \
             -type f \
@@ -282,12 +247,9 @@ jobs:
             artifacts/nethunter.config
 
           echo
-          echo "===== ARTIFACTS ====="
+          echo "===== BUILD OUTPUT ====="
           ls -lh artifacts
 
-      # ---------------------------------------------------------
-      # 11. Upload build
-      # ---------------------------------------------------------
       - name: Upload kernel artifacts
         uses: actions/upload-artifact@v4
         with:
