@@ -445,7 +445,114 @@ jobs:
           echo "========================================"
 
           find artifacts -type f -exec ls -lh {} \;
+          
+      # =========================================================
+      # Create flashable AnyKernel3 package
+      # =========================================================
+      - name: Prepare AnyKernel3
+        shell: bash
+        run: |
+          set -e
 
+          echo "========================================"
+          echo "DOWNLOADING ANYKERNEL3"
+          echo "========================================"
+
+          git clone \
+            --depth=1 \
+            https://github.com/osm0sis/AnyKernel3.git \
+            AnyKernel3
+
+          echo
+          echo "========================================"
+          echo "INSTALLING COMPILED KERNEL"
+          echo "========================================"
+
+          cp \
+            kernel/out/arch/arm64/boot/Image \
+            AnyKernel3/Image
+
+          test -f AnyKernel3/Image
+
+          echo
+          echo "Kernel:"
+          ls -lh AnyKernel3/Image
+
+          echo
+          echo "========================================"
+          echo "CONFIGURING ANYKERNEL3"
+          echo "========================================"
+
+          cat > AnyKernel3/anykernel.sh <<'EOF'
+          # AnyKernel3 Ramdisk Mod Script
+
+          properties() { '
+          kernel.string=Moto G9 Power cebu NetHunter Kernel
+
+          do.devicecheck=1
+          do.modules=0
+          do.systemless=0
+          do.cleanup=1
+          do.cleanuponabort=0
+
+          device.name1=cebu
+          device.name2=
+
+          supported.versions=
+          supported.patchlevels=
+          supported.vendorpatchlevels=
+
+          '; }
+
+          # Boot image configuration
+          BLOCK=boot
+          IS_SLOT_DEVICE=auto
+          RAMDISK_COMPRESSION=auto
+          PATCH_VBMETA_FLAG=auto
+
+          # AnyKernel3 core
+          . tools/ak3-core.sh
+
+          # Install kernel
+          dump_boot
+          write_boot
+          EOF
+
+          chmod 755 AnyKernel3/anykernel.sh
+
+          echo
+          echo "========================================"
+          echo "CREATING FLASHABLE ZIP"
+          echo "========================================"
+
+          rm -rf AnyKernel3/.git
+
+          cd AnyKernel3
+
+          zip -r9 \
+            ../Moto-G9-Power-cebu-NetHunter-Kernel.zip \
+            . \
+            -x "README.md" \
+            -x ".git/*"
+
+          cd ..
+
+          echo
+          echo "========================================"
+          echo "VERIFYING FLASHABLE ZIP"
+          echo "========================================"
+
+          test -f Moto-G9-Power-cebu-NetHunter-Kernel.zip
+
+          ls -lh \
+            Moto-G9-Power-cebu-NetHunter-Kernel.zip
+
+          echo
+          unzip -l \
+            Moto-G9-Power-cebu-NetHunter-Kernel.zip
+
+          echo
+          echo "AnyKernel3 package created successfully."
       # =========================================================
       # Upload
       # =========================================================
@@ -454,4 +561,13 @@ jobs:
         with:
           name: moto-g9-power-cebu-nethunter-kernel
           path: artifacts/
+          if-no-files-found: error
+                # =========================================================
+      # Upload flashable kernel ZIP
+      # =========================================================
+      - name: Upload flashable kernel ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: moto-g9-power-cebu-nethunter-flashable
+          path: Moto-G9-Power-cebu-NetHunter-Kernel.zip
           if-no-files-found: error
