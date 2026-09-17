@@ -9,9 +9,9 @@ jobs:
 
     steps:
 
-      # =========================================================
-      # Dependencies
-      # =========================================================
+      # ------------------------------------------------------------
+      # 1. Install build dependencies
+      # ------------------------------------------------------------
       - name: Install dependencies
         run: |
           set -e
@@ -39,26 +39,22 @@ jobs:
             xz-utils \
             zip
 
-      # =========================================================
-      # LLVM
-      # =========================================================
+      # ------------------------------------------------------------
+      # 2. Setup LLVM 14
+      # ------------------------------------------------------------
       - name: Setup LLVM
         run: |
           set -e
 
           echo "/usr/lib/llvm-14/bin" >> "$GITHUB_PATH"
 
-          echo "===== CLANG ====="
           /usr/lib/llvm-14/bin/clang --version
-
-          echo
-          echo "===== LLD ====="
           /usr/lib/llvm-14/bin/ld.lld --version
 
-      # =========================================================
-      # Kernel source
-      # =========================================================
-      - name: Checkout LineageOS kernel
+      # ------------------------------------------------------------
+      # 3. Checkout official LineageOS kernel
+      # ------------------------------------------------------------
+      - name: Checkout LineageOS SM6225 kernel
         uses: actions/checkout@v4
         with:
           repository: LineageOS/android_kernel_motorola_sm6225
@@ -66,9 +62,9 @@ jobs:
           path: kernel
           fetch-depth: 1
 
-      # =========================================================
-      # Cebu device tree
-      # =========================================================
+      # ------------------------------------------------------------
+      # 4. Checkout cebu device tree
+      # ------------------------------------------------------------
       - name: Checkout cebu device tree
         uses: actions/checkout@v4
         with:
@@ -77,10 +73,10 @@ jobs:
           path: device/motorola/cebu
           fetch-depth: 1
 
-      # =========================================================
-      # Common device tree
-      # =========================================================
-      - name: Checkout SM6225 common tree
+      # ------------------------------------------------------------
+      # 5. Checkout SM6225 common device tree
+      # ------------------------------------------------------------
+      - name: Checkout SM6225 common device tree
         uses: actions/checkout@v4
         with:
           repository: LineageOS/android_device_motorola_sm6225-common
@@ -88,210 +84,166 @@ jobs:
           path: device/motorola/sm6225-common
           fetch-depth: 1
 
-      # =========================================================
-      # Verify source
-      # =========================================================
+      # ------------------------------------------------------------
+      # 6. Verify source trees
+      # ------------------------------------------------------------
       - name: Verify source
+        working-directory: kernel
         run: |
           set -e
 
           echo "========================================"
-          echo "KERNEL SOURCE"
+          echo "Kernel revision"
           echo "========================================"
-
-          git -C kernel rev-parse --short HEAD
+          git rev-parse HEAD
 
           echo
           echo "========================================"
-          echo "CEBU DEVICE TREE"
+          echo "cebu device revision"
+          echo "========================================"
+          git -C "$GITHUB_WORKSPACE/device/motorola/cebu" rev-parse HEAD
+
+          echo
+          echo "========================================"
+          echo "SM6225 common revision"
+          echo "========================================"
+          git -C "$GITHUB_WORKSPACE/device/motorola/sm6225-common" rev-parse HEAD
+
+          echo
+          echo "========================================"
+          echo "Checking required kernel files"
           echo "========================================"
 
-          git -C device/motorola/cebu rev-parse --short HEAD
+          test -f arch/arm64/configs/vendor/bengal-perf_defconfig
+          test -f scripts/kconfig/merge_config.sh
+          test -f drivers/clk/qcom/clk-debug.c
+
+          echo "Required kernel files found."
 
           echo
           echo "========================================"
-          echo "COMMON DEVICE TREE"
+          echo "Checking cebu BoardConfig"
           echo "========================================"
 
-          git -C device/motorola/sm6225-common rev-parse --short HEAD
+          grep -n "cebu-default.config" \
+            "$GITHUB_WORKSPACE/device/motorola/cebu/BoardConfig.mk" \
+            || true
 
-          echo
-          echo "Checking Bengal defconfig..."
-
-          test -f \
-            kernel/arch/arm64/configs/vendor/bengal-perf_defconfig
-
-          echo "FOUND"
-
-          echo
-          echo "Checking Qualcomm trace header..."
-
-          test -f \
-            kernel/drivers/clk/qcom/trace.h
-
-          echo "FOUND"
-
-          echo
-          echo "Cebu BoardConfig kernel settings:"
-
-          grep -n \
-            "TARGET_KERNEL_CONFIG" \
-            device/motorola/cebu/BoardConfig.mk || true
-
-      # =========================================================
-      # Clean kernel source
-      # =========================================================
+      # ------------------------------------------------------------
+      # 7. Clean source tree
+      # ------------------------------------------------------------
       - name: Clean kernel source
         working-directory: kernel
         run: |
           set -e
 
-          make mrproper
+          make ARCH=arm64 mrproper
 
           rm -rf out
+
           rm -rf include/config
           rm -rf include/generated
           rm -rf arch/arm64/include/generated
+          rm -rf .config
 
-          echo
-          echo "SOURCE TREE CLEAN."
+          echo "Kernel source cleaned."
 
-      # =========================================================
-      # Locate cebu configuration
-      # =========================================================
-      - name: Locate cebu configuration
+      # ------------------------------------------------------------
+      # 8. Locate cebu-specific kernel config
+      # ------------------------------------------------------------
+      - name: Locate cebu kernel configuration
         run: |
           set -e
 
-          echo "========================================"
-          echo "SEARCHING FOR CEBU DEFAULT CONFIG"
-          echo "========================================"
-
-          CEBU_CONFIG="$(
-            find \
-              "$GITHUB_WORKSPACE" \
-              -type f \
-              -name "cebu-default.config" \
-              -print \
-              -quit
-          )"
+          CEBU_CONFIG="$(find "$GITHUB_WORKSPACE" \
+            -type f \
+            -name "cebu-default.config" \
+            -print -quit)"
 
           if [ -n "$CEBU_CONFIG" ]; then
-
-            echo "CEBU_CONFIG=$CEBU_CONFIG" >> "$GITHUB_ENV"
-
-            echo
-            echo "FOUND:"
+            echo "Found cebu config:"
             echo "$CEBU_CONFIG"
 
+            echo "CEBU_CONFIG=$CEBU_CONFIG" >> "$GITHUB_ENV"
           else
-
-            echo "CEBU_CONFIG=" >> "$GITHUB_ENV"
-
-            echo
-            echo "WARNING:"
-            echo "cebu-default.config was not found."
-            echo
-            echo "The public cebu BoardConfig references:"
-            echo "vendor/ext_config/cebu-default.config"
-            echo
-            echo "Continuing with Bengal base configuration."
-
+            echo "::warning::cebu-default.config was not found in the checked-out public trees."
+            echo "The build will continue using the SM6225 Bengal base configuration."
           fi
 
-      # =========================================================
-      # Create NetHunter configuration
-      # =========================================================
+      # ------------------------------------------------------------
+      # 9. Create NetHunter configuration fragment
+      # ------------------------------------------------------------
       - name: Create NetHunter config
         working-directory: kernel
         run: |
           set -e
 
           cat > nethunter.config <<'EOF'
-
-          # =====================================================
+          # --------------------------------------------------------
           # Bluetooth
-          # =====================================================
-
+          # --------------------------------------------------------
           CONFIG_BT=y
           CONFIG_BT_BREDR=y
-
           CONFIG_BT_RFCOMM=y
           CONFIG_BT_RFCOMM_TTY=y
           CONFIG_BT_HIDP=y
           CONFIG_BT_HCIVHCI=y
-
           CONFIG_BT_HCIUART=y
           CONFIG_BT_HCIUART_H4=y
 
-          # Bluetooth dependencies
+          # --------------------------------------------------------
+          # TTY / input / HID
+          # --------------------------------------------------------
           CONFIG_TTY=y
           CONFIG_INPUT=y
           CONFIG_HID=y
-
-          # =====================================================
-          # USB Gadget
-          # =====================================================
-
-          CONFIG_USB_GADGET=y
-          CONFIG_USB_CONFIGFS=y
-
-          CONFIG_USB_CONFIGFS_F_HID=y
-          CONFIG_USB_CONFIGFS_NCM=y
-          CONFIG_USB_CONFIGFS_F_FS=y
-
-          # =====================================================
-          # HID / Input
-          # =====================================================
-
           CONFIG_INPUT_EVDEV=y
           CONFIG_INPUT_UINPUT=y
           CONFIG_UHID=y
           CONFIG_HIDRAW=y
 
-          # =====================================================
+          # --------------------------------------------------------
+          # USB gadget / HID / networking
+          # --------------------------------------------------------
+          CONFIG_USB_GADGET=y
+          CONFIG_USB_CONFIGFS=y
+          CONFIG_USB_CONFIGFS_F_HID=y
+          CONFIG_USB_CONFIGFS_NCM=y
+          CONFIG_USB_CONFIGFS_F_FS=y
+
+          # --------------------------------------------------------
           # Networking
-          # =====================================================
-
+          # --------------------------------------------------------
           CONFIG_PACKET=y
-
           CONFIG_NETFILTER=y
           CONFIG_NETFILTER_XTABLES=y
           CONFIG_NF_CONNTRACK=y
-
           CONFIG_TUN=y
           CONFIG_VETH=y
 
-          # =====================================================
+          # --------------------------------------------------------
           # Wireless framework
-          # =====================================================
-
+          # --------------------------------------------------------
           CONFIG_CFG80211=y
           CONFIG_RFKILL=y
 
+          # --------------------------------------------------------
+          # Qualcomm / Motorola sensor support
+          # --------------------------------------------------------
+          CONFIG_SENSORS_CLASS=y
           EOF
 
+          echo "Created nethunter.config:"
           echo
-          echo "========================================"
-          echo "NETHUNTER CONFIGURATION"
-          echo "========================================"
-
           cat nethunter.config
 
-      # =========================================================
-      # Base kernel configuration
-      # =========================================================
+      # ------------------------------------------------------------
+      # 10. Configure base Bengal kernel
+      # ------------------------------------------------------------
       - name: Configure base kernel
         working-directory: kernel
-        env:
-          ARCH: arm64
-          LLVM: "1"
-          LLVM_IAS: "1"
-          CROSS_COMPILE: aarch64-linux-gnu-
         run: |
           set -e
-
-          mkdir -p out
 
           make \
             O=out \
@@ -301,69 +253,28 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             vendor/bengal-perf_defconfig
 
-          test -f out/.config
-
-          echo
-          echo "========================================"
-          echo "BASE CONFIGURATION CREATED"
-          echo "========================================"
-
-          ls -lh out/.config
-
-      # =========================================================
-      # Merge cebu configuration
-      #
-      # -m = merge only
-      # -O out = write merged configuration to out/.config
-      # =========================================================
+      # ------------------------------------------------------------
+      # 11. Merge cebu configuration
+      # ------------------------------------------------------------
       - name: Apply cebu configuration
+        if: env.CEBU_CONFIG != ''
         working-directory: kernel
         run: |
           set -e
 
-          if [ -n "$CEBU_CONFIG" ]; then
+          scripts/kconfig/merge_config.sh \
+            -m \
+            -O out \
+            out/.config \
+            "$CEBU_CONFIG"
 
-            echo "========================================"
-            echo "MERGING CEBU CONFIGURATION"
-            echo "========================================"
-
-            echo "$CEBU_CONFIG"
-
-            scripts/kconfig/merge_config.sh \
-              -m \
-              -O out \
-              out/.config \
-              "$CEBU_CONFIG"
-
-            test -f out/.config
-
-            echo
-            echo "Cebu configuration merged."
-
-          else
-
-            echo "========================================"
-            echo "CEBU CONFIGURATION NOT AVAILABLE"
-            echo "========================================"
-
-            echo "Using Bengal configuration."
-
-          fi
-
-      # =========================================================
-      # Merge NetHunter configuration
-      #
-      # -m = merge only
-      # -O out = write merged configuration to out/.config
-      # =========================================================
+      # ------------------------------------------------------------
+      # 12. Merge NetHunter configuration
+      # ------------------------------------------------------------
       - name: Apply NetHunter configuration
         working-directory: kernel
         run: |
           set -e
-
-          echo "========================================"
-          echo "MERGING NETHUNTER CONFIGURATION"
-          echo "========================================"
 
           scripts/kconfig/merge_config.sh \
             -m \
@@ -371,33 +282,13 @@ jobs:
             out/.config \
             nethunter.config
 
-          test -f out/.config
-
-          echo
-          echo "========================================"
-          echo "CONFIGURATION AFTER MERGE"
-          echo "========================================"
-
-          grep -E \
-            'CONFIG_BT=|CONFIG_BT_BREDR=|CONFIG_BT_RFCOMM=|CONFIG_BT_RFCOMM_TTY=|CONFIG_BT_HIDP=|CONFIG_BT_HCIVHCI=|CONFIG_BT_HCIUART=|CONFIG_BT_HCIUART_H4=|CONFIG_TTY=|CONFIG_INPUT=|CONFIG_HID=|CONFIG_USB_GADGET=|CONFIG_USB_CONFIGFS=|CONFIG_USB_CONFIGFS_F_HID=|CONFIG_USB_CONFIGFS_NCM=|CONFIG_INPUT_UINPUT=|CONFIG_TUN=|CONFIG_VETH=|CONFIG_CFG80211=|CONFIG_RFKILL=' \
-            out/.config || true
-
-      # =========================================================
-      # Finalize Kconfig
-      # =========================================================
+      # ------------------------------------------------------------
+      # 13. Resolve Kconfig dependencies
+      # ------------------------------------------------------------
       - name: Finalize configuration
         working-directory: kernel
-        env:
-          ARCH: arm64
-          LLVM: "1"
-          LLVM_IAS: "1"
-          CROSS_COMPILE: aarch64-linux-gnu-
         run: |
           set -e
-
-          echo "========================================"
-          echo "RUNNING OLDDEFCONFIG"
-          echo "========================================"
 
           make \
             O=out \
@@ -407,159 +298,140 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             olddefconfig
 
-          test -f out/.config
-
-          echo
-          echo "========================================"
-          echo "FINAL CONFIGURATION"
-          echo "========================================"
-
-          grep -E \
-            'CONFIG_BT=|CONFIG_BT_BREDR=|CONFIG_BT_RFCOMM=|CONFIG_BT_RFCOMM_TTY=|CONFIG_BT_HIDP=|CONFIG_BT_HCIVHCI=|CONFIG_BT_HCIUART=|CONFIG_BT_HCIUART_H4=|CONFIG_TTY=|CONFIG_INPUT=|CONFIG_HID=|CONFIG_USB_GADGET=|CONFIG_USB_CONFIGFS=|CONFIG_USB_CONFIGFS_F_HID=|CONFIG_USB_CONFIGFS_NCM=|CONFIG_INPUT_UINPUT=|CONFIG_TUN=|CONFIG_VETH=|CONFIG_CFG80211=|CONFIG_RFKILL=' \
-            out/.config || true
-
-      # =========================================================
-      # Verify required NetHunter options
-      # =========================================================
-      - name: Verify required NetHunter options
+      # ------------------------------------------------------------
+      # 14. Verify required options
+      # ------------------------------------------------------------
+      - name: Verify NetHunter configuration
         working-directory: kernel
         run: |
           set -e
 
-          echo "========================================"
-          echo "VERIFYING REQUIRED NETHUNTER OPTIONS"
-          echo "========================================"
+          CONFIG="out/.config"
+          FAILED=0
 
-          required=(
-            CONFIG_BT
-            CONFIG_BT_BREDR
-            CONFIG_BT_RFCOMM
-            CONFIG_BT_RFCOMM_TTY
-            CONFIG_BT_HIDP
-            CONFIG_BT_HCIVHCI
-            CONFIG_BT_HCIUART
-            CONFIG_BT_HCIUART_H4
-            CONFIG_TTY
-            CONFIG_INPUT
-            CONFIG_HID
-            CONFIG_USB_GADGET
-            CONFIG_USB_CONFIGFS
-            CONFIG_USB_CONFIGFS_F_HID
-            CONFIG_USB_CONFIGFS_NCM
-            CONFIG_INPUT_EVDEV
-            CONFIG_INPUT_UINPUT
-            CONFIG_UHID
-            CONFIG_HIDRAW
-            CONFIG_PACKET
-            CONFIG_NETFILTER
-            CONFIG_NF_CONNTRACK
-            CONFIG_TUN
-            CONFIG_VETH
-            CONFIG_CFG80211
-            CONFIG_RFKILL
-          )
+          check_y() {
+            OPTION="$1"
 
-          failed=0
-
-          for option in "${required[@]}"; do
-
-            if grep -q "^${option}=y$" out/.config; then
-
-              echo "OK: ${option}=y"
-
+            if grep -q "^${OPTION}=y$" "$CONFIG"; then
+              echo "OK: ${OPTION}=y"
             else
-
-              echo "FAIL: ${option} is NOT built-in"
-
-              grep \
-                -E "^# ${option} is not set$|^${option}=" \
-                out/.config || true
-
-              failed=1
-
+              echo "FAIL: ${OPTION} is NOT built-in"
+              grep -E "^# ${OPTION} is not set$|^${OPTION}=" "$CONFIG" || true
+              FAILED=1
             fi
+          }
 
-          done
+          echo "========================================"
+          echo "Bluetooth"
+          echo "========================================"
+
+          check_y CONFIG_BT
+          check_y CONFIG_BT_BREDR
+          check_y CONFIG_BT_RFCOMM
+          check_y CONFIG_BT_RFCOMM_TTY
+          check_y CONFIG_BT_HIDP
+          check_y CONFIG_BT_HCIVHCI
+          check_y CONFIG_BT_HCIUART
+          check_y CONFIG_BT_HCIUART_H4
 
           echo
+          echo "========================================"
+          echo "Input / HID"
+          echo "========================================"
 
-          if [ "$failed" -ne 0 ]; then
+          check_y CONFIG_TTY
+          check_y CONFIG_INPUT
+          check_y CONFIG_HID
+          check_y CONFIG_INPUT_EVDEV
+          check_y CONFIG_INPUT_UINPUT
+          check_y CONFIG_UHID
+          check_y CONFIG_HIDRAW
 
-            echo "========================================"
+          echo
+          echo "========================================"
+          echo "USB gadget"
+          echo "========================================"
+
+          check_y CONFIG_USB_GADGET
+          check_y CONFIG_USB_CONFIGFS
+          check_y CONFIG_USB_CONFIGFS_F_HID
+          check_y CONFIG_USB_CONFIGFS_NCM
+          check_y CONFIG_USB_CONFIGFS_F_FS
+
+          echo
+          echo "========================================"
+          echo "Networking"
+          echo "========================================"
+
+          check_y CONFIG_PACKET
+          check_y CONFIG_NETFILTER
+          check_y CONFIG_NETFILTER_XTABLES
+          check_y CONFIG_NF_CONNTRACK
+          check_y CONFIG_TUN
+          check_y CONFIG_VETH
+
+          echo
+          echo "========================================"
+          echo "Wireless"
+          echo "========================================"
+
+          check_y CONFIG_CFG80211
+          check_y CONFIG_RFKILL
+
+          echo
+          echo "========================================"
+          echo "Sensors"
+          echo "========================================"
+
+          check_y CONFIG_SENSORS_CLASS
+
+          echo
+          echo "========================================"
+
+          if [ "$FAILED" -ne 0 ]; then
             echo "CONFIGURATION VERIFICATION FAILED"
-            echo "========================================"
-
             exit 1
-
           fi
 
-          echo "========================================"
-          echo "ALL REQUIRED NETHUNTER OPTIONS ARE BUILT-IN"
-          echo "========================================"
+          echo "ALL REQUIRED NETHUNTER OPTIONS ARE ENABLED."
 
-      # =========================================================
-      # Clean generated source files before build
-      # =========================================================
-      - name: Clean generated source files before build
+      # ------------------------------------------------------------
+      # 15. Save final config
+      # ------------------------------------------------------------
+      - name: Save final kernel config
         working-directory: kernel
         run: |
           set -e
 
-          echo "Removing generated source files..."
+          cp out/.config out/kernel.config
 
-          rm -f .config
+          echo "Final kernel configuration saved."
+
+      # ------------------------------------------------------------
+      # 16. Clean source generated files
+      # ------------------------------------------------------------
+      - name: Clean source generated files
+        working-directory: kernel
+        run: |
+          set -e
 
           rm -rf include/config
           rm -rf include/generated
           rm -rf arch/arm64/include/generated
 
-          echo
-          echo "========================================"
-          echo "SOURCE TREE CHECK"
-          echo "========================================"
+          echo "Source generated files cleaned."
+          echo "out/ configuration preserved."
 
-          if [ -f .config ]; then
-            echo "ERROR: .config still exists"
-            exit 1
-          fi
-
-          if [ -d include/config ]; then
-            echo "ERROR: include/config still exists"
-            exit 1
-          fi
-
-          if [ -d arch/arm64/include/generated ]; then
-            echo "ERROR: generated directory still exists"
-            exit 1
-          fi
-
-          echo
-          echo "SOURCE TREE CLEAN."
-
-          echo
-          echo "Output configuration:"
-          ls -lh out/.config
-
-      # =========================================================
-      # Build kernel Image
-      #
-      # Intentionally NO dtbs target.
-      # =========================================================
+      # ------------------------------------------------------------
+      # 17. Build kernel Image
+      # ------------------------------------------------------------
       - name: Build kernel Image
         working-directory: kernel
-        env:
-          ARCH: arm64
-          LLVM: "1"
-          LLVM_IAS: "1"
-          CROSS_COMPILE: aarch64-linux-gnu-
         run: |
           set -e
 
-          echo "========================================"
-          echo "BUILDING KERNEL IMAGE"
-          echo "========================================"
-
-          make -j"$(nproc)" \
+          make \
+            -j"$(nproc)" \
             O=out \
             ARCH=arm64 \
             LLVM=1 \
@@ -567,33 +439,16 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             Image
 
-          echo
-          echo "Checking Image..."
-
-          test -f \
-            out/arch/arm64/boot/Image
-
-          ls -lh \
-            out/arch/arm64/boot/Image
-
-      # =========================================================
-      # Build kernel modules
-      # =========================================================
+      # ------------------------------------------------------------
+      # 18. Build kernel modules
+      # ------------------------------------------------------------
       - name: Build kernel modules
         working-directory: kernel
-        env:
-          ARCH: arm64
-          LLVM: "1"
-          LLVM_IAS: "1"
-          CROSS_COMPILE: aarch64-linux-gnu-
         run: |
           set -e
 
-          echo "========================================"
-          echo "BUILDING KERNEL MODULES"
-          echo "========================================"
-
-          make -j"$(nproc)" \
+          make \
+            -j"$(nproc)" \
             O=out \
             ARCH=arm64 \
             LLVM=1 \
@@ -601,110 +456,5 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             modules
 
-      # =========================================================
-      # Collect artifacts
-      # =========================================================
-      - name: Collect artifacts
-        run: |
-          set -e
-
-          mkdir -p artifacts
-          mkdir -p artifacts/modules
-
-          cp \
-            kernel/out/arch/arm64/boot/Image \
-            artifacts/Image
-
-          cp \
-            kernel/out/.config \
-            artifacts/kernel.config
-
-          cp \
-            kernel/nethunter.config \
-            artifacts/nethunter.config
-
-          find kernel/out \
-            -type f \
-            -name "*.ko" \
-            -exec cp {} artifacts/modules/ \; || true
-
-          echo
-          echo "========================================"
-          echo "FINAL ARTIFACTS"
-          echo "========================================"
-
-          find artifacts \
-            -type f \
-            -exec ls -lh {} \;
-
-      # =========================================================
-      # Prepare AnyKernel3
-      # =========================================================
-      - name: Prepare AnyKernel3
-        shell: bash
-        run: |
-          set -e
-
-          echo "========================================"
-          echo "DOWNLOADING ANYKERNEL3"
-          echo "========================================"
-
-          git clone \
-            --depth=1 \
-            https://github.com/osm0sis/AnyKernel3.git \
-            AnyKernel3
-
-          echo
-          echo "========================================"
-          echo "INSTALLING COMPILED KERNEL"
-          echo "========================================"
-
-          cp \
-            kernel/out/arch/arm64/boot/Image \
-            AnyKernel3/Image
-
-          test -f AnyKernel3/Image
-
-          ls -lh AnyKernel3/Image
-
-          echo
-          echo "========================================"
-          echo "CONFIGURING ANYKERNEL3"
-          echo "========================================"
-
-          cat > AnyKernel3/anykernel.sh <<'EOF'
-          # AnyKernel3 Ramdisk Mod Script
-
-          properties() { '
-          kernel.string=Moto G9 Power cebu NetHunter Kernel
-
-          do.devicecheck=1
-          do.modules=0
-          do.systemless=0
-          do.cleanup=1
-          do.cleanuponabort=0
-
-          device.name1=cebu
-          device.name2=
-
-          supported.versions=
-          supported.patchlevels=
-          supported.vendorpatchlevels=
-
-          '; }
-
-          BLOCK=boot
-          IS_SLOT_DEVICE=auto
-          RAMDISK_COMPRESSION=auto
-          PATCH_VBMETA_FLAG=auto
-
-          . tools/ak3-core.sh
-
-          dump_boot
-          write_boot
-          EOF
-
-          chmod 755 AnyKernel3/anykernel.sh
-
-          echo
-          echo "===============
+      # ------------------------------------------------------------
+      # 19. Collect build artifacts
