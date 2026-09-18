@@ -686,5 +686,55 @@ jobs:
           } > results/deep-dive-report.txt
 
           echo "Report generated."
+                # ============================================================
+      # 16. PACKAGE RESULTS
+      # ============================================================
+
+      - name: Package results
+        if: always()
+        shell: bash
+        run: |
+          echo "=============================================="
+          echo "PACKAGING RESULTS"
+          echo "=============================================="
+
+          mkdir -p results
+
+          echo
+          echo "Files currently in results:"
+          find results -type f -print | sort || true
+
+          echo
+          echo "Results directory:"
+          ls -lah results || true
+
+      # ============================================================
+      # 17. UPLOAD RESULTS
+      # ============================================================
+
+      - name: Upload investigation results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cebu-qcacld3-candidate-deep-dive-fixed
+          path: results/
+          if-no-files-found: warn
+          retention-days: 14
+
+      # ============================================================
+      # 18. FINISH
+      # ============================================================
+
+      - name: Finish
+        if: always()
+        shell: bash
+        run: |
+          echo
+          echo "=============================================="
+          echo "QCACLD3 DEEP DIVE COMPLETE"
+          echo "=============================================="
+          echo
+          echo "Artifact:"
+          echo "cebu-qcacld3-candidate-deep-dive-fixed"
 
       # ========================
