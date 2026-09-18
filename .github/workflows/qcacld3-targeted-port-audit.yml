@@ -242,3 +242,12 @@ jobs:
 
           with open(out / "structures.txt", "w") as f:
               f.write("=" * 70 + "\n
+
+                  - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcacld3-targeted-port-audit
+          path: report/
+          if-no-files-found: error
+          retention-days: 7
