@@ -74,7 +74,7 @@ jobs:
           fetch-depth: 1
 
       # ============================================================
-      # 5. Checkout common device tree
+      # 5. Checkout SM6225 common device tree
       # ============================================================
       - name: Checkout SM6225 common device tree
         uses: actions/checkout@v4
@@ -92,19 +92,14 @@ jobs:
         run: |
           set -e
 
-          echo "========================================"
-          echo "Kernel revision"
-          echo "========================================"
+          echo "Kernel revision:"
           git rev-parse HEAD
 
           echo
-          echo "========================================"
-          echo "Checking required files"
-          echo "========================================"
+          echo "Checking required files..."
 
           test -f arch/arm64/configs/vendor/bengal-perf_defconfig
           test -f scripts/kconfig/merge_config.sh
-
           test -f drivers/sensors/Kconfig
           test -f drivers/sensors/Makefile
           test -f drivers/sensors/sensors_class.c
@@ -112,19 +107,18 @@ jobs:
           echo "Required kernel files found."
 
           echo
-          echo "drivers/Makefile sensor entry:"
-          grep -n "CONFIG_SENSORS_SSC.*sensors/" drivers/Makefile || true
+          echo "Sensor driver configuration:"
+          grep -n "CONFIG_SENSORS_SSC" drivers/Makefile || true
+          grep -n "SENSORS_CLASS" drivers/sensors/Makefile || true
 
           echo
-          echo "drivers/sensors/Makefile:"
-          cat drivers/sensors/Makefile
-
-          echo
-          echo "drivers/sensors/Kconfig:"
-          cat drivers/sensors/Kconfig
+          echo "cebu BoardConfig:"
+          grep -n "cebu-default.config" \
+            "$GITHUB_WORKSPACE/device/motorola/cebu/BoardConfig.mk" \
+            || true
 
       # ============================================================
-      # 7. Clean source
+      # 7. Clean kernel source
       # ============================================================
       - name: Clean kernel source
         working-directory: kernel
@@ -134,7 +128,6 @@ jobs:
           make ARCH=arm64 mrproper
 
           rm -rf out
-
           rm -rf include/config
           rm -rf include/generated
           rm -rf arch/arm64/include/generated
@@ -149,15 +142,11 @@ jobs:
         run: |
           set -e
 
-          CEBU_CONFIG="$(find "$GITHUB_WORKSPACE" \
-            -type f \
-            -name "cebu-default.config" \
-            -print -quit)"
+          CEBU_CONFIG="$(find "$GITHUB_WORKSPACE" -type f -name "cebu-default.config" -print -quit)"
 
           if [ -n "$CEBU_CONFIG" ]; then
             echo "Found cebu config:"
             echo "$CEBU_CONFIG"
-
             echo "CEBU_CONFIG=$CEBU_CONFIG" >> "$GITHUB_ENV"
           else
             echo "::warning::cebu-default.config was not found in the checked-out public trees."
@@ -173,11 +162,6 @@ jobs:
           set -e
 
           cat > nethunter.config <<'EOF'
-
-          # ========================================================
-          # Bluetooth
-          # ========================================================
-
           CONFIG_BT=y
           CONFIG_BT_BREDR=y
           CONFIG_BT_RFCOMM=y
@@ -187,10 +171,6 @@ jobs:
           CONFIG_BT_HCIUART=y
           CONFIG_BT_HCIUART_H4=y
 
-          # ========================================================
-          # TTY / INPUT / HID
-          # ========================================================
-
           CONFIG_TTY=y
           CONFIG_INPUT=y
           CONFIG_HID=y
@@ -199,19 +179,11 @@ jobs:
           CONFIG_UHID=y
           CONFIG_HIDRAW=y
 
-          # ========================================================
-          # USB Gadget
-          # ========================================================
-
           CONFIG_USB_GADGET=y
           CONFIG_USB_CONFIGFS=y
           CONFIG_USB_CONFIGFS_F_HID=y
           CONFIG_USB_CONFIGFS_NCM=y
           CONFIG_USB_CONFIGFS_F_FS=y
-
-          # ========================================================
-          # Networking
-          # ========================================================
 
           CONFIG_PACKET=y
           CONFIG_NETFILTER=y
@@ -220,36 +192,18 @@ jobs:
           CONFIG_TUN=y
           CONFIG_VETH=y
 
-          # ========================================================
-          # Wireless framework
-          # ========================================================
-
           CONFIG_CFG80211=y
           CONFIG_RFKILL=y
 
-          # ========================================================
-          # Motorola sensor framework
-          #
-          # drivers/Makefile only enters drivers/sensors/ when
-          # CONFIG_SENSORS_SSC is enabled.
-          #
-          # sensors_class itself is kept as a module because the
-          # Motorola vendor kernel loads sensors_class.ko.
-          # ========================================================
-
           CONFIG_SENSORS_SSC=y
           CONFIG_SENSORS_CLASS=m
-
           EOF
 
-          echo "========================================"
-          echo "NetHunter configuration"
-          echo "========================================"
-
+          echo "NetHunter configuration:"
           cat nethunter.config
 
       # ============================================================
-      # 10. Configure Bengal base
+      # 10. Configure base kernel
       # ============================================================
       - name: Configure base kernel
         working-directory: kernel
@@ -294,7 +248,7 @@ jobs:
             nethunter.config
 
       # ============================================================
-      # 13. Finalize Kconfig
+      # 13. Finalize configuration
       # ============================================================
       - name: Finalize configuration
         working-directory: kernel
@@ -327,9 +281,7 @@ jobs:
               echo "OK: ${OPTION}=y"
             else
               echo "FAIL: ${OPTION} is NOT built-in"
-              grep -E \
-                "^# ${OPTION} is not set$|^${OPTION}=" \
-                "$CONFIG" || true
+              grep -E "^# ${OPTION} is not set$|^${OPTION}=" "$CONFIG" || true
               FAILED=1
             fi
           }
@@ -341,17 +293,12 @@ jobs:
               echo "OK: ${OPTION}=m"
             else
               echo "FAIL: ${OPTION} is NOT a module"
-              grep -E \
-                "^# ${OPTION} is not set$|^${OPTION}=" \
-                "$CONFIG" || true
+              grep -E "^# ${OPTION} is not set$|^${OPTION}=" "$CONFIG" || true
               FAILED=1
             fi
           }
 
-          echo
-          echo "========================================"
-          echo "Bluetooth"
-          echo "========================================"
+          echo "========== Bluetooth =========="
 
           check_y CONFIG_BT
           check_y CONFIG_BT_BREDR
@@ -363,9 +310,7 @@ jobs:
           check_y CONFIG_BT_HCIUART_H4
 
           echo
-          echo "========================================"
-          echo "Input / HID"
-          echo "========================================"
+          echo "========== Input / HID =========="
 
           check_y CONFIG_TTY
           check_y CONFIG_INPUT
@@ -376,9 +321,7 @@ jobs:
           check_y CONFIG_HIDRAW
 
           echo
-          echo "========================================"
-          echo "USB Gadget"
-          echo "========================================"
+          echo "========== USB Gadget =========="
 
           check_y CONFIG_USB_GADGET
           check_y CONFIG_USB_CONFIGFS
@@ -387,9 +330,7 @@ jobs:
           check_y CONFIG_USB_CONFIGFS_F_FS
 
           echo
-          echo "========================================"
-          echo "Networking"
-          echo "========================================"
+          echo "========== Networking =========="
 
           check_y CONFIG_PACKET
           check_y CONFIG_NETFILTER
@@ -399,35 +340,28 @@ jobs:
           check_y CONFIG_VETH
 
           echo
-          echo "========================================"
-          echo "Wireless"
-          echo "========================================"
+          echo "========== Wireless =========="
 
           check_y CONFIG_CFG80211
           check_y CONFIG_RFKILL
 
           echo
-          echo "========================================"
-          echo "Motorola sensors"
-          echo "========================================"
+          echo "========== Sensors =========="
 
           check_y CONFIG_SENSORS_SSC
           check_m CONFIG_SENSORS_CLASS
 
           echo
-          echo "========================================"
 
           if [ "$FAILED" -ne 0 ]; then
-            echo
             echo "CONFIGURATION VERIFICATION FAILED"
             exit 1
           fi
 
-          echo
           echo "ALL REQUIRED CONFIGURATION OPTIONS PASSED."
 
       # ============================================================
-      # 15. Save final configuration
+      # 15. Save final config
       # ============================================================
       - name: Save final kernel config
         working-directory: kernel
@@ -435,8 +369,6 @@ jobs:
           set -e
 
           cp out/.config out/kernel.config
-
-          echo "Final kernel configuration saved."
 
       # ============================================================
       # 16. Build kernel Image
@@ -456,7 +388,7 @@ jobs:
             Image
 
       # ============================================================
-      # 17. Build modules
+      # 17. Build kernel modules
       # ============================================================
       - name: Build kernel modules
         working-directory: kernel
@@ -480,33 +412,18 @@ jobs:
         run: |
           set -e
 
-          echo "Searching for sensors_class.ko..."
-
-          SENSOR_MODULE="$(find out \
-            -type f \
-            -name "sensors_class.ko" \
-            -print -quit)"
+          SENSOR_MODULE="$(find out -type f -name "sensors_class.ko" -print -quit)"
 
           if [ -z "$SENSOR_MODULE" ]; then
-            echo
             echo "ERROR: sensors_class.ko was not produced."
-            echo
-            echo "Final sensor configuration:"
-            grep -E \
-              "^CONFIG_SENSORS_(SSC|CLASS)=" \
-              out/.config || true
+            grep -E "^CONFIG_SENSORS_(SSC|CLASS)=" out/.config || true
             exit 1
           fi
 
-          echo
-          echo "FOUND:"
+          echo "Sensor module found:"
           echo "$SENSOR_MODULE"
 
           ls -lh "$SENSOR_MODULE"
-
-          echo
-          echo "Module information:"
-          modinfo "$SENSOR_MODULE" 2>/dev/null || true
 
       # ============================================================
       # 19. Collect artifacts
@@ -518,38 +435,28 @@ jobs:
 
           rm -rf "$GITHUB_WORKSPACE/artifact"
 
-          mkdir -p \
-            "$GITHUB_WORKSPACE/artifact/modules/vendor/lib/modules"
+          mkdir -p "$GITHUB_WORKSPACE/artifact/modules/vendor/lib/modules"
 
-          # Kernel image
           cp \
             out/arch/arm64/boot/Image \
             "$GITHUB_WORKSPACE/artifact/Image"
 
-          # Final kernel config
           cp \
             out/kernel.config \
             "$GITHUB_WORKSPACE/artifact/kernel.config"
 
-          # NetHunter config fragment
           cp \
             nethunter.config \
             "$GITHUB_WORKSPACE/artifact/nethunter.config"
 
-          # Sensor class module
-          SENSOR_MODULE="$(find out \
-            -type f \
-            -name "sensors_class.ko" \
-            -print -quit)"
+          SENSOR_MODULE="$(find out -type f -name "sensors_class.ko" -print -quit)"
 
           cp \
             "$SENSOR_MODULE" \
             "$GITHUB_WORKSPACE/artifact/modules/vendor/lib/modules/sensors_class.ko"
 
           echo
-          echo "========================================"
-          echo "Artifact contents"
-          echo "========================================"
+          echo "========== Artifact contents =========="
 
           find \
             "$GITHUB_WORKSPACE/artifact" \
@@ -558,16 +465,15 @@ jobs:
             | sort
 
           echo
-          echo "Kernel:"
+          echo "Kernel Image:"
           ls -lh "$GITHUB_WORKSPACE/artifact/Image"
 
           echo
           echo "Sensor module:"
-          ls -lh \
-            "$GITHUB_WORKSPACE/artifact/modules/vendor/lib/modules/sensors_class.ko"
+          ls -lh "$GITHUB_WORKSPACE/artifact/modules/vendor/lib/modules/sensors_class.ko"
 
       # ============================================================
-      # 20. Upload raw kernel artifact
+      # 20. Upload kernel artifact
       # ============================================================
       - name: Upload kernel artifact
         uses: actions/upload-artifact@v4
@@ -586,31 +492,22 @@ jobs:
 
           rm -rf AnyKernel3
 
-          git clone \
-            --depth=1 \
+          git clone --depth=1 \
             https://github.com/osm0sis/AnyKernel3.git \
             AnyKernel3
 
-          # Kernel Image
           cp \
             "$GITHUB_WORKSPACE/artifact/Image" \
             AnyKernel3/Image
 
-          # Remove existing modules
           rm -rf AnyKernel3/modules
 
-          # Create vendor module path
           mkdir -p \
             AnyKernel3/modules/vendor/lib/modules
 
-          # Install sensors_class.ko
           cp \
             "$GITHUB_WORKSPACE/artifact/modules/vendor/lib/modules/sensors_class.ko" \
             AnyKernel3/modules/vendor/lib/modules/sensors_class.ko
-
-          # ========================================================
-          # AnyKernel3 installer
-          # ========================================================
 
           cat > AnyKernel3/anykernel.sh <<'EOF'
           properties() { '
@@ -639,39 +536,50 @@ jobs:
           EOF
 
           echo
-          echo "========================================"
-          echo "AnyKernel3 configuration"
-          echo "========================================"
+          echo "========== AnyKernel3 configuration =========="
 
           cat AnyKernel3/anykernel.sh
 
           echo
-          echo "========================================"
-          echo "AnyKernel3 modules"
-          echo "========================================"
+          echo "========== AnyKernel3 modules =========="
 
-          find \
-            AnyKernel3/modules \
-            -type f \
-            -printf '%P\n' \
-            | sort
+          find AnyKernel3/modules -type f -printf '%P\n' | sort
 
       # ============================================================
       # 22. Build flashable ZIP
       # ============================================================
       - name: Build AnyKernel3 flashable ZIP
+        working-directory: AnyKernel3
         run: |
           set -e
 
-          cd AnyKernel3
+          ZIP_FILE="$GITHUB_WORKSPACE/moto-g9-power-cebu-nethunter-flashable.zip"
 
-          zip -r9 \
-            "$GITHUB_WORKSPACE/moto-g9-power-cebu-nethunter-flashable.zip" \
-            . \
-            -x ".git/*" \
-            -x ".github/*"
+          rm -f "$ZIP_FILE"
 
-          cd "$GITHUB_WORKSPACE"
+          echo "Creating flashable ZIP..."
+
+          zip -r9 "$ZIP_FILE" . -x '.git/*' -x '.github/*'
 
           echo
-          echo "============================
+          echo "Flashable ZIP created:"
+          ls -lh "$ZIP_FILE"
+
+          echo
+          echo "Testing ZIP..."
+
+          unzip -t "$ZIP_FILE"
+
+          echo
+          echo "ZIP test completed successfully."
+
+      # ============================================================
+      # 23. Upload flashable ZIP
+      # ============================================================
+      - name: Upload flashable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: moto-g9-power-cebu-nethunter-flashable
+          path: moto-g9-power-cebu-nethunter-flashable.zip
+          if-no-files-found: error
+          retention-days: 30
