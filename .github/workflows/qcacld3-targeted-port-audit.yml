@@ -11,10 +11,17 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
+
+      - name: Initialize report directory
+        if: always()
+        run: |
+          mkdir -p report
+          echo "Audit started." > report/status.txt
+
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y git python3 zip
+          sudo apt-get install -y git python3 zip unzip
 
       - name: Clone Motorola QCACLD3
         run: |
@@ -36,35 +43,70 @@ jobs:
             https://github.com/yesimxev/android_kernel_xiaomi_sm6125.git \
             xiaomi
 
+      - name: Record source versions
+        run: |
+          {
+            echo "=== MOTOROLA ==="
+            git -C motorola rev-parse HEAD
+            git -C motorola log -1 --oneline
+
+            echo
+            echo "=== ONEPLUS ==="
+            git -C oneplus rev-parse HEAD
+            git -C oneplus log -1 --oneline
+
+            echo
+            echo "=== XIAOMI ==="
+            git -C xiaomi rev-parse HEAD
+            git -C xiaomi log -1 --oneline
+          } > report/source-versions.txt
+
       - name: Locate reference injection files
         run: |
-          mkdir -p report
+          {
+            echo "=== MOTOROLA ==="
+            find motorola -type f \( \
+              -name 'wlan_hdd_frame_inject.c' -o \
+              -name 'wlan_hdd_frame_inject.h' -o \
+              -name 'wlan_hdd_frame_validate.c' -o \
+              -name 'wlan_hdd_frame_validate.h' -o \
+              -name 'wma_frame_inject.c' -o \
+              -name 'wma_frame_inject.h' \
+            \) | sort
 
-          find oneplus/drivers/staging/qcacld-3.0 \
-            -type f \
-            \
-              -name 'wlan_hdd_frame_inject.c' \
-              -o -name 'wlan_hdd_frame_inject.h' \
-              -o -name 'wlan_hdd_frame_validate.c' \
-              -o -name 'wlan_hdd_frame_validate.h' \
-              -o -name 'wma_frame_inject.c' \
-              -o -name 'wma_frame_inject.h' \
-            \
-            | sort > report/reference-files.txt
+            echo
+            echo "=== ONEPLUS ==="
+            find oneplus/drivers/staging/qcacld-3.0 -type f \( \
+              -name 'wlan_hdd_frame_inject.c' -o \
+              -name 'wlan_hdd_frame_inject.h' -o \
+              -name 'wlan_hdd_frame_validate.c' -o \
+              -name 'wlan_hdd_frame_validate.h' -o \
+              -name 'wma_frame_inject.c' -o \
+              -name 'wma_frame_inject.h' \
+            \) | sort
 
-          echo "Reference injection files:"
-          cat report/reference-files.txt
+            echo
+            echo "=== XIAOMI ==="
+            find xiaomi/drivers/staging/qcacld-3.0 -type f \( \
+              -name 'wlan_hdd_frame_inject.c' -o \
+              -name 'wlan_hdd_frame_inject.h' -o \
+              -name 'wlan_hdd_frame_validate.c' -o \
+              -name 'wlan_hdd_frame_validate.h' -o \
+              -name 'wma_frame_inject.c' -o \
+              -name 'wma_frame_inject.h' \
+            \) | sort
+          } > report/reference-files.txt
 
-      - name: Analyze injection source
+      - name: Analyze source dependencies
         run: |
           cat > analyze.py <<'PY'
-          import os
           import re
           from pathlib import Path
 
           MOTOROLA = Path("motorola")
           ONEPLUS = Path("oneplus/drivers/staging/qcacld-3.0")
           XIAOMI = Path("xiaomi/drivers/staging/qcacld-3.0")
+          REPORT = Path("report")
 
           TARGET_FILES = [
               "core/hdd/src/wlan_hdd_frame_inject.c",
@@ -75,44 +117,57 @@ jobs:
               "core/wma/inc/wma_frame_inject.h",
           ]
 
-          out = Path("report")
-          out.mkdir(exist_ok=True)
-
-          def read(path):
+          def read_file(path):
               try:
                   return path.read_text(errors="ignore")
               except Exception:
                   return ""
 
-          def find_symbol(symbol):
-              results = []
-              for p in MOTOROLA.rglob("*"):
-                  if p.is_file() and p.suffix in (".c", ".h"):
-                      try:
-                          text = p.read_text(errors="ignore")
-                      except Exception:
-                          continue
-                      if symbol in text:
-                          results.append(str(p))
-              return sorted(set(results))
+          def all_source_files(root):
+              for path in root.rglob("*"):
+                  if path.is_file() and path.suffix in (".c", ".h"):
+                      yield path
+
+          def find_symbol(root, symbol):
+              result = []
+
+              for path in all_source_files(root):
+                  try:
+                      text = path.read_text(errors="ignore")
+                  except Exception:
+                      continue
+
+                  if symbol in text:
+                      result.append(str(path))
+
+              return sorted(set(result))
 
           def extract_includes(text):
               return sorted(set(
-                  re.findall(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]',
-                             text, re.MULTILINE)
+                  re.findall(
+                      r'^\s*#\s*include\s*[<"]([^>"]+)[>"]',
+                      text,
+                      re.MULTILINE
+                  )
               ))
 
-          def extract_definitions(text):
+          def extract_functions(text):
               pattern = re.compile(
-                  r'\b(?:static\s+)?'
+                  r'\b'
+                  r'(?:static\s+)?'
                   r'(?:inline\s+)?'
                   r'(?:const\s+)?'
-                  r'[A-Za-z_][A-Za-z0-9_\s\*]*\s+'
-                  r'([A-Za-z_][A-Za-z0-9_]*)\s*'
-                  r'[^;{}]*\s*\{',
+                  r'[A-Za-z_][A-Za-z0-9_\s\*]*'
+                  r'\s+'
+                  r'([A-Za-z_][A-Za-z0-9_]*)'
+                  r'\s*\([^;{}]*\)\s*\{',
                   re.MULTILINE
               )
-              return sorted(set(m.group(1) for m in pattern.finditer(text)))
+
+              return sorted(set(
+                  match.group(1)
+                  for match in pattern.finditer(text)
+              ))
 
           def extract_calls(text):
               names = re.findall(
@@ -120,134 +175,324 @@ jobs:
                   text
               )
 
-              keywords = {
-                  "if", "for", "while", "switch", "return",
-                  "sizeof", "typeof", "do", "case"
+              excluded = {
+                  "if",
+                  "else",
+                  "for",
+                  "while",
+                  "switch",
+                  "return",
+                  "sizeof",
+                  "typeof",
+                  "do",
+                  "case"
               }
 
               return sorted(set(
-                  x for x in names
-                  if x not in keywords
-                  and not x.startswith("__")
+                  name for name in names
+                  if name not in excluded
               ))
 
           all_calls = set()
-          all_defs = set()
 
-          with open(out / "source-analysis.txt", "w") as report:
-              for rel in TARGET_FILES:
-                  ref = ONEPLUS / rel
+          with open(REPORT / "reference-source-analysis.txt", "w") as out:
+              for relative in TARGET_FILES:
 
-                  report.write("\n" + "=" * 70 + "\n")
-                  report.write(rel + "\n")
-                  report.write("=" * 70 + "\n")
+                  path = ONEPLUS / relative
 
-                  if not ref.exists():
-                      report.write("REFERENCE FILE: MISSING\n")
+                  out.write("\n")
+                  out.write("=" * 70 + "\n")
+                  out.write(relative + "\n")
+                  out.write("=" * 70 + "\n")
+
+                  if not path.exists():
+                      out.write("FILE MISSING\n")
                       continue
 
-                  text = read(ref)
+                  text = read_file(path)
 
                   includes = extract_includes(text)
-                  defs = extract_definitions(text)
+                  functions = extract_functions(text)
                   calls = extract_calls(text)
 
-                  all_defs.update(defs)
                   all_calls.update(calls)
 
-                  report.write("\nINCLUDES:\n")
-                  for x in includes:
-                      report.write(x + "\n")
+                  out.write("\nINCLUDES:\n")
+                  for item in includes:
+                      out.write(item + "\n")
 
-                  report.write("\nFUNCTION DEFINITIONS:\n")
-                  for x in defs:
-                      report.write(x + "\n")
+                  out.write("\nFUNCTION DEFINITIONS:\n")
+                  for item in functions:
+                      out.write(item + "\n")
 
-                  report.write("\nFUNCTION CALLS:\n")
-                  for x in calls:
-                      report.write(x + "\n")
+                  out.write("\nFUNCTION CALLS:\n")
+                  for item in calls:
+                      out.write(item + "\n")
 
-          injection_names = sorted(
-              x for x in all_calls
+          relevant = sorted(
+              name for name in all_calls
               if (
-                  "inject" in x.lower()
-                  or "validate" in x.lower()
-                  or x.startswith("wma_")
-                  or x.startswith("wlan_hdd_")
-                  or x.startswith("qdf_")
-                  or x.startswith("cdp_")
-                  or x.startswith("wmi_")
+                  "inject" in name.lower()
+                  or "validate" in name.lower()
+                  or name.startswith("wma_")
+                  or name.startswith("wlan_hdd_")
+                  or name.startswith("qdf_")
+                  or name.startswith("cdp_")
+                  or name.startswith("wmi_")
+                  or name.startswith("WMI_")
               )
           )
 
-          with open(out / "motorola-api-check.txt", "w") as f:
-              f.write("=" * 70 + "\n")
-              f.write("MOTOROLA API AVAILABILITY\n")
-              f.write("=" * 70 + "\n\n")
+          with open(REPORT / "motorola-api-check.txt", "w") as out:
 
-              for symbol in injection_names:
-                  locations = find_symbol(symbol)
+              out.write("=" * 70 + "\n")
+              out.write("MOTOROLA API AVAILABILITY\n")
+              out.write("=" * 70 + "\n\n")
+
+              for symbol in relevant:
+
+                  locations = find_symbol(MOTOROLA, symbol)
 
                   if locations:
-                      f.write("PRESENT  " + symbol + "\n")
-                      for loc in locations[:20]:
-                          f.write("    " + loc + "\n")
+                      out.write("PRESENT  " + symbol + "\n")
+
+                      for location in locations[:20]:
+                          out.write("    " + location + "\n")
+
                   else:
-                      f.write("MISSING  " + symbol + "\n")
+                      out.write("MISSING  " + symbol + "\n")
 
-          # Check the actual reference injection files against Motorola
-          with open(out / "file-comparison.txt", "w") as f:
-              f.write("=" * 70 + "\n")
-              f.write("REFERENCE FILE / MOTOROLA COMPARISON\n")
-              f.write("=" * 70 + "\n\n")
+          structures = set()
 
-              for rel in TARGET_FILES:
-                  op = ONEPLUS / rel
-                  xi = XIAOMI / rel
-                  base = os.path.basename(rel)
-
-                  f.write("\n" + rel + "\n")
-                  f.write("-" * len(rel) + "\n")
-
-                  f.write("OnePlus: " +
-                          ("PRESENT" if op.exists() else "MISSING") + "\n")
-
-                  f.write("Xiaomi: " +
-                          ("PRESENT" if xi.exists() else "MISSING") + "\n")
-
-                  matches = list(MOTOROLA.rglob(base))
-
-                  f.write("Motorola basename matches:\n")
-                  if matches:
-                      for m in matches:
-                          f.write("  " + str(m) + "\n")
-                  else:
-                      f.write("  NONE\n")
-
-          # Extract structures associated with the injection path.
           structure_pattern = re.compile(
               r'\bstruct\s+([A-Za-z_][A-Za-z0-9_]*)'
           )
 
-          structures = set()
+          for relative in TARGET_FILES:
 
-          for rel in TARGET_FILES:
-              text = read(ONEPLUS / rel)
+              text = read_file(ONEPLUS / relative)
+
               for match in structure_pattern.finditer(text):
+
                   name = match.group(1)
-                  if any(k in name.lower()
-                         for k in ("inject", "frame", "tx", "wma", "hdd",
-                                   "validate")):
+
+                  if any(
+                      word in name.lower()
+                      for word in (
+                          "inject",
+                          "frame",
+                          "validate",
+                          "tx",
+                          "wma",
+                          "hdd"
+                      )
+                  ):
                       structures.add(name)
 
-          with open(out / "structures.txt", "w") as f:
-              f.write("=" * 70 + "\n
+          with open(REPORT / "structures.txt", "w") as out:
 
-                  - name: Upload audit report
+              out.write("=" * 70 + "\n")
+              out.write("REFERENCE INJECTION STRUCTURES\n")
+              out.write("=" * 70 + "\n\n")
+
+              for structure in sorted(structures):
+
+                  locations = find_symbol(MOTOROLA, structure)
+
+                  if locations:
+                      out.write("PRESENT  " + structure + "\n")
+
+                      for location in locations[:20]:
+                          out.write("    " + location + "\n")
+
+                  else:
+                      out.write("MISSING  " + structure + "\n")
+
+          firmware_pattern = re.compile(
+              r'\b(?:WMI|wmi|WMA|wma)_[A-Za-z0-9_]*'
+              r'(?:TX|tx|INJECT|inject|MGMT|mgmt|FRAME|frame)'
+              r'[A-Za-z0-9_]*\b'
+          )
+
+          firmware_symbols = set()
+
+          for relative in TARGET_FILES:
+              text = read_file(ONEPLUS / relative)
+              firmware_symbols.update(
+                  firmware_pattern.findall(text)
+              )
+
+          with open(REPORT / "firmware-api-check.txt", "w") as out:
+
+              out.write("=" * 70 + "\n")
+              out.write("FIRMWARE-FACING API CHECK\n")
+              out.write("=" * 70 + "\n\n")
+
+              for symbol in sorted(firmware_symbols):
+
+                  locations = find_symbol(MOTOROLA, symbol)
+
+                  if locations:
+                      out.write("PRESENT  " + symbol + "\n")
+                  else:
+                      out.write("MISSING  " + symbol + "\n")
+
+          present = 0
+          missing = 0
+
+          api_text = (
+              REPORT / "motorola-api-check.txt"
+          ).read_text()
+
+          for line in api_text.splitlines():
+
+              if line.startswith("PRESENT "):
+                  present += 1
+
+              elif line.startswith("MISSING "):
+                  missing += 1
+
+          with open(REPORT / "FINAL-RESULT.txt", "w") as out:
+
+              out.write("QCACLD3 TARGETED PORT AUDIT\n")
+              out.write("===========================\n\n")
+
+              out.write(
+                  "Target: Motorola Moto G9 Power / cebu\n"
+              )
+
+              out.write(
+                  "Platform: Qualcomm SM6225\n"
+              )
+
+              out.write(
+                  "Kernel generation: Linux 4.19\n\n"
+              )
+
+              out.write(
+                  "Reference: OnePlus 7 NetHunter\n"
+              )
+
+              out.write(
+                  "Reference: Xiaomi Mi A3 NetHunter\n\n"
+              )
+
+              out.write(
+                  "Reference API identifiers checked: "
+                  + str(len(relevant))
+                  + "\n"
+              )
+
+              out.write(
+                  "Found in Motorola: "
+                  + str(present)
+                  + "\n"
+              )
+
+              out.write(
+                  "Not found in Motorola: "
+                  + str(missing)
+                  + "\n\n"
+              )
+
+              out.write(
+                  "IMPORTANT: symbol presence alone does not establish "
+                  "API or firmware compatibility.\n"
+              )
+
+              out.write(
+                  "Function signatures, structures and firmware "
+                  "interfaces require review before any port.\n"
+              )
+
+          print(
+              (REPORT / "FINAL-RESULT.txt").read_text()
+          )
+          PY
+
+          python3 analyze.py
+
+      - name: Create complete report
+        if: always()
+        run: |
+          {
+            echo "============================================================"
+            echo "QCACLD3 TARGETED PORT AUDIT"
+            echo "============================================================"
+            echo
+
+            echo "=== STATUS ==="
+            cat report/status.txt || true
+
+            echo
+            echo "=== SOURCE VERSIONS ==="
+            cat report/source-versions.txt || true
+
+            echo
+            echo "=== REFERENCE FILES ==="
+            cat report/reference-files.txt || true
+
+            echo
+            echo "=== FINAL RESULT ==="
+            cat report/FINAL-RESULT.txt || true
+
+            echo
+            echo "=== MOTOROLA API CHECK ==="
+            cat report/motorola-api-check.txt || true
+
+            echo
+            echo "=== STRUCTURES ==="
+            cat report/structures.txt || true
+
+            echo
+            echo "=== FIRMWARE API CHECK ==="
+            cat report/firmware-api-check.txt || true
+
+            echo
+            echo "=== REFERENCE SOURCE ANALYSIS ==="
+            cat report/reference-source-analysis.txt || true
+
+          } > report/COMPLETE-PORT-AUDIT.txt
+
+      - name: Mark audit complete
+        if: always()
+        run: |
+          echo "Audit processing finished." >> report/status.txt
+          date -u >> report/status.txt
+
+      - name: Package report
+        if: always()
+        run: |
+          zip -r qcacld3-targeted-port-audit.zip report
+          unzip -t qcacld3-targeted-port-audit.zip
+
+      - name: Upload audit directory
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: qcacld3-targeted-port-audit
+          name: qcacld3-targeted-port-audit-report
           path: report/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
+
+      - name: Upload audit ZIP
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcacld3-targeted-port-audit-zip
+          path: qcacld3-targeted-port-audit.zip
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Final verification
+        if: always()
+        run: |
+          echo "=================================================="
+          echo "AUDIT FINISHED"
+          echo "=================================================="
+          echo
+          echo "Report directory:"
+          find report -maxdepth 2 -type f | sort || true
+          echo
+          echo "ZIP:"
+          ls -lh qcacld3-targeted-port-audit.zip || true
