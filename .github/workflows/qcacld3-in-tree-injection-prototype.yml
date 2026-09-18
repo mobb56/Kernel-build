@@ -1,0 +1,426 @@
+name: QCACLD3 In-Tree Injection Prototype
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git \
+            clang \
+            lld \
+            llvm \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu \
+            bc \
+            bison \
+            flex \
+            libssl-dev \
+            libelf-dev \
+            pahole \
+            python3 \
+            rsync \
+            ripgrep
+
+      - name: Clone LineageOS SM6225 kernel
+        run: |
+          git clone --depth=1 \
+            --branch lineage-23.2 \
+            https://github.com/LineageOS/android_kernel_motorola_sm6225.git \
+            kernel
+
+      - name: Clone NetHunter reference
+        run: |
+          git clone --depth=1 \
+            --branch nethunter-lineage-23.2 \
+            https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git \
+            reference
+
+      - name: Verify integrated Qualcomm source
+        run: |
+          set -e
+
+          echo "=== QCACLD3 ==="
+          test -d kernel/drivers/staging/qcacld-3.0
+          echo "FOUND"
+
+          echo
+          echo "=== QCA host common ==="
+          test -d kernel/drivers/staging/qca-wifi-host-cmn
+          echo "FOUND"
+
+          echo
+          echo "=== QDF nbuf ==="
+          test -f \
+            kernel/drivers/staging/qca-wifi-host-cmn/qdf/inc/qdf_nbuf.h
+          echo "FOUND"
+
+          echo
+          echo "=== FW API ==="
+          test -f \
+            kernel/drivers/staging/fw-api/fw/athdefs.h
+          echo "FOUND"
+
+      - name: Prepare kernel output
+        run: |
+          set -e
+
+          mkdir -p out
+
+          make -C kernel \
+            O="$PWD/out" \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            vendor/bengal-perf_defconfig
+
+          make -C kernel \
+            O="$PWD/out" \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            modules_prepare
+
+      - name: Inspect original QCACLD3 Kbuild
+        run: |
+          mkdir -p report
+
+          {
+            echo "=== HDD objects ==="
+            grep -n -A30 \
+              '^HDD_OBJS' \
+              kernel/drivers/staging/qcacld-3.0/Kbuild \
+              | head -n 50
+
+            echo
+            echo "=== WMA objects ==="
+            grep -n -A25 \
+              '^WMA_OBJS' \
+              kernel/drivers/staging/qcacld-3.0/Kbuild \
+              | head -n 50
+
+            echo
+            echo "=== QDF include paths ==="
+            grep -n -A15 \
+              '^QDF_INC' \
+              kernel/drivers/staging/qcacld-3.0/Kbuild \
+              | head -n 40
+          } > report/original-kbuild.txt
+
+      - name: Copy minimal injection implementation
+        run: |
+          set -e
+
+          KERNEL_QCACLD="$PWD/kernel/drivers/staging/qcacld-3.0"
+          REF="$PWD/reference/drivers/staging/qcacld-3.0"
+
+          cp \
+            "$REF/core/wma/inc/wma_frame_inject.h" \
+            "$KERNEL_QCACLD/core/wma/inc/"
+
+          cp \
+            "$REF/core/wma/src/wma_frame_inject.c" \
+            "$KERNEL_QCACLD/core/wma/src/"
+
+          cp \
+            "$REF/core/hdd/inc/wlan_hdd_frame_inject.h" \
+            "$KERNEL_QCACLD/core/hdd/inc/"
+
+          cp \
+            "$REF/core/hdd/src/wlan_hdd_frame_inject.c" \
+            "$KERNEL_QCACLD/core/hdd/src/"
+
+          cp \
+            "$REF/core/hdd/inc/wlan_hdd_frame_validate.h" \
+            "$KERNEL_QCACLD/core/hdd/inc/"
+
+          cp \
+            "$REF/core/hdd/src/wlan_hdd_frame_validate.c" \
+            "$KERNEL_QCACLD/core/hdd/src/"
+
+      - name: Verify copied injection files
+        run: |
+          set -e
+
+          KERNEL_QCACLD="$PWD/kernel/drivers/staging/qcacld-3.0"
+
+          for f in \
+            core/wma/inc/wma_frame_inject.h \
+            core/wma/src/wma_frame_inject.c \
+            core/hdd/inc/wlan_hdd_frame_inject.h \
+            core/hdd/src/wlan_hdd_frame_inject.c \
+            core/hdd/inc/wlan_hdd_frame_validate.h \
+            core/hdd/src/wlan_hdd_frame_validate.c
+          do
+            test -f "$KERNEL_QCACLD/$f"
+            echo "FOUND: $f"
+          done
+
+      - name: Enable prototype objects
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path(
+              "kernel/drivers/staging/qcacld-3.0/Kbuild"
+          )
+
+          text = p.read_text()
+
+          # Add the WMA injection implementation.
+          marker = (
+              "$(WMA_SRC_DIR)/wlan_qct_wma_legacy.o\\\n"
+          )
+
+          addition = (
+              "$(WMA_SRC_DIR)/wlan_qct_wma_legacy.o \\\n"
+              "\t\t$(WMA_SRC_DIR)/wma_frame_inject.o"
+          )
+
+          if "$(WMA_SRC_DIR)/wma_frame_inject.o" not in text:
+              text = text.replace(
+                  marker,
+                  addition + "\n"
+              )
+
+          # Add HDD injection + validation implementations.
+          marker_hdd = (
+              "\t\t$(HDD_SRC_DIR)/wlan_hdd_wowl.o"
+          )
+
+          addition_hdd = (
+              "\t\t$(HDD_SRC_DIR)/wlan_hdd_wowl.o \\\n"
+              "\t\t$(HDD_SRC_DIR)/wlan_hdd_frame_inject.o \\\n"
+              "\t\t$(HDD_SRC_DIR)/wlan_hdd_frame_validate.o"
+          )
+
+          if "$(HDD_SRC_DIR)/wlan_hdd_frame_inject.o" not in text:
+              text = text.replace(
+                  marker_hdd,
+                  addition_hdd
+              )
+
+          p.write_text(text)
+          PY
+
+      - name: Add prototype feature define
+        run: |
+          cat > kernel/drivers/staging/qcacld-3.0/prototype-injection.mk <<'EOF'
+          cppflags-y += -DCONFIG_FEATURE_FRAME_INJECTION_SUPPORT
+          EOF
+
+          cat kernel/drivers/staging/qcacld-3.0/prototype-injection.mk
+
+      - name: Record modified Kbuild
+        run: |
+          mkdir -p report
+
+          {
+            echo "=== Modified HDD objects ==="
+            grep -n -A35 \
+              '^HDD_OBJS' \
+              kernel/drivers/staging/qcacld-3.0/Kbuild \
+              | head -n 60
+
+            echo
+            echo "=== Modified WMA objects ==="
+            grep -n -A25 \
+              '^WMA_OBJS' \
+              kernel/drivers/staging/qcacld-3.0/Kbuild \
+              | head -n 60
+
+            echo
+            echo "=== Injection symbols in source ==="
+            rg -n --text \
+              'wma_frame_inject|wlan_hdd_frame_inject|wlan_hdd_frame_validate|CONFIG_FEATURE_FRAME_INJECTION_SUPPORT' \
+              kernel/drivers/staging/qcacld-3.0 \
+              | head -n 1000 || true
+          } > report/modified-kbuild.txt
+
+      - name: Compile QCACLD3 in-tree
+        id: build-qcacld
+        continue-on-error: true
+        run: |
+          set -o pipefail
+
+          mkdir -p report
+
+          make -C kernel \
+            O="$PWD/out" \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            M=drivers/staging/qcacld-3.0 \
+            V=1 \
+            modules \
+            2>&1 | tee report/qcacld3-build.log
+
+      - name: Capture compiler diagnostics
+        if: always()
+        run: |
+          {
+            echo "=== Fatal errors ==="
+            grep -n -C 6 \
+              "fatal error" \
+              report/qcacld3-build.log || true
+
+            echo
+            echo "=== Compiler errors ==="
+            grep -n -C 5 \
+              "error:" \
+              report/qcacld3-build.log || true
+
+            echo
+            echo "=== Warnings ==="
+            grep -n -C 3 \
+              "warning:" \
+              report/qcacld3-build.log \
+              | head -n 500 || true
+
+            echo
+            echo "=== Undefined symbols ==="
+            grep -n -E \
+              "undefined|UNDEFINED" \
+              report/qcacld3-build.log || true
+
+            echo
+            echo "=== Missing headers ==="
+            grep -n \
+              "file not found" \
+              report/qcacld3-build.log || true
+          } > report/compiler-diagnostics.txt
+
+      - name: Find generated WLAN module
+        if: always()
+        run: |
+          {
+            echo "=== qca_cld3_wlan ==="
+
+            find kernel out \
+              -type f \
+              -name 'qca_cld3_wlan.ko' \
+              -print || true
+
+            echo
+            echo "=== wlan.ko ==="
+
+            find kernel out \
+              -type f \
+              -name 'wlan.ko' \
+              -print || true
+
+            echo
+            echo "=== All generated modules ==="
+
+            find kernel out \
+              -type f \
+              -name '*.ko' \
+              -print \
+              | head -n 300 || true
+          } > report/generated-modules.txt
+
+      - name: Check injection objects
+        if: always()
+        run: |
+          {
+            echo "=== Injection object files ==="
+
+            find kernel out \
+              -type f \
+              \( \
+                -name 'wma_frame_inject.o' \
+                -o -name 'wlan_hdd_frame_inject.o' \
+                -o -name 'wlan_hdd_frame_validate.o' \
+              \) \
+              -print || true
+          } > report/injection-objects.txt
+
+      - name: Check module symbols
+        if: always()
+        run: |
+          {
+            echo "=== Injection symbols ==="
+
+            for ko in $(find kernel out \
+              -type f \
+              -name '*.ko'); do
+
+              echo
+              echo "===== $ko ====="
+
+              llvm-nm -n "$ko" 2>/dev/null \
+                | grep -E \
+                  'wma_frame_inject|wlan_hdd_frame_inject|wlan_hdd_frame_validate' \
+                || true
+            done
+          } > report/injection-symbols.txt
+
+      - name: Final conclusion
+        if: always()
+        run: |
+          {
+            echo "=== QCACLD3 In-Tree Injection Prototype ==="
+            echo
+
+            if find kernel out \
+              -type f \
+              -name 'qca_cld3_wlan.ko' \
+              | grep -q .; then
+
+              echo "RESULT: QCACLD3 MODULE GENERATED"
+
+            elif find kernel out \
+              -type f \
+              -name 'wlan.ko' \
+              | grep -q .; then
+
+              echo "RESULT: WLAN MODULE GENERATED"
+
+            else
+
+              echo "RESULT: NO WLAN MODULE GENERATED"
+
+            fi
+
+            echo
+            echo "=== Injection objects ==="
+
+            find kernel out \
+              -type f \
+              \( \
+                -name 'wma_frame_inject.o' \
+                -o -name 'wlan_hdd_frame_inject.o' \
+                -o -name 'wlan_hdd_frame_validate.o' \
+              \) \
+              -print || true
+
+            echo
+            echo "The build used the integrated SM6225 QDF,"
+            echo "host-common and FW API trees."
+          } > report/CONCLUSION.txt
+
+      - name: Package report
+        if: always()
+        run: |
+          mkdir -p artifact
+          cp -r report artifact/
+
+          cd artifact
+          zip -r ../qcacld3-in-tree-injection-prototype.zip .
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcacld3-in-tree-injection-prototype
+          path: qcacld3-in-tree-injection-prototype.zip
+          if-no-files-found: error
