@@ -40,7 +40,7 @@ jobs:
             zip
 
       # ============================================================
-      # 2. Setup LLVM 14
+      # 2. Setup LLVM
       # ============================================================
       - name: Setup LLVM
         run: |
@@ -52,7 +52,7 @@ jobs:
           /usr/lib/llvm-14/bin/ld.lld --version
 
       # ============================================================
-      # 3. Checkout official LineageOS kernel
+      # 3. Checkout LineageOS SM6225 kernel
       # ============================================================
       - name: Checkout LineageOS SM6225 kernel
         uses: actions/checkout@v4
@@ -74,7 +74,7 @@ jobs:
           fetch-depth: 1
 
       # ============================================================
-      # 5. Checkout SM6225 common tree
+      # 5. Checkout common device tree
       # ============================================================
       - name: Checkout SM6225 common device tree
         uses: actions/checkout@v4
@@ -99,23 +99,12 @@ jobs:
 
           echo
           echo "========================================"
-          echo "cebu device revision"
-          echo "========================================"
-          git -C "$GITHUB_WORKSPACE/device/motorola/cebu" rev-parse HEAD
-
-          echo
-          echo "========================================"
-          echo "SM6225 common revision"
-          echo "========================================"
-          git -C "$GITHUB_WORKSPACE/device/motorola/sm6225-common" rev-parse HEAD
-
-          echo
-          echo "========================================"
-          echo "Checking required kernel files"
+          echo "Checking required files"
           echo "========================================"
 
           test -f arch/arm64/configs/vendor/bengal-perf_defconfig
           test -f scripts/kconfig/merge_config.sh
+
           test -f drivers/sensors/Kconfig
           test -f drivers/sensors/Makefile
           test -f drivers/sensors/sensors_class.c
@@ -123,21 +112,16 @@ jobs:
           echo "Required kernel files found."
 
           echo
-          echo "========================================"
-          echo "Checking sensors configuration"
-          echo "========================================"
-
-          grep -n "SENSORS_CLASS" drivers/sensors/Kconfig
-          grep -n "sensors_class" drivers/sensors/Makefile
+          echo "drivers/Makefile sensor entry:"
+          grep -n "CONFIG_SENSORS_SSC.*sensors/" drivers/Makefile || true
 
           echo
-          echo "========================================"
-          echo "Checking cebu BoardConfig"
-          echo "========================================"
+          echo "drivers/sensors/Makefile:"
+          cat drivers/sensors/Makefile
 
-          grep -n "cebu-default.config" \
-            "$GITHUB_WORKSPACE/device/motorola/cebu/BoardConfig.mk" \
-            || true
+          echo
+          echo "drivers/sensors/Kconfig:"
+          cat drivers/sensors/Kconfig
 
       # ============================================================
       # 7. Clean source
@@ -159,7 +143,7 @@ jobs:
           echo "Kernel source cleaned."
 
       # ============================================================
-      # 8. Locate cebu kernel config
+      # 8. Locate cebu configuration
       # ============================================================
       - name: Locate cebu kernel configuration
         run: |
@@ -244,13 +228,16 @@ jobs:
           CONFIG_RFKILL=y
 
           # ========================================================
-          # Motorola sensor class
+          # Motorola sensor framework
           #
-          # This is deliberately a module. The Motorola sensor
-          # drivers reference sensors_classdev_register() and
-          # sensors_classdev_unregister().
+          # drivers/Makefile only enters drivers/sensors/ when
+          # CONFIG_SENSORS_SSC is enabled.
+          #
+          # sensors_class itself is kept as a module because the
+          # Motorola vendor kernel loads sensors_class.ko.
           # ========================================================
 
+          CONFIG_SENSORS_SSC=y
           CONFIG_SENSORS_CLASS=m
 
           EOF
@@ -262,7 +249,7 @@ jobs:
           cat nethunter.config
 
       # ============================================================
-      # 10. Configure base Bengal kernel
+      # 10. Configure Bengal base
       # ============================================================
       - name: Configure base kernel
         working-directory: kernel
@@ -307,7 +294,7 @@ jobs:
             nethunter.config
 
       # ============================================================
-      # 13. Resolve Kconfig dependencies
+      # 13. Finalize Kconfig
       # ============================================================
       - name: Finalize configuration
         working-directory: kernel
@@ -323,7 +310,7 @@ jobs:
             olddefconfig
 
       # ============================================================
-      # 14. Verify final configuration
+      # 14. Verify configuration
       # ============================================================
       - name: Verify NetHunter configuration
         working-directory: kernel
@@ -421,9 +408,10 @@ jobs:
 
           echo
           echo "========================================"
-          echo "Motorola Sensors"
+          echo "Motorola sensors"
           echo "========================================"
 
+          check_y CONFIG_SENSORS_SSC
           check_m CONFIG_SENSORS_CLASS
 
           echo
@@ -439,7 +427,7 @@ jobs:
           echo "ALL REQUIRED CONFIGURATION OPTIONS PASSED."
 
       # ============================================================
-      # 15. Save final config
+      # 15. Save final configuration
       # ============================================================
       - name: Save final kernel config
         working-directory: kernel
@@ -451,22 +439,7 @@ jobs:
           echo "Final kernel configuration saved."
 
       # ============================================================
-      # 16. Clean source generated files
-      # ============================================================
-      - name: Clean source generated files
-        working-directory: kernel
-        run: |
-          set -e
-
-          rm -rf include/config
-          rm -rf include/generated
-          rm -rf arch/arm64/include/generated
-
-          echo "Source generated files cleaned."
-          echo "out/ preserved."
-
-      # ============================================================
-      # 17. Build kernel Image
+      # 16. Build kernel Image
       # ============================================================
       - name: Build kernel Image
         working-directory: kernel
@@ -483,7 +456,7 @@ jobs:
             Image
 
       # ============================================================
-      # 18. Build modules
+      # 17. Build modules
       # ============================================================
       - name: Build kernel modules
         working-directory: kernel
@@ -500,7 +473,7 @@ jobs:
             modules
 
       # ============================================================
-      # 19. Verify sensors_class.ko exists
+      # 18. Verify sensor module
       # ============================================================
       - name: Verify sensor module
         working-directory: kernel
@@ -518,19 +491,25 @@ jobs:
             echo
             echo "ERROR: sensors_class.ko was not produced."
             echo
-            echo "CONFIG_SENSORS_CLASS:"
-            grep "^CONFIG_SENSORS_CLASS=" out/.config || true
+            echo "Final sensor configuration:"
+            grep -E \
+              "^CONFIG_SENSORS_(SSC|CLASS)=" \
+              out/.config || true
             exit 1
           fi
 
           echo
-          echo "Found:"
+          echo "FOUND:"
           echo "$SENSOR_MODULE"
 
           ls -lh "$SENSOR_MODULE"
 
+          echo
+          echo "Module information:"
+          modinfo "$SENSOR_MODULE" 2>/dev/null || true
+
       # ============================================================
-      # 20. Collect artifacts
+      # 19. Collect artifacts
       # ============================================================
       - name: Collect artifacts
         working-directory: kernel
@@ -547,12 +526,12 @@ jobs:
             out/arch/arm64/boot/Image \
             "$GITHUB_WORKSPACE/artifact/Image"
 
-          # Final configuration
+          # Final kernel config
           cp \
             out/kernel.config \
             "$GITHUB_WORKSPACE/artifact/kernel.config"
 
-          # NetHunter fragment
+          # NetHunter config fragment
           cp \
             nethunter.config \
             "$GITHUB_WORKSPACE/artifact/nethunter.config"
@@ -579,23 +558,16 @@ jobs:
             | sort
 
           echo
-          echo "========================================"
-          echo "Kernel Image"
-          echo "========================================"
-
-          ls -lh \
-            "$GITHUB_WORKSPACE/artifact/Image"
+          echo "Kernel:"
+          ls -lh "$GITHUB_WORKSPACE/artifact/Image"
 
           echo
-          echo "========================================"
-          echo "Sensor module"
-          echo "========================================"
-
+          echo "Sensor module:"
           ls -lh \
             "$GITHUB_WORKSPACE/artifact/modules/vendor/lib/modules/sensors_class.ko"
 
       # ============================================================
-      # 21. Upload raw kernel artifact
+      # 20. Upload raw kernel artifact
       # ============================================================
       - name: Upload kernel artifact
         uses: actions/upload-artifact@v4
@@ -606,7 +578,7 @@ jobs:
           retention-days: 30
 
       # ============================================================
-      # 22. Clone AnyKernel3
+      # 21. Prepare AnyKernel3
       # ============================================================
       - name: Prepare AnyKernel3
         run: |
@@ -619,18 +591,19 @@ jobs:
             https://github.com/osm0sis/AnyKernel3.git \
             AnyKernel3
 
-          # Kernel image
+          # Kernel Image
           cp \
             "$GITHUB_WORKSPACE/artifact/Image" \
             AnyKernel3/Image
 
-          # Replace modules directory
+          # Remove existing modules
           rm -rf AnyKernel3/modules
 
+          # Create vendor module path
           mkdir -p \
             AnyKernel3/modules/vendor/lib/modules
 
-          # Sensor class module
+          # Install sensors_class.ko
           cp \
             "$GITHUB_WORKSPACE/artifact/modules/vendor/lib/modules/sensors_class.ko" \
             AnyKernel3/modules/vendor/lib/modules/sensors_class.ko
@@ -684,7 +657,7 @@ jobs:
             | sort
 
       # ============================================================
-      # 23. Build flashable ZIP
+      # 22. Build flashable ZIP
       # ============================================================
       - name: Build AnyKernel3 flashable ZIP
         run: |
@@ -701,20 +674,4 @@ jobs:
           cd "$GITHUB_WORKSPACE"
 
           echo
-          echo "========================================"
-          echo "Flashable ZIP"
-          echo "========================================"
-
-          ls -lh \
-            moto-g9-power-cebu-nethunter-flashable.zip
-
-      # ============================================================
-      # 24. Upload flashable ZIP
-      # ============================================================
-      - name: Upload flashable ZIP
-        uses: actions/upload-artifact@v4
-        with:
-          name: moto-g9-power-cebu-nethunter-flashable
-          path: moto-g9-power-cebu-nethunter-flashable.zip
-          if-no-files-found: error
-          retention-days: 30
+          echo "============================
