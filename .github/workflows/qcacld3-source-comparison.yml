@@ -1,0 +1,623 @@
+name: QCACLD3 Source Comparison
+
+on:
+  workflow_dispatch:
+
+jobs:
+  compare:
+    runs-on: ubuntu-22.04
+
+    steps:
+
+      # ============================================================
+      # 1. MOTOROLA QCACLD-3.0
+      # ============================================================
+
+      - name: Clone Motorola QCACLD3
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          mkdir -p vendor/qcom/opensource/wlan
+
+          git clone \
+            --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qcacld-3.0.git \
+            vendor/qcom/opensource/wlan/qcacld-3.0
+
+      # ============================================================
+      # 2. MOTOROLA HOST COMMON
+      # ============================================================
+
+      - name: Clone Motorola host common
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          git clone \
+            --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qca-wifi-host-cmn.git \
+            vendor/qcom/opensource/wlan/qca-wifi-host-cmn
+
+      # ============================================================
+      # 3. MOTOROLA FW API
+      # ============================================================
+
+      - name: Clone Motorola FW API
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          git clone \
+            --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-fw-api.git \
+            vendor/qcom/opensource/wlan/fw-api
+
+      # ============================================================
+      # 4. CLONE ONEPLUS 7 NETHUNTER REFERENCE
+      # ============================================================
+
+      - name: Clone OnePlus 7 NetHunter kernel
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          mkdir -p references
+
+          git clone \
+            --depth=1 \
+            --branch nethunter-lineage-23.2 \
+            https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git \
+            references/oneplus7
+
+          echo "OnePlus reference:"
+          git -C references/oneplus7 rev-parse HEAD
+
+      # ============================================================
+      # 5. CLONE XIAOMI MI A3 NETHUNTER REFERENCE
+      # ============================================================
+
+      - name: Clone Xiaomi Mi A3 NetHunter kernel
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          git clone \
+            --depth=1 \
+            --branch lineage-23.2 \
+            https://github.com/yesimxev/android_kernel_xiaomi_sm6125.git \
+            references/mi-a3
+
+          echo "Mi A3 reference:"
+          git -C references/mi-a3 rev-parse HEAD
+
+      # ============================================================
+      # 6. CLONE POCO X3 NFC REFERENCE
+      # ============================================================
+
+      - name: Clone Poco X3 NFC NetHunter kernel
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          git clone \
+            --depth=1 \
+            https://github.com/dr1408/kernel_xiaomi_surya_16.git \
+            references/poco-x3-nfc
+
+          echo "POCO reference:"
+          git -C references/poco-x3-nfc rev-parse HEAD
+
+      # ============================================================
+      # 7. DOWNLOAD KNOWN INJECTION PATCH
+      # ============================================================
+
+      - name: Download reference injection patch
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          mkdir -p patches
+
+          curl \
+            --location \
+            --fail \
+            --retry 5 \
+            --retry-delay 2 \
+            "https://raw.githubusercontent.com/Loukious/android_kernel_xiaomi_sm8150/patches/patches/nethunter/07_packet_injection.patch" \
+            --output patches/07_packet_injection.patch
+
+          test -s patches/07_packet_injection.patch
+
+          echo "Patch downloaded:"
+          ls -lh patches/07_packet_injection.patch
+
+          sha256sum patches/07_packet_injection.patch
+
+      # ============================================================
+      # 8. LOCATE QCACLD DIRECTORIES
+      # ============================================================
+
+      - name: Locate QCACLD source trees
+        shell: bash
+        run: |
+          set -u
+
+          {
+            echo "QCACLD SOURCE LOCATIONS"
+            echo "======================="
+            echo
+
+            for ROOT in \
+              vendor/qcom/opensource/wlan/qcacld-3.0 \
+              references/oneplus7 \
+              references/mi-a3 \
+              references/poco-x3-nfc
+            do
+              echo
+              echo "========== $ROOT =========="
+
+              find "$ROOT" \
+                -type d \
+                \( \
+                  -iname '*qcacld*' \
+                  -o -iname '*wlan*' \
+                \) \
+                2>/dev/null \
+                | head -300 \
+                || true
+            done
+
+          } > qcacld-locations.txt
+
+          cat qcacld-locations.txt
+
+      # ============================================================
+      # 9. SEARCH ALL REFERENCE TREES FOR INJECTION CODE
+      # ============================================================
+
+      - name: Search reference kernels for injection
+        shell: bash
+        run: |
+          set -u
+
+          REPORT="reference-injection-search.txt"
+
+          {
+            echo "QCACLD3 INJECTION IMPLEMENTATIONS"
+            echo "=================================="
+            echo
+
+            for ROOT in \
+              references/oneplus7 \
+              references/mi-a3 \
+              references/poco-x3-nfc
+            do
+
+              echo
+              echo "################################################"
+              echo "$ROOT"
+              echo "################################################"
+
+              grep -Rni \
+                --exclude-dir=.git \
+                -E \
+                'FRAME_INJECTION|FRAME_INJECT|wlan_hdd_frame_inject|wlan_hdd_frame_validate|wma_frame_inject|INJECTION' \
+                "$ROOT" \
+                2>/dev/null \
+                | head -3000 \
+                || true
+
+            done
+
+          } > "$REPORT"
+
+          cat "$REPORT"
+
+      # ============================================================
+      # 10. SEARCH MOTOROLA SOURCE
+      # ============================================================
+
+      - name: Search Motorola injection infrastructure
+        shell: bash
+        run: |
+          set -u
+
+          {
+            echo "MOTOROLA QCACLD3 INJECTION INFRASTRUCTURE"
+            echo "=========================================="
+            echo
+
+            grep -Rni \
+              --exclude-dir=.git \
+              -E \
+              'FRAME_INJECTION|FRAME_INJECT|wlan_hdd_frame_inject|wlan_hdd_frame_validate|wma_frame_inject|INJECTION|mgmt_tx|radiotap|monitor' \
+              vendor/qcom/opensource/wlan/qcacld-3.0 \
+              vendor/qcom/opensource/wlan/qca-wifi-host-cmn \
+              2>/dev/null \
+              | head -5000 \
+              || true
+
+          } > motorola-injection-search.txt
+
+          cat motorola-injection-search.txt
+
+      # ============================================================
+      # 11. EXTRACT IMPORTANT SYMBOLS FROM PATCH
+      # ============================================================
+
+      - name: Extract reference symbols
+        shell: bash
+        run: |
+          set -u
+
+          {
+            echo "SYMBOLS FROM NETHUNTER PATCH"
+            echo "============================"
+            echo
+
+            grep -E \
+              -o \
+              '\b(wlan_[A-Za-z0-9_]+|wma_[A-Za-z0-9_]+|ol_[A-Za-z0-9_]+|qdf_[A-Za-z0-9_]+|wmi_[A-Za-z0-9_]+)\b' \
+              patches/07_packet_injection.patch \
+              | sort -u \
+              | head -2000 \
+              || true
+
+          } > patch-symbols.txt
+
+          cat patch-symbols.txt
+
+      # ============================================================
+      # 12. MAP SYMBOLS INTO MOTOROLA
+      # ============================================================
+
+      - name: Map symbols into Motorola source
+        shell: bash
+        run: |
+          set -u
+
+          REPORT="motorola-symbol-map.txt"
+
+          {
+            echo "MOTOROLA SYMBOL MAP"
+            echo "==================="
+            echo
+
+            while IFS= read -r SYMBOL
+            do
+
+              [ -z "$SYMBOL" ] && continue
+
+              echo
+              echo "--------------------------------------------"
+              echo "$SYMBOL"
+              echo "--------------------------------------------"
+
+              grep -Rni \
+                --exclude-dir=.git \
+                -E \
+                "(^|[^A-Za-z0-9_])${SYMBOL}([^A-Za-z0-9_]|$)" \
+                vendor/qcom/opensource/wlan/qcacld-3.0 \
+                vendor/qcom/opensource/wlan/qca-wifi-host-cmn \
+                2>/dev/null \
+                | head -50 \
+                || echo "NOT FOUND"
+
+            done < patch-symbols.txt
+
+          } > "$REPORT"
+
+          cat "$REPORT"
+
+      # ============================================================
+      # 13. FIND REFERENCE IMPLEMENTATION FILES
+      # ============================================================
+
+      - name: Find injection implementation files
+        shell: bash
+        run: |
+          set -u
+
+          {
+            echo "REFERENCE INJECTION FILES"
+            echo "========================="
+            echo
+
+            for ROOT in \
+              references/oneplus7 \
+              references/mi-a3 \
+              references/poco-x3-nfc
+            do
+
+              echo
+              echo "========== $ROOT =========="
+
+              find "$ROOT" \
+                -type f \
+                \( \
+                  -iname '*inject*' \
+                  -o -iname '*monitor*' \
+                \) \
+                2>/dev/null \
+                | sort \
+                | head -1000
+
+            done
+
+          } > reference-injection-files.txt
+
+          cat reference-injection-files.txt
+
+      # ============================================================
+      # 14. SEARCH FOR MGMT TX PATHS
+      # ============================================================
+
+      - name: Compare management TX paths
+        shell: bash
+        run: |
+          set -u
+
+          {
+            echo "MANAGEMENT TX PATH COMPARISON"
+            echo "=============================="
+            echo
+
+            echo "=== MOTOROLA ==="
+
+            grep -Rni \
+              --exclude-dir=.git \
+              -E \
+              'cfg80211.*mgmt|mgmt.*tx|mgmt_tx|tx_mgmt|wlan_hdd_cfg80211' \
+              vendor/qcom/opensource/wlan/qcacld-3.0 \
+              vendor/qcom/opensource/wlan/qca-wifi-host-cmn \
+              2>/dev/null \
+              | head -3000 \
+              || true
+
+            echo
+            echo "=== ONEPLUS 7 ==="
+
+            grep -Rni \
+              --exclude-dir=.git \
+              -E \
+              'cfg80211.*mgmt|mgmt.*tx|mgmt_tx|tx_mgmt|wlan_hdd_cfg80211' \
+              references/oneplus7 \
+              2>/dev/null \
+              | head -3000 \
+              || true
+
+            echo
+            echo "=== MI A3 ==="
+
+            grep -Rni \
+              --exclude-dir=.git \
+              -E \
+              'cfg80211.*mgmt|mgmt.*tx|mgmt_tx|tx_mgmt|wlan_hdd_cfg80211' \
+              references/mi-a3 \
+              2>/dev/null \
+              | head -3000 \
+              || true
+
+            echo
+            echo "=== POCO X3 NFC ==="
+
+            grep -Rni \
+              --exclude-dir=.git \
+              -E \
+              'cfg80211.*mgmt|mgmt.*tx|mgmt_tx|tx_mgmt|wlan_hdd_cfg80211' \
+              references/poco-x3-nfc \
+              2>/dev/null \
+              | head -3000 \
+              || true
+
+          } > mgmt-tx-comparison.txt
+
+          cat mgmt-tx-comparison.txt
+
+      # ============================================================
+      # 15. COMPARE MONITOR MODE
+      # ============================================================
+
+      - name: Compare monitor mode implementation
+        shell: bash
+        run: |
+          set -u
+
+          {
+            echo "MONITOR MODE COMPARISON"
+            echo "======================="
+            echo
+
+            for ROOT in \
+              vendor/qcom/opensource/wlan/qcacld-3.0 \
+              references/oneplus7 \
+              references/mi-a3 \
+              references/poco-x3-nfc
+            do
+
+              echo
+              echo "################################################"
+              echo "$ROOT"
+              echo "################################################"
+
+              grep -Rni \
+                --exclude-dir=.git \
+                -E \
+                'monitor.*mode|mode.*monitor|QDF_GLOBAL_MONITOR_MODE|WLAN_HDD.*MONITOR|radiotap' \
+                "$ROOT" \
+                2>/dev/null \
+                | head -2000 \
+                || true
+
+            done
+
+          } > monitor-comparison.txt
+
+          cat monitor-comparison.txt
+
+      # ============================================================
+      # 16. COMPARE CONFIG OPTIONS
+      # ============================================================
+
+      - name: Compare configuration
+        shell: bash
+        run: |
+          set -u
+
+          {
+            echo "CONFIGURATION COMPARISON"
+            echo "========================"
+            echo
+
+            echo "=== PATCH ==="
+
+            grep -n \
+              -E \
+              'CONFIG_|FRAME_INJECTION|INJECTION' \
+              patches/07_packet_injection.patch \
+              | head -1500 \
+              || true
+
+            echo
+            echo "=== MOTOROLA ==="
+
+            grep -Rni \
+              --exclude-dir=.git \
+              -E \
+              'FRAME_INJECTION|INJECTION|NL80211_TESTMODE|TESTMODE|QCA_CLD_WLAN' \
+              vendor/qcom/opensource/wlan/qcacld-3.0 \
+              vendor/qcom/opensource/wlan/qca-wifi-host-cmn \
+              2>/dev/null \
+              | head -2000 \
+              || true
+
+          } > configuration-comparison.txt
+
+          cat configuration-comparison.txt
+
+      # ============================================================
+      # 17. CHECK GIT HISTORY WHERE AVAILABLE
+      # ============================================================
+
+      - name: Search Motorola repository history
+        shell: bash
+        run: |
+          set +e
+
+          cd vendor/qcom/opensource/wlan/qcacld-3.0
+
+          git fetch \
+            --unshallow \
+            2>/dev/null \
+            || true
+
+          {
+            echo "MOTOROLA QCACLD3 HISTORY"
+            echo "========================"
+            echo
+
+            git log \
+              --all \
+              --oneline \
+              --decorate \
+              --grep='inject\|injection\|monitor\|radiotap' \
+              -i \
+              | head -100
+
+            echo
+            echo "Current commit:"
+            git rev-parse HEAD
+
+          } > "$GITHUB_WORKSPACE/motorola-history.txt"
+
+          cat "$GITHUB_WORKSPACE/motorola-history.txt"
+
+      # ============================================================
+      # 18. CREATE SUMMARY
+      # ============================================================
+
+      - name: Create comparison summary
+        shell: bash
+        run: |
+          set -u
+
+          {
+            echo "Moto G9 Power cebu"
+            echo "QCACLD3 Injection Source Comparison"
+            echo "===================================="
+            echo
+
+            echo "Motorola QCACLD3:"
+            git -C vendor/qcom/opensource/wlan/qcacld-3.0 \
+              rev-parse HEAD
+
+            echo
+            echo "Motorola host common:"
+            git -C vendor/qcom/opensource/wlan/qca-wifi-host-cmn \
+              rev-parse HEAD
+
+            echo
+            echo "OnePlus reference:"
+            git -C references/oneplus7 \
+              rev-parse HEAD
+
+            echo
+            echo "Mi A3 reference:"
+            git -C references/mi-a3 \
+              rev-parse HEAD
+
+            echo
+            echo "POCO reference:"
+            git -C references/poco-x3-nfc \
+              rev-parse HEAD
+
+            echo
+            echo "The purpose of this workflow is source comparison."
+            echo "It does not modify the Motorola source."
+            echo "It does not build or flash a kernel."
+
+          } > COMPARISON-SUMMARY.txt
+
+          cat COMPARISON-SUMMARY.txt
+
+      # ============================================================
+      # 19. UPLOAD RESULTS
+      # ============================================================
+
+      - name: Upload comparison report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cebu-qcacld3-source-comparison
+          path: |
+            COMPARISON-SUMMARY.txt
+            qcacld-locations.txt
+            reference-injection-search.txt
+            motorola-injection-search.txt
+            patch-symbols.txt
+            motorola-symbol-map.txt
+            reference-injection-files.txt
+            mgmt-tx-comparison.txt
+            monitor-comparison.txt
+            configuration-comparison.txt
+            motorola-history.txt
+            patches/07_packet_injection.patch
+          if-no-files-found: error
+          retention-days: 14
+
+      # ============================================================
+      # 20. FINISH
+      # ============================================================
+
+      - name: Finish
+        shell: bash
+        run: |
+          echo
+          echo "=============================================="
+          echo "SOURCE COMPARISON COMPLETE"
+          echo "=============================================="
+          echo
+          echo "Artifact:"
+          echo "cebu-qcacld3-source-comparison"
+          echo
+          echo "Upload the artifact here."
