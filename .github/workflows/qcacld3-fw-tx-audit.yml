@@ -1,0 +1,545 @@
+name: QCACLD3 Firmware TX Audit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+
+    steps:
+
+      - name: Initialize report
+        if: always()
+        run: |
+          mkdir -p report
+          echo "Audit started" > report/status.txt
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git python3 zip unzip
+
+      - name: Clone Motorola QCACLD3
+        run: |
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qcacld-3.0.git \
+            motorola
+
+      - name: Clone OnePlus reference
+        run: |
+          git clone --depth=1 \
+            --branch nethunter-lineage-23.2 \
+            https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git \
+            oneplus
+
+      - name: Clone Xiaomi reference
+        run: |
+          git clone --depth=1 \
+            --branch lineage-23.2 \
+            https://github.com/yesimxev/android_kernel_xiaomi_sm6125.git \
+            xiaomi
+
+      - name: Record revisions
+        run: |
+          {
+            echo "=== MOTOROLA ==="
+            git -C motorola rev-parse HEAD
+            git -C motorola log -1 --oneline
+
+            echo
+            echo "=== ONEPLUS ==="
+            git -C oneplus rev-parse HEAD
+            git -C oneplus log -1 --oneline
+
+            echo
+            echo "=== XIAOMI ==="
+            git -C xiaomi rev-parse HEAD
+            git -C xiaomi log -1 --oneline
+          } > report/revisions.txt
+
+      - name: Locate WMA and WMI files
+        run: |
+          {
+            echo "=================================================="
+            echo "MOTOROLA WMA FILES"
+            echo "=================================================="
+
+            find motorola \
+              -type f \
+              \( -name 'wma*.c' -o -name 'wma*.h' \) \
+              | sort
+
+            echo
+            echo "=================================================="
+            echo "MOTOROLA WMI FILES"
+            echo "=================================================="
+
+            find motorola \
+              -type f \
+              \( -name 'wmi*.c' -o -name 'wmi*.h' \) \
+              | sort
+
+            echo
+            echo "=================================================="
+            echo "ONEPLUS INJECTION WMA FILES"
+            echo "=================================================="
+
+            find oneplus/drivers/staging/qcacld-3.0 \
+              -type f \
+              \( -name 'wma_frame_inject.c' -o -name 'wma_frame_inject.h' \) \
+              | sort
+
+            echo
+            echo "=================================================="
+            echo "XIAOMI INJECTION WMA FILES"
+            echo "=================================================="
+
+            find xiaomi/drivers/staging/qcacld-3.0 \
+              -type f \
+              \( -name 'wma_frame_inject.c' -o -name 'wma_frame_inject.h' \) \
+              | sort
+
+          } > report/file-inventory.txt
+
+      - name: Analyze WMA injection dependencies
+        run: |
+          cat > analyze_tx.py <<'PY'
+          import re
+          from pathlib import Path
+
+          MOTOROLA = Path("motorola")
+          ONEPLUS = Path("oneplus/drivers/staging/qcacld-3.0")
+          XIAOMI = Path("xiaomi/drivers/staging/qcacld-3.0")
+          REPORT = Path("report")
+
+          REFERENCE_FILES = [
+              "core/wma/inc/wma_frame_inject.h",
+              "core/wma/src/wma_frame_inject.c",
+          ]
+
+          def read(path):
+              try:
+                  return path.read_text(errors="ignore")
+              except Exception:
+                  return ""
+
+          def source_files(root):
+              for p in root.rglob("*"):
+                  if p.is_file() and p.suffix in (".c", ".h"):
+                      yield p
+
+          def locations(root, symbol):
+              result = []
+
+              for p in source_files(root):
+                  try:
+                      text = p.read_text(errors="ignore")
+                  except Exception:
+                      continue
+
+                  if symbol in text:
+                      result.append(str(p))
+
+              return sorted(set(result))
+
+          def includes(text):
+              return sorted(set(
+                  re.findall(
+                      r'^\s*#\s*include\s*[<"]([^>"]+)[>"]',
+                      text,
+                      re.MULTILINE
+                  )
+              ))
+
+          def functions(text):
+              pattern = re.compile(
+                  r'\b'
+                  r'(?:static\s+)?'
+                  r'(?:inline\s+)?'
+                  r'(?:const\s+)?'
+                  r'[A-Za-z_][A-Za-z0-9_\s\*]*'
+                  r'\s+'
+                  r'([A-Za-z_][A-Za-z0-9_]*)'
+                  r'\s*\([^;{}]*\)\s*\{',
+                  re.MULTILINE
+              )
+
+              return sorted(set(
+                  m.group(1) for m in pattern.finditer(text)
+              ))
+
+          def calls(text):
+              names = re.findall(
+                  r'\b([A-Za-z_][A-Za-z0-9_]*)\s*\(',
+                  text
+              )
+
+              excluded = {
+                  "if", "else", "for", "while", "switch",
+                  "return", "sizeof", "typeof", "do", "case"
+              }
+
+              return sorted(set(
+                  x for x in names
+                  if x not in excluded
+              ))
+
+          reference_calls = set()
+          reference_functions = set()
+
+          with open(
+              REPORT / "wma-injection-analysis.txt",
+              "w"
+          ) as out:
+
+              for relative in REFERENCE_FILES:
+
+                  path = ONEPLUS / relative
+
+                  out.write("\n")
+                  out.write("=" * 70 + "\n")
+                  out.write(relative + "\n")
+                  out.write("=" * 70 + "\n")
+
+                  if not path.exists():
+                      out.write("MISSING FROM ONEPLUS\n")
+                      continue
+
+                  text = read(path)
+
+                  inc = includes(text)
+                  defs = functions(text)
+                  used = calls(text)
+
+                  reference_functions.update(defs)
+                  reference_calls.update(used)
+
+                  out.write("\nINCLUDES:\n")
+                  for x in inc:
+                      out.write(x + "\n")
+
+                  out.write("\nFUNCTION DEFINITIONS:\n")
+                  for x in defs:
+                      out.write(x + "\n")
+
+                  out.write("\nFUNCTION CALLS:\n")
+                  for x in used:
+                      out.write(x + "\n")
+
+          # Focus on APIs that matter to the TX/WMI path.
+          important = sorted(
+              x for x in reference_calls
+              if (
+                  x.startswith("wma_")
+                  or x.startswith("wmi_")
+                  or x.startswith("WMI_")
+                  or x.startswith("qdf_")
+                  or x.startswith("qca_")
+                  or x.startswith("cdp_")
+                  or "tx" in x.lower()
+                  or "inject" in x.lower()
+                  or "frame" in x.lower()
+                  or "vdev" in x.lower()
+              )
+          )
+
+          with open(
+              REPORT / "motorola-tx-api-availability.txt",
+              "w"
+          ) as out:
+
+              out.write("=" * 70 + "\n")
+              out.write("MOTOROLA TX/WMI API AVAILABILITY\n")
+              out.write("=" * 70 + "\n\n")
+
+              for symbol in important:
+
+                  found = locations(MOTOROLA, symbol)
+
+                  if found:
+                      out.write("PRESENT  " + symbol + "\n")
+
+                      for p in found[:15]:
+                          out.write("    " + p + "\n")
+                  else:
+                      out.write("MISSING  " + symbol + "\n")
+
+          # Extract WMI/TX identifiers specifically.
+          wmi_pattern = re.compile(
+              r'\b(?:WMI|wmi)_[A-Za-z0-9_]*'
+              r'(?:TX|tx|MGMT|mgmt|INJECT|inject|FRAME|frame|VDEV|vdev)'
+              r'[A-Za-z0-9_]*\b'
+          )
+
+          wmi_symbols = set()
+
+          for relative in REFERENCE_FILES:
+              text = read(ONEPLUS / relative)
+              wmi_symbols.update(wmi_pattern.findall(text))
+
+          with open(
+              REPORT / "wmi-tx-availability.txt",
+              "w"
+          ) as out:
+
+              out.write("=" * 70 + "\n")
+              out.write("REFERENCE WMI/TX IDENTIFIERS\n")
+              out.write("=" * 70 + "\n\n")
+
+              for symbol in sorted(wmi_symbols):
+
+                  found = locations(MOTOROLA, symbol)
+
+                  if found:
+                      out.write("PRESENT  " + symbol + "\n")
+
+                      for p in found[:15]:
+                          out.write("    " + p + "\n")
+                  else:
+                      out.write("MISSING  " + symbol + "\n")
+
+          # Search Motorola's actual management TX implementation.
+          search_terms = [
+              "mgmt_tx",
+              "mgmt_tx_send",
+              "wma_mgmt",
+              "wma_send",
+              "wma_tx",
+              "tx_mgmt",
+              "WMI_MGMT",
+              "WMI_TX",
+              "wmi_unified"
+          ]
+
+          with open(
+              REPORT / "motorola-management-tx.txt",
+              "w"
+          ) as out:
+
+              out.write("=" * 70 + "\n")
+              out.write("MOTOROLA MANAGEMENT/TX IMPLEMENTATION\n")
+              out.write("=" * 70 + "\n\n")
+
+              for term in search_terms:
+
+                  out.write("\n--- " + term + " ---\n")
+
+                  for p in source_files(MOTOROLA):
+
+                      try:
+                          text = p.read_text(errors="ignore")
+                      except Exception:
+                          continue
+
+                      for number, line in enumerate(
+                          text.splitlines(),
+                          1
+                      ):
+
+                          if term in line:
+                              out.write(
+                                  f"{p}:{number}:{line.strip()}\n"
+                              )
+
+          # Structures referenced by WMA injection.
+          struct_pattern = re.compile(
+              r'\bstruct\s+([A-Za-z_][A-Za-z0-9_]*)'
+          )
+
+          structures = set()
+
+          for relative in REFERENCE_FILES:
+
+              text = read(ONEPLUS / relative)
+
+              for match in struct_pattern.finditer(text):
+
+                  name = match.group(1)
+
+                  if any(
+                      word in name.lower()
+                      for word in (
+                          "tx",
+                          "frame",
+                          "inject",
+                          "wma",
+                          "vdev",
+                          "mgmt"
+                      )
+                  ):
+                      structures.add(name)
+
+          with open(
+              REPORT / "tx-structures.txt",
+              "w"
+          ) as out:
+
+              out.write("=" * 70 + "\n")
+              out.write("REFERENCE TX STRUCTURES\n")
+              out.write("=" * 70 + "\n\n")
+
+              for structure in sorted(structures):
+
+                  found = locations(MOTOROLA, structure)
+
+                  if found:
+                      out.write("PRESENT  " + structure + "\n")
+
+                      for p in found[:15]:
+                          out.write("    " + p + "\n")
+                  else:
+                      out.write("MISSING  " + structure + "\n")
+
+          # Produce summary.
+          api_text = (
+              REPORT / "motorola-tx-api-availability.txt"
+          ).read_text()
+
+          present = sum(
+              1 for line in api_text.splitlines()
+              if line.startswith("PRESENT ")
+          )
+
+          missing = sum(
+              1 for line in api_text.splitlines()
+              if line.startswith("MISSING ")
+          )
+
+          with open(
+              REPORT / "FINAL-RESULT.txt",
+              "w"
+          ) as out:
+
+              out.write("QCACLD3 FIRMWARE TX AUDIT\n")
+              out.write("=========================\n\n")
+              out.write(
+                  "Target: Motorola Moto G9 Power / cebu\n"
+              )
+              out.write(
+                  "Platform: Qualcomm SM6225\n"
+              )
+              out.write(
+                  "Kernel generation: Linux 4.19\n\n"
+              )
+
+              out.write(
+                  "Reference: OnePlus 7 NetHunter\n"
+              )
+              out.write(
+                  "Reference: Xiaomi Mi A3 NetHunter\n\n"
+              )
+
+              out.write(
+                  "Reference TX/WMI APIs found in Motorola: "
+                  + str(present) + "\n"
+              )
+
+              out.write(
+                  "Reference TX/WMI APIs not found: "
+                  + str(missing) + "\n\n"
+              )
+
+              out.write(
+                  "This is a source compatibility audit only.\n"
+              )
+
+              out.write(
+                  "It does not establish firmware support or guarantee "
+                  "packet transmission.\n"
+              )
+
+          print(
+              (REPORT / "FINAL-RESULT.txt").read_text()
+          )
+          PY
+
+          python3 analyze_tx.py
+
+      - name: Build complete report
+        if: always()
+        run: |
+          {
+            echo "============================================================"
+            echo "QCACLD3 FIRMWARE TX AUDIT"
+            echo "============================================================"
+            echo
+
+            echo "=== STATUS ==="
+            cat report/status.txt || true
+
+            echo
+            echo "=== REVISIONS ==="
+            cat report/revisions.txt || true
+
+            echo
+            echo "=== FILE INVENTORY ==="
+            cat report/file-inventory.txt || true
+
+            echo
+            echo "=== FINAL RESULT ==="
+            cat report/FINAL-RESULT.txt || true
+
+            echo
+            echo "=== WMA INJECTION ANALYSIS ==="
+            cat report/wma-injection-analysis.txt || true
+
+            echo
+            echo "=== MOTOROLA TX API AVAILABILITY ==="
+            cat report/motorola-tx-api-availability.txt || true
+
+            echo
+            echo "=== WMI/TX AVAILABILITY ==="
+            cat report/wmi-tx-availability.txt || true
+
+            echo
+            echo "=== MOTOROLA MANAGEMENT TX ==="
+            cat report/motorola-management-tx.txt || true
+
+            echo
+            echo "=== TX STRUCTURES ==="
+            cat report/tx-structures.txt || true
+
+          } > report/COMPLETE-FW-TX-AUDIT.txt
+
+      - name: Update status
+        if: always()
+        run: |
+          echo "Audit processing finished." >> report/status.txt
+          date -u >> report/status.txt
+
+      - name: Package report
+        if: always()
+        run: |
+          zip -r qcacld3-fw-tx-audit.zip report
+          unzip -t qcacld3-fw-tx-audit.zip
+
+      - name: Upload report directory
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcacld3-fw-tx-audit-report
+          path: report/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload report ZIP
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcacld3-fw-tx-audit-zip
+          path: qcacld3-fw-tx-audit.zip
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Final status
+        if: always()
+        run: |
+          echo "=================================================="
+          echo "QCACLD3 FIRMWARE TX AUDIT FINISHED"
+          echo "=================================================="
+          find report -type f | sort
+          ls -lh qcacld3-fw-tx-audit.zip || true
