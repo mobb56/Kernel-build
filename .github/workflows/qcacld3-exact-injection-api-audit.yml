@@ -67,8 +67,6 @@ jobs:
               Path("report/reference/xiaomi-wma_frame_inject.c")
           ]
 
-          all_calls = {}
-
           ignore = {
               "if",
               "for",
@@ -79,8 +77,13 @@ jobs:
               "do"
           }
 
+          all_calls = {}
+
           for path in files:
-              source = path.read_text(errors="ignore")
+              source = path.read_text(
+                  encoding="utf-8",
+                  errors="ignore"
+              )
 
               calls = re.findall(
                   r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(",
@@ -88,21 +91,29 @@ jobs:
               )
 
               calls = sorted(
-                  set(x for x in calls if x not in ignore)
+                  set(
+                      x for x in calls
+                      if x not in ignore
+                  )
               )
 
               all_calls[path.name] = calls
 
-              output = path.stem + "-calls.txt"
-
               Path(
-                  "report/comparison/" + output
+                  "report/comparison/" +
+                  path.stem +
+                  "-calls.txt"
               ).write_text(
                   "\n".join(calls) + "\n"
               )
 
-          oneplus = set(all_calls[files[0].name])
-          xiaomi = set(all_calls[files[1].name])
+          oneplus = set(
+              all_calls[files[0].name]
+          )
+
+          xiaomi = set(
+              all_calls[files[1].name]
+          )
 
           common = sorted(oneplus & xiaomi)
           oneplus_only = sorted(oneplus - xiaomi)
@@ -110,8 +121,12 @@ jobs:
 
           lines = []
 
-          lines.append("COMMON REFERENCE INJECTION CALLS")
-          lines.append("================================")
+          lines.append(
+              "COMMON REFERENCE INJECTION CALLS"
+          )
+          lines.append(
+              "================================"
+          )
           lines.extend(common)
 
           lines.append("")
@@ -140,7 +155,10 @@ jobs:
 
           source = Path(
               "report/comparison/reference-call-set.txt"
-          ).read_text(errors="ignore")
+          ).read_text(
+              encoding="utf-8",
+              errors="ignore"
+          )
 
           common_section = source.split(
               "ONEPLUS ONLY",
@@ -174,12 +192,19 @@ jobs:
                   [
                       "rg",
                       "-n",
+                      "--text",
                       "--fixed-strings",
                       symbol,
                       "motorola"
                   ],
-                  capture_output=True,
-                  text=True
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.PIPE,
+                  text=False
+              )
+
+              stdout = result.stdout.decode(
+                  "utf-8",
+                  errors="ignore"
               )
 
               if result.returncode == 0:
@@ -187,16 +212,18 @@ jobs:
                       "[PRESENT] " + symbol
                   )
 
-                  for line in result.stdout.splitlines()[:8]:
-                      results.append("  " + line)
-
+                  for line in stdout.splitlines()[:8]:
+                      results.append(
+                          "  " + line
+                      )
               else:
                   results.append(
                       "[MISSING] " + symbol
                   )
 
           Path(
-              "report/comparison/motorola-call-compatibility.txt"
+              "report/comparison/" +
+              "motorola-call-compatibility.txt"
           ).write_text(
               "\n".join(results) + "\n"
           )
@@ -204,6 +231,9 @@ jobs:
           print(
               "Reference calls checked:",
               len(symbols)
+          )
+          print(
+              "Compatibility report generated successfully."
           )
           PY
 
@@ -222,7 +252,10 @@ jobs:
           identifiers = set()
 
           for path in files:
-              source = path.read_text(errors="ignore")
+              source = path.read_text(
+                  encoding="utf-8",
+                  errors="ignore"
+              )
 
               found = re.findall(
                   r"\b(?:WMI|wmi|WMA|wma)_[A-Za-z0-9_]+\b",
@@ -238,12 +271,19 @@ jobs:
                   [
                       "rg",
                       "-n",
+                      "--text",
                       "--fixed-strings",
                       symbol,
                       "motorola"
                   ],
-                  capture_output=True,
-                  text=True
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.PIPE,
+                  text=False
+              )
+
+              stdout = result.stdout.decode(
+                  "utf-8",
+                  errors="ignore"
               )
 
               if result.returncode == 0:
@@ -251,16 +291,18 @@ jobs:
                       "[PRESENT] " + symbol
                   )
 
-                  for line in result.stdout.splitlines()[:8]:
-                      results.append("  " + line)
-
+                  for line in stdout.splitlines()[:8]:
+                      results.append(
+                          "  " + line
+                      )
               else:
                   results.append(
                       "[MISSING] " + symbol
                   )
 
           Path(
-              "report/comparison/exact-wmi-identifiers.txt"
+              "report/comparison/" +
+              "exact-wmi-identifiers.txt"
           ).write_text(
               "\n".join(results) + "\n"
           )
@@ -275,14 +317,16 @@ jobs:
         run: |
           {
             echo "===== ONEPLUS WMA FRAME INJECTION ====="
-            rg -n -C 8 \
+
+            rg -n -C 8 --text \
               "wmi_|WMI_|wma_|WMA_|tx_|TX_|mgmt_|MGMT_|vdev_|VDEV_" \
               report/reference/oneplus-wma_frame_inject.c \
               || true
 
             echo
             echo "===== XIAOMI WMA FRAME INJECTION ====="
-            rg -n -C 8 \
+
+            rg -n -C 8 --text \
               "wmi_|WMI_|wma_|WMA_|tx_|TX_|mgmt_|MGMT_|vdev_|VDEV_" \
               report/reference/xiaomi-wma_frame_inject.c \
               || true
@@ -293,21 +337,24 @@ jobs:
         run: |
           {
             echo "===== wlan_hdd_mgmt_tx ====="
-            rg -n -C 60 \
+
+            rg -n -C 60 --text \
               "wlan_hdd_mgmt_tx|__wlan_hdd_mgmt_tx" \
               motorola \
               || true
 
             echo
             echo "===== WMA MANAGEMENT TX ====="
-            rg -n -C 60 \
+
+            rg -n -C 60 --text \
               "wma_mgmt_tx" \
               motorola \
               || true
 
             echo
             echo "===== WMI MANAGEMENT TX ====="
-            rg -n -C 60 \
+
+            rg -n -C 60 --text \
               "wmi_mgmt_unified_cmd_send" \
               motorola \
               || true
@@ -319,7 +366,7 @@ jobs:
           {
             echo "===== MGMT TX DEFINITIONS ====="
 
-            rg -n -C 12 \
+            rg -n -C 12 --text \
               "MGMT_TX|MGMT.*TX|mgmt_tx" \
               motorola \
               || true
@@ -327,7 +374,7 @@ jobs:
             echo
             echo "===== TX COMPLETION DEFINITIONS ====="
 
-            rg -n -C 12 \
+            rg -n -C 12 --text \
               "TX.*COMP|COMP.*TX|completion.*tx|tx.*completion" \
               motorola \
               || true
@@ -335,7 +382,7 @@ jobs:
             echo
             echo "===== VDEV DEFINITIONS ====="
 
-            rg -n -C 8 \
+            rg -n -C 8 --text \
               "WMI_VDEV_TYPE_MONITOR|vdev_create|vdev_start|vdev_stop|vdev_delete" \
               motorola \
               || true
@@ -347,7 +394,7 @@ jobs:
           {
             echo "===== ONEPLUS STRUCTURES ====="
 
-            rg -n -C 12 \
+            rg -n -C 12 --text \
               "struct .*mgmt.*tx|struct .*tx.*mgmt|mgmt_tx.*param|tx.*mgmt.*param" \
               oneplus/drivers/staging/qcacld-3.0 \
               || true
@@ -355,7 +402,7 @@ jobs:
             echo
             echo "===== XIAOMI STRUCTURES ====="
 
-            rg -n -C 12 \
+            rg -n -C 12 --text \
               "struct .*mgmt.*tx|struct .*tx.*mgmt|mgmt_tx.*param|tx.*mgmt.*param" \
               xiaomi/drivers/staging/qcacld-3.0 \
               || true
@@ -363,7 +410,7 @@ jobs:
             echo
             echo "===== MOTOROLA STRUCTURES ====="
 
-            rg -n -C 12 \
+            rg -n -C 12 --text \
               "struct .*mgmt.*tx|struct .*tx.*mgmt|mgmt_tx.*param|tx.*mgmt.*param" \
               motorola \
               || true
@@ -384,12 +431,20 @@ jobs:
           from pathlib import Path
 
           calls = Path(
-              "report/comparison/motorola-call-compatibility.txt"
-          ).read_text(errors="ignore")
+              "report/comparison/" +
+              "motorola-call-compatibility.txt"
+          ).read_text(
+              encoding="utf-8",
+              errors="ignore"
+          )
 
           wmi = Path(
-              "report/comparison/exact-wmi-identifiers.txt"
-          ).read_text(errors="ignore")
+              "report/comparison/" +
+              "exact-wmi-identifiers.txt"
+          ).read_text(
+              encoding="utf-8",
+              errors="ignore"
+          )
 
           present_calls = calls.count("[PRESENT]")
           missing_calls = calls.count("[MISSING]")
@@ -421,10 +476,9 @@ jobs:
               "It does not modify firmware.",
               "It does not flash the phone.",
               "",
-              "A matching kernel API does not prove that the",
-              "Moto G9 Power firmware supports actual frame injection.",
+              "Matching kernel APIs do not prove firmware support.",
               "",
-              "The source-port decision must therefore consider:",
+              "The source-port decision must consider:",
               "1. WMI command compatibility.",
               "2. TX structure compatibility.",
               "3. Completion-event compatibility.",
