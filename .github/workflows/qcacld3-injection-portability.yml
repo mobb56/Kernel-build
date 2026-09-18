@@ -1,0 +1,552 @@
+name: QCACLD3 Injection Portability Audit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+
+      # ============================================================
+      # 1. DEPENDENCIES
+      # ============================================================
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git ripgrep diffutils
+
+      # ============================================================
+      # 2. PREPARE
+      # ============================================================
+
+      - name: Prepare workspace
+        run: |
+          mkdir -p results
+          mkdir -p results/motorola
+          mkdir -p results/oneplus
+          mkdir -p results/xiaomi
+          mkdir -p results/comparison
+          mkdir -p results/patches
+
+      # ============================================================
+      # 3. MOTOROLA QCACLD3
+      # ============================================================
+
+      - name: Clone Motorola QCACLD3
+        run: |
+          git clone \
+            --filter=blob:none \
+            --no-single-branch \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qcacld-3.0.git \
+            motorola-qcacld3
+
+          cd motorola-qcacld3
+
+          git fetch origin --prune --tags
+
+          echo "Motorola HEAD:"
+          git rev-parse HEAD
+
+          git rev-list --all --count \
+            > ../results/motorola/commit-count.txt
+
+      # ============================================================
+      # 4. ONEPLUS 7 QCACLD3 INJECTION KERNEL
+      # ============================================================
+
+      - name: Clone OnePlus 7 reference
+        run: |
+          git clone \
+            --filter=blob:none \
+            --branch nethunter-lineage-23.2 \
+            https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git \
+            oneplus7
+
+          cd oneplus7
+
+          echo "OnePlus 7 HEAD:"
+          git rev-parse HEAD
+
+          git rev-list --all --count \
+            > ../results/oneplus/commit-count.txt
+
+      # ============================================================
+      # 5. XIAOMI MI A3 QCACLD3 INJECTION KERNEL
+      # ============================================================
+
+      - name: Clone Xiaomi Mi A3 reference
+        run: |
+          git clone \
+            --filter=blob:none \
+            --branch lineage-23.2 \
+            https://github.com/yesimxev/android_kernel_xiaomi_sm6125.git \
+            xiaomi-a3
+
+          cd xiaomi-a3
+
+          echo "Xiaomi Mi A3 HEAD:"
+          git rev-parse HEAD
+
+          git rev-list --all --count \
+            > ../results/xiaomi/commit-count.txt
+
+      # ============================================================
+      # 6. FIND INJECTION FILES IN ALL THREE TREES
+      # ============================================================
+
+      - name: Inventory injection files
+        shell: bash
+        run: |
+          set +e
+
+          for TREE in \
+            motorola-qcacld3 \
+            oneplus7 \
+            xiaomi-a3
+          do
+
+            echo
+            echo "======================================"
+            echo "$TREE"
+            echo "======================================"
+
+            git -C "$TREE" ls-tree \
+              -r \
+              --name-only \
+              HEAD \
+              | grep -Ei \
+                'frame.?inject|frame.?validate|injection|pkt.?inject|radiotap|pkt.?capture' \
+              | sort \
+              > "results/${TREE}-injection-files.txt"
+
+          done
+
+      # ============================================================
+      # 7. FIND KEY INJECTION SYMBOLS
+      # ============================================================
+
+      - name: Search injection symbols
+        shell: bash
+        run: |
+          set +e
+
+          for TREE in \
+            motorola-qcacld3 \
+            oneplus7 \
+            xiaomi-a3
+          do
+
+            {
+              echo "======================================"
+              echo "$TREE"
+              echo "======================================"
+
+              git -C "$TREE" grep -n \
+                -E \
+                'wlan_hdd_frame_inject|wlan_hdd_frame_validate|wlan_hdd_inject_security|wma_frame_inject|wma_init_injection_queue|wma_queue_injection_frame|wma_send_injection_frame_to_fw|FRAME_INJECTION_SUPPORT' \
+                HEAD \
+                -- '*.c' '*.h' 'Kconfig' 'Kbuild' \
+                || true
+
+            } > "results/${TREE}-injection-symbols.txt"
+
+          done
+
+      # ============================================================
+      # 8. FIND INJECTION CONFIGURATION
+      # ============================================================
+
+      - name: Compare injection configuration
+        shell: bash
+        run: |
+          set +e
+
+          for TREE in \
+            motorola-qcacld3 \
+            oneplus7 \
+            xiaomi-a3
+          do
+
+            {
+              echo "======================================"
+              echo "$TREE CONFIG"
+              echo "======================================"
+
+              git -C "$TREE" grep -n \
+                -E \
+                'FRAME_INJECTION|INJECTION_SUPPORT|QCA_CLD_WLAN|QCACLD' \
+                HEAD \
+                -- 'Kconfig*' '*defconfig' '*.config' \
+                || true
+
+            } > "results/${TREE}-config.txt"
+
+          done
+
+      # ============================================================
+      # 9. FIND INJECTION-RELATED COMMITS
+      # ============================================================
+
+      - name: Find injection commits
+        shell: bash
+        run: |
+          set +e
+
+          for TREE in \
+            oneplus7 \
+            xiaomi-a3
+          do
+
+            git -C "$TREE" log \
+              --all \
+              --date=short \
+              --format='%H|%ad|%s' \
+              --regexp-ignore-case \
+              --grep='injection' \
+              --grep='frame inject' \
+              --grep='packet inject' \
+              --grep='qcacld' \
+              | head -300 \
+              > "results/${TREE}-injection-commits.txt"
+
+          done
+
+          git -C motorola-qcacld3 log \
+            --all \
+            --date=short \
+            --format='%H|%ad|%s' \
+            --regexp-ignore-case \
+            --grep='injection' \
+            --grep='frame inject' \
+            --grep='packet inject' \
+            | head -300 \
+            > results/motorola/injection-commits.txt
+
+      # ============================================================
+      # 10. LOCATE THE ACTUAL INJECTION IMPLEMENTATION
+      # ============================================================
+
+      - name: Extract reference injection source
+        shell: bash
+        run: |
+          set +e
+
+          for TREE in \
+            oneplus7 \
+            xiaomi-a3
+          do
+
+            mkdir -p "results/patches/$TREE"
+
+            git -C "$TREE" ls-tree \
+              -r \
+              --name-only \
+              HEAD \
+              | grep -Ei \
+                'wlan_hdd_frame_inject|wlan_hdd_frame_validate|wlan_hdd_inject_security|wma_frame_inject' \
+              | sort \
+              > "results/patches/$TREE/injection-source-files.txt"
+
+          done
+
+      # ============================================================
+      # 11. COMPARE THE FILE LISTS
+      # ============================================================
+
+      - name: Compare Motorola against references
+        shell: bash
+        run: |
+          set +e
+
+          git -C motorola-qcacld3 ls-tree \
+            -r \
+            --name-only \
+            HEAD \
+            | sort \
+            > /tmp/motorola-files.txt
+
+          git -C oneplus7 ls-tree \
+            -r \
+            --name-only \
+            HEAD \
+            | sort \
+            > /tmp/oneplus-files.txt
+
+          git -C xiaomi-a3 ls-tree \
+            -r \
+            --name-only \
+            HEAD \
+            | sort \
+            > /tmp/xiaomi-files.txt
+
+          # Files that both working reference kernels have
+          comm -12 \
+            /tmp/oneplus-files.txt \
+            /tmp/xiaomi-files.txt \
+            > results/comparison/common-reference-files.txt
+
+          # Injection-specific common files
+          grep -Ei \
+            'frame.?inject|frame.?validate|injection|wma_frame_inject' \
+            results/comparison/common-reference-files.txt \
+            > results/comparison/common-injection-files.txt \
+            || true
+
+          # Which common injection files are missing from Motorola?
+          while IFS= read -r FILE; do
+
+            [ -z "$FILE" ] && continue
+
+            if ! grep -Fxq "$FILE" /tmp/motorola-files.txt; then
+              echo "$FILE"
+            fi
+
+          done < results/comparison/common-injection-files.txt \
+            > results/comparison/injection-files-missing-from-motorola.txt
+
+      # ============================================================
+      # 12. COMPARE KEY FILE CONTENT
+      # ============================================================
+
+      - name: Compare injection source content
+        shell: bash
+        run: |
+          set +e
+
+          mkdir -p results/comparison/source-diffs
+
+          while IFS= read -r FILE; do
+
+            [ -z "$FILE" ] && continue
+
+            SAFE=$(echo "$FILE" | tr '/' '_')
+
+            # OnePlus reference
+            git -C oneplus7 show \
+              "HEAD:$FILE" \
+              > /tmp/oneplus-source \
+              2>/dev/null
+
+            if [ "$?" -ne 0 ]; then
+              continue
+            fi
+
+            # Xiaomi reference
+            git -C xiaomi-a3 show \
+              "HEAD:$FILE" \
+              > /tmp/xiaomi-source \
+              2>/dev/null
+
+            if [ "$?" -ne 0 ]; then
+              continue
+            fi
+
+            diff -u \
+              /tmp/oneplus-source \
+              /tmp/xiaomi-source \
+              > "results/comparison/source-diffs/${SAFE}.oneplus-vs-xiaomi.diff" \
+              || true
+
+          done < results/comparison/common-injection-files.txt
+
+      # ============================================================
+      # 13. IDENTIFY SHARED INJECTION API
+      # ============================================================
+
+      - name: Analyze shared injection API
+        shell: bash
+        run: |
+          set +e
+
+          {
+            echo "=========================================="
+            echo "ONEPLUS 7 INJECTION API"
+            echo "=========================================="
+
+            cat results/oneplus7-injection-symbols.txt
+
+            echo
+            echo "=========================================="
+            echo "XIAOMI MI A3 INJECTION API"
+            echo "=========================================="
+
+            cat results/xiaomi-a3-injection-symbols.txt
+
+            echo
+            echo "=========================================="
+            echo "MOTOROLA"
+            echo "=========================================="
+
+            cat results/motorola-qcacld3-injection-symbols.txt
+
+          } > results/comparison/shared-api-analysis.txt
+
+      # ============================================================
+      # 14. CHECK DRIVER ARCHITECTURE
+      # ============================================================
+
+      - name: Compare WLAN driver architecture
+        shell: bash
+        run: |
+          set +e
+
+          for TREE in \
+            motorola-qcacld3 \
+            oneplus7 \
+            xiaomi-a3
+          do
+
+            {
+              echo "======================================"
+              echo "$TREE"
+              echo "======================================"
+
+              git -C "$TREE" ls-tree \
+                -r \
+                --name-only \
+                HEAD \
+                | grep -Ei \
+                  'drivers/staging/qcacld|qcacld-3.0|core/hdd|core/wma|components/dp' \
+                | head -1000 \
+                || true
+
+            } > "results/${TREE}-architecture.txt"
+
+          done
+
+      # ============================================================
+      # 15. GENERATE FINAL REPORT
+      # ============================================================
+
+      - name: Generate final report
+        if: always()
+        shell: bash
+        run: |
+          set +e
+
+          {
+            echo "======================================================"
+            echo "CEBU QCACLD3 INJECTION PORTABILITY AUDIT"
+            echo "======================================================"
+            echo
+            echo "Target:"
+            echo "Moto G9 Power / cebu"
+            echo
+            echo "Kernel:"
+            echo "4.19.325-cip135-st19-perf-g39bcecd5c63d"
+            echo
+            echo "Reference 1:"
+            echo "OnePlus 7 / LineageOS 23.2"
+            echo
+            echo "Reference 2:"
+            echo "Xiaomi Mi A3 / LineageOS 23.2"
+            echo
+            echo "======================================================"
+            echo "MOTOROLA INJECTION SYMBOLS"
+            echo "======================================================"
+
+            cat results/motorola-qcacld3-injection-symbols.txt \
+              2>/dev/null || true
+
+            echo
+            echo "======================================================"
+            echo "ONEPLUS INJECTION SYMBOLS"
+            echo "======================================================"
+
+            cat results/oneplus7-injection-symbols.txt \
+              2>/dev/null || true
+
+            echo
+            echo "======================================================"
+            echo "XIAOMI INJECTION SYMBOLS"
+            echo "======================================================"
+
+            cat results/xiaomi-a3-injection-symbols.txt \
+              2>/dev/null || true
+
+            echo
+            echo "======================================================"
+            echo "COMMON INJECTION FILES"
+            echo "======================================================"
+
+            cat results/comparison/common-injection-files.txt \
+              2>/dev/null || true
+
+            echo
+            echo "======================================================"
+            echo "INJECTION FILES MISSING FROM MOTOROLA"
+            echo "======================================================"
+
+            cat results/comparison/injection-files-missing-from-motorola.txt \
+              2>/dev/null || true
+
+            echo
+            echo "======================================================"
+            echo "MOTOROLA INJECTION COMMITS"
+            echo "======================================================"
+
+            cat results/motorola/injection-commits.txt \
+              2>/dev/null || true
+
+            echo
+            echo "======================================================"
+            echo "ONEPLUS INJECTION COMMITS"
+            echo "======================================================"
+
+            cat results/oneplus7-injection-commits.txt \
+              2>/dev/null || true
+
+            echo
+            echo "======================================================"
+            echo "XIAOMI INJECTION COMMITS"
+            echo "======================================================"
+
+            cat results/xiaomi-a3-injection-commits.txt \
+              2>/dev/null || true
+
+            echo
+            echo "======================================================"
+            echo "SHARED API ANALYSIS"
+            echo "======================================================"
+
+            cat results/comparison/shared-api-analysis.txt \
+              2>/dev/null || true
+
+          } > results/final-report.txt
+
+          echo "Final report generated."
+
+      # ============================================================
+      # 16. ALWAYS UPLOAD
+      # ============================================================
+
+      - name: Upload audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cebu-qcacld3-injection-portability-audit
+          path: results/
+          if-no-files-found: warn
+          retention-days: 14
+
+      # ============================================================
+      # 17. FINISH
+      # ============================================================
+
+      - name: Finish
+        if: always()
+        run: |
+          echo
+          echo "=============================================="
+          echo "PORTABILITY AUDIT COMPLETE"
+          echo "=============================================="
+          echo
+          echo "Artifact:"
+          echo "cebu-qcacld3-injection-portability-audit"
