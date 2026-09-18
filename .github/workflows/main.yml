@@ -15,13 +15,13 @@ jobs:
     steps:
 
       # ============================================================
-      # 1. Checkout workflow repository
+      # 1. Checkout this workflow repository
       # ============================================================
       - name: Set up job
         uses: actions/checkout@v4
 
       # ============================================================
-      # 2. Install build dependencies
+      # 2. Install dependencies
       # ============================================================
       - name: Install dependencies
         run: |
@@ -37,6 +37,7 @@ jobs:
             clang \
             flex \
             git \
+            kmod \
             libelf-dev \
             libssl-dev \
             lld \
@@ -52,7 +53,7 @@ jobs:
 
           echo "/usr/lib/llvm-14/bin" >> "$GITHUB_PATH"
 
-          echo "Toolchain:"
+          echo "=== Toolchain ==="
           clang-14 --version
           ld.lld-14 --version
           aarch64-linux-gnu-gcc --version
@@ -75,7 +76,7 @@ jobs:
 
           cd "$KERNEL_DIR"
 
-          echo "Remote:"
+          echo "=== Kernel source ==="
           git remote -v
 
           echo
@@ -87,7 +88,7 @@ jobs:
           git rev-parse HEAD
 
       # ============================================================
-      # 4. Prepare clean OUT directory
+      # 4. Prepare build directories
       # ============================================================
       - name: Prepare build directories
         run: |
@@ -100,7 +101,7 @@ jobs:
           echo "OUT_DIR=$OUT_DIR"
 
       # ============================================================
-      # 5. Verify base defconfig
+      # 5. Verify Bengal base configuration
       # ============================================================
       - name: Verify Bengal base configuration
         working-directory: ${{ env.KERNEL_DIR }}
@@ -110,15 +111,20 @@ jobs:
           CONFIG_FILE="arch/arm64/configs/vendor/bengal-perf_defconfig"
 
           if [ ! -f "$CONFIG_FILE" ]; then
-            echo "ERROR: $CONFIG_FILE not found."
+            echo "ERROR: Base defconfig not found:"
+            echo "$CONFIG_FILE"
             exit 1
           fi
 
-          echo "Base configuration found:"
+          echo "Base defconfig found:"
           ls -lh "$CONFIG_FILE"
 
       # ============================================================
-      # 6. Create NetHunter configuration OUTSIDE kernel tree
+      # 6. Create NetHunter configuration
+      #
+      # IMPORTANT:
+      # This file is outside the kernel source tree so it cannot
+      # make the Git source tree dirty.
       # ============================================================
       - name: Create NetHunter configuration
         run: |
@@ -148,7 +154,7 @@ jobs:
 
 
           # ==========================================================
-          # USB gadget / HID
+          # USB gadget
           # ==========================================================
 
           CONFIG_USB_GADGET=y
@@ -176,11 +182,12 @@ jobs:
 
           # ==========================================================
           # Wireless framework
+          #
+          # These do NOT by themselves guarantee QCACLD-3 injection.
           # ==========================================================
 
           CONFIG_CFG80211=y
           CONFIG_RFKILL=y
-
           CONFIG_NL80211_TESTMODE=y
 
 
@@ -192,7 +199,7 @@ jobs:
           CONFIG_SENSORS_CLASS=m
           EOF
 
-          echo "NetHunter configuration:"
+          echo "=== NetHunter configuration ==="
           cat "$NH_CONFIG"
 
       # ============================================================
@@ -205,7 +212,7 @@ jobs:
 
           rm -f "$OUT_DIR/.config"
 
-          echo "Generating Bengal base configuration..."
+          echo "=== Creating Bengal configuration ==="
 
           make \
             O="$OUT_DIR" \
@@ -216,7 +223,7 @@ jobs:
             vendor/bengal-perf_defconfig
 
           echo
-          echo "Merging NetHunter configuration..."
+          echo "=== Merging NetHunter configuration ==="
 
           scripts/kconfig/merge_config.sh \
             -m \
@@ -225,7 +232,7 @@ jobs:
             "$GITHUB_WORKSPACE/nethunter.config"
 
           echo
-          echo "Running olddefconfig..."
+          echo "=== Running olddefconfig ==="
 
           make \
             O="$OUT_DIR" \
@@ -236,7 +243,7 @@ jobs:
             olddefconfig
 
       # ============================================================
-      # 8. Verify NetHunter configuration
+      # 8. Verify configuration
       # ============================================================
       - name: Verify NetHunter configuration
         run: |
@@ -246,7 +253,6 @@ jobs:
 
           check_config() {
             SYMBOL="$1"
-
             VALUE="$(grep -E "^${SYMBOL}=" "$CONFIG" || true)"
 
             if [ -z "$VALUE" ]; then
@@ -259,13 +265,14 @@ jobs:
                 echo "OK: $VALUE"
                 ;;
               *)
-                echo "ERROR: $VALUE"
+                echo "ERROR: Invalid value:"
+                echo "$VALUE"
                 exit 1
                 ;;
             esac
           }
 
-          echo "Checking required configuration..."
+          echo "=== Required configuration ==="
           echo
 
           check_config CONFIG_BT
@@ -274,22 +281,27 @@ jobs:
           check_config CONFIG_BT_HIDP
           check_config CONFIG_BT_HCIVHCI
           check_config CONFIG_BT_HCIUART
+
           check_config CONFIG_USB_GADGET
           check_config CONFIG_USB_LIBCOMPOSITE
           check_config CONFIG_USB_CONFIGFS
           check_config CONFIG_USB_CONFIGFS_F_HID
           check_config CONFIG_USB_CONFIGFS_NCM
+
           check_config CONFIG_INPUT_UINPUT
+
           check_config CONFIG_TUN
           check_config CONFIG_VETH
+
           check_config CONFIG_CFG80211
           check_config CONFIG_RFKILL
           check_config CONFIG_NL80211_TESTMODE
+
           check_config CONFIG_SENSORS_SSC
           check_config CONFIG_SENSORS_CLASS
 
           echo
-          echo "Configuration verification passed."
+          echo "Configuration verification PASSED."
 
       # ============================================================
       # 9. Verify source tree is clean
@@ -299,7 +311,7 @@ jobs:
         run: |
           set -e
 
-          echo "Git status:"
+          echo "=== Git status ==="
           git status --short
 
           if [ -n "$(git status --porcelain)" ]; then
@@ -309,10 +321,12 @@ jobs:
           fi
 
           echo
-          echo "Kernel source tree is clean."
+          echo "Kernel source tree is CLEAN."
 
       # ============================================================
-      # 10. Get release directly from Kbuild
+      # 10. Get kernel release directly from Kbuild
+      #
+      # Do NOT hard-code the release string.
       # ============================================================
       - name: Verify kernel release
         working-directory: ${{ env.KERNEL_DIR }}
@@ -336,13 +350,13 @@ jobs:
           echo "=========================================="
 
           if [ -z "$BUILT_RELEASE" ]; then
-            echo "ERROR: kernelrelease is empty."
+            echo "ERROR: kernelrelease returned empty."
             exit 1
           fi
 
           case "$BUILT_RELEASE" in
             *-dirty)
-              echo "ERROR: kernel release contains -dirty."
+              echo "ERROR: Kernel release contains -dirty."
               exit 1
               ;;
           esac
@@ -350,10 +364,10 @@ jobs:
           printf '%s\n' "$BUILT_RELEASE" \
             > "$GITHUB_WORKSPACE/kernel-release.txt"
 
-          echo "Kernel release accepted."
+          echo "Kernel release verification PASSED."
 
       # ============================================================
-      # 11. Save configuration
+      # 11. Save final configs
       # ============================================================
       - name: Save final kernel config
         run: |
@@ -367,7 +381,7 @@ jobs:
             "$GITHUB_WORKSPACE/nethunter.config" \
             "$GITHUB_WORKSPACE/nethunter-final.config"
 
-          echo "Saved final configuration files."
+          echo "Configuration files saved."
 
       # ============================================================
       # 12. Build kernel Image
@@ -396,7 +410,7 @@ jobs:
           IMAGE="$OUT_DIR/arch/arm64/boot/Image"
 
           if [ ! -f "$IMAGE" ]; then
-            echo "ERROR: Image was not produced."
+            echo "ERROR: Kernel Image was not produced."
             exit 1
           fi
 
@@ -421,7 +435,7 @@ jobs:
             modules
 
       # ============================================================
-      # 15. Install modules into staging directory
+      # 15. Install modules into staging
       # ============================================================
       - name: Install kernel modules
         working-directory: ${{ env.KERNEL_DIR }}
@@ -451,8 +465,13 @@ jobs:
           echo "$MODULE_DIR"
 
           if [ ! -d "$MODULE_DIR" ]; then
-            echo "ERROR: Module directory was not created."
-            find "$MODULE_STAGE" -maxdepth 5 -type f | sort
+            echo "ERROR: Module directory not found."
+
+            find "$MODULE_STAGE" \
+              -maxdepth 6 \
+              -type f \
+              | sort
+
             exit 1
           fi
 
@@ -465,7 +484,7 @@ jobs:
             | sort
 
       # ============================================================
-      # 16. Prepare vendor/lib/modules tree
+      # 16. Prepare Android vendor module tree
       # ============================================================
       - name: Prepare vendor modules
         run: |
@@ -496,7 +515,7 @@ jobs:
           echo "Module count: $MODULE_COUNT"
 
           if [ "$MODULE_COUNT" -eq 0 ]; then
-            echo "ERROR: No .ko modules found."
+            echo "ERROR: No .ko modules were produced."
             exit 1
           fi
 
@@ -518,7 +537,7 @@ jobs:
           SENSOR="$GITHUB_WORKSPACE/ak-modules/vendor/lib/modules/sensors_class.ko"
 
           if [ ! -f "$SENSOR" ]; then
-            echo "ERROR: sensors_class.ko missing."
+            echo "ERROR: sensors_class.ko is missing."
             exit 1
           fi
 
@@ -527,12 +546,13 @@ jobs:
 
           echo
           echo "Module information:"
+
           modinfo "$SENSOR" 2>/dev/null \
             | grep -E '^(filename|version|vermagic|depends):' \
             || true
 
       # ============================================================
-      # 18. Verify every module vermagic
+      # 18. Verify module vermagic
       # ============================================================
       - name: Verify module vermagic
         run: |
@@ -540,7 +560,7 @@ jobs:
 
           RELEASE="$(cat "$GITHUB_WORKSPACE/kernel-release.txt")"
 
-          echo "Expected release:"
+          echo "Expected kernel release:"
           echo "$RELEASE"
 
           FAILED=0
@@ -552,7 +572,9 @@ jobs:
                 | sed -n 's/^vermagic: //p'
             )"
 
-            MODULE_RELEASE="$(printf '%s\n' "$VERMAGIC" | awk '{print $1}')"
+            MODULE_RELEASE="$(
+              printf '%s\n' "$VERMAGIC" | awk '{print $1}'
+            )"
 
             echo
             echo "Module: $(basename "$MODULE")"
@@ -564,7 +586,7 @@ jobs:
               echo "Actual:   $MODULE_RELEASE"
               FAILED=1
             else
-              echo "OK"
+              echo "OK: release matches."
             fi
 
           done < <(
@@ -576,7 +598,7 @@ jobs:
 
           if [ "$FAILED" -ne 0 ]; then
             echo
-            echo "ERROR: One or more modules have incorrect vermagic."
+            echo "ERROR: Module vermagic verification failed."
             exit 1
           fi
 
@@ -617,25 +639,20 @@ jobs:
 
           properties() { '
           kernel.string=Moto G9 Power cebu NetHunter Kernel
-
           do.devicecheck=1
           do.modules=1
           do.systemless=0
-
           do.cleanup=1
           do.cleanuponabort=0
-
           device.name1=cebu
           device.name2=
-
-          supported.versions=16
+          supported.versions=
           supported.patchlevels=
           supported.vendorpatchlevels=
           '; }
 
           BLOCK=boot
           IS_SLOT_DEVICE=auto
-
           RAMDISK_COMPRESSION=auto
           PATCH_VBMETA_FLAG=auto
 
@@ -647,11 +664,11 @@ jobs:
 
           chmod +x anykernel.sh
 
-          echo "AnyKernel script:"
+          echo "=== AnyKernel3 script ==="
           cat anykernel.sh
 
       # ============================================================
-      # 21. Put Image + modules into AnyKernel3
+      # 21. Prepare AnyKernel files
       # ============================================================
       - name: Prepare AnyKernel kernel files
         run: |
@@ -683,14 +700,17 @@ jobs:
           echo "AnyKernel kernel files prepared."
 
       # ============================================================
-      # 22. Verify files BEFORE ZIP creation
+      # 22. Verify AnyKernel package
       # ============================================================
       - name: Verify AnyKernel package
         run: |
           set -e
 
           test -f "$ANYKERNEL_DIR/Image"
-          test -f "$ANYKERNEL_DIR/anykernel.sh"
+
+          test -f \
+            "$ANYKERNEL_DIR/anykernel.sh"
+
           test -f \
             "$ANYKERNEL_DIR/modules/vendor/lib/modules/sensors_class.ko"
 
@@ -698,21 +718,5 @@ jobs:
           ls -lh "$ANYKERNEL_DIR/Image"
 
           echo
-          echo "AnyKernel modules:"
-          find "$ANYKERNEL_DIR/modules" \
-            -type f \
-            -name '*.ko' \
-            -printf '%p\n' \
-            | sort
-
-          echo
-          echo "AnyKernel package structure verified."
-
-      # ============================================================
-      # 23. Create flashable ZIP
-      # ============================================================
-      - name: Create flashable ZIP
-        run: |
-          set -e
-
-          ZIP_FILE="$GITHUB_WORKSPACE/moto-g9-power-cebu-
+          echo "Modules:"
+          find "$ANYKERNEL_DIR/modules" 
