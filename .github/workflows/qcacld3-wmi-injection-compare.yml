@@ -1,0 +1,418 @@
+name: QCACLD3 WMI Injection Compare
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git ripgrep python3 diffutils
+
+      - name: Clone Motorola QCACLD3
+        run: |
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qcacld-3.0.git \
+            motorola-qcacld3
+
+      - name: Clone OnePlus reference
+        run: |
+          git clone --depth=1 --branch nethunter-lineage-23.2 \
+            https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git \
+            oneplus-kernel
+
+      - name: Clone Xiaomi reference
+        run: |
+          git clone --depth=1 --branch lineage-23.2 \
+            https://github.com/yesimxev/android_kernel_xiaomi_sm6125.git \
+            xiaomi-kernel
+
+      - name: Prepare report
+        run: |
+          mkdir -p report/reference report/motorola report/comparison
+
+      - name: Extract reference injection implementation
+        shell: bash
+        run: |
+          set +e
+
+          for SRC in oneplus-kernel xiaomi-kernel; do
+            NAME="$(basename "$SRC")"
+
+            find "$SRC/drivers/staging/qcacld-3.0" \
+              -type f \
+              \( \
+                -name 'wma_frame_inject.c' \
+                -o -name 'wma_frame_inject.h' \
+                -o -name 'wlan_hdd_frame_inject.c' \
+                -o -name 'wlan_hdd_frame_inject.h' \
+                -o -name 'wlan_hdd_frame_validate.c' \
+                -o -name 'wlan_hdd_frame_validate.h' \
+              \) \
+              -print \
+              > "report/reference/${NAME}-injection-files.txt"
+
+            while IFS= read -r FILE; do
+              [ -f "$FILE" ] || continue
+              REL="${FILE#$SRC/}"
+              mkdir -p "report/reference/$NAME/$(dirname "$REL")"
+              cp "$FILE" "report/reference/$NAME/$REL"
+            done < "report/reference/${NAME}-injection-files.txt"
+          done
+
+      - name: Extract exact reference WMI/TX calls
+        shell: bash
+        run: |
+          set +e
+
+          for SRC in oneplus-kernel xiaomi-kernel; do
+            NAME="$(basename "$SRC")"
+            OUT="report/reference/${NAME}-wmi-tx-symbols.txt"
+
+            {
+              echo "===== $NAME ====="
+              echo
+              echo "--- WMI symbols ---"
+              rg -n \
+                'wmi_[A-Za-z0-9_]*(mgmt|tx|inject|vdev)[A-Za-z0-9_]*' \
+                "$SRC/drivers/staging/qcacld-3.0" \
+                || true
+
+              echo
+              echo "--- Injection symbols ---"
+              rg -n \
+                'wma_[A-Za-z0-9_]*inject[A-Za-z0-9_]*|hdd_[A-Za-z0-9_]*inject[A-Za-z0-9_]*' \
+                "$SRC/drivers/staging/qcacld-3.0" \
+                || true
+
+              echo
+              echo "--- TX completion symbols ---"
+              rg -n \
+                'TX.*COMP|COMP.*TX|tx.*completion|completion.*tx' \
+                "$SRC/drivers/staging/qcacld-3.0/core/wma" \
+                || true
+
+              echo
+              echo "--- WMI management TX structures ---"
+              rg -n \
+                'mgmt_tx|MGMT_TX|mgmt.*tx' \
+                "$SRC/drivers/staging/qcacld-3.0/core/wmi" \
+                "$SRC/drivers/staging/qcacld-3.0/core/wma" \
+                || true
+            } > "$OUT"
+          done
+
+      - name: Extract Motorola WMI and management TX
+        shell: bash
+        run: |
+          set +e
+
+          SRC="motorola-qcacld3"
+
+          {
+            echo "===== MOTOROLA QCACLD3 ====="
+            echo
+            echo "--- WMI management TX ---"
+            rg -n \
+              'wmi_[A-Za-z0-9_]*(mgmt|tx)[A-Za-z0-9_]*|mgmt_tx|MGMT_TX' \
+              "$SRC" \
+              || true
+
+            echo
+            echo "--- TX completion ---"
+            rg -n \
+              'TX.*COMP|COMP.*TX|tx.*completion|completion.*tx' \
+              "$SRC/core/wma" \
+              "$SRC/core/wmi" \
+              "$SRC" \
+              || true
+
+            echo
+            echo "--- VDEV operations ---"
+            rg -n \
+              'wmi_unified_vdev_(create|start|stop|delete)|WMI_VDEV_TYPE_MONITOR' \
+              "$SRC" \
+              || true
+          } > report/motorola/wmi-management-tx.txt
+
+      - name: Extract Motorola WMI definitions
+        shell: bash
+        run: |
+          set +e
+
+          {
+            echo "===== MOTOROLA WMI DEFINITIONS ====="
+            echo
+
+            rg -n -C 8 \
+              'MGMT_TX|MGMT.*TX|mgmt_tx|MGMT_TX_COMPLETION|MGMT_TX_BUNDLE' \
+              motorola-qcacld3 \
+              || true
+
+            echo
+            echo "===== WMI COMMAND SEND FUNCTIONS ====="
+            rg -n -C 5 \
+              'wmi.*mgmt.*tx|mgmt.*tx.*wmi|wmi_mgmt_unified_cmd_send' \
+              motorola-qcacld3 \
+              || true
+          } > report/motorola/wmi-definitions-context.txt
+
+      - name: Compare reference injection WMI usage with Motorola
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import re
+          from pathlib import Path
+
+          root = Path("report")
+          motorola = Path("motorola-qcacld3")
+
+          # Extract symbol-like identifiers from the reference injection
+          # implementation, then check whether Motorola defines/uses them.
+          refs = []
+
+          for base in [
+              root / "reference/oneplus-kernel/injection",
+              root / "reference/xiaomi-kernel/injection",
+          ]:
+              if not base.exists():
+                  continue
+              for p in base.rglob("*"):
+                  if p.is_file():
+                      try:
+                          text = p.read_text(errors="ignore")
+                      except:
+                          continue
+
+                      for s in re.findall(
+                          r'\b(?:wmi|wma|WMI|QDF|qdf)_[A-Za-z0-9_]+\b',
+                          text
+                      ):
+                          refs.append(s)
+
+          refs = sorted(set(refs))
+
+          # Focus on actual WMI/WMA/QDF identifiers.
+          refs = [
+              s for s in refs
+              if (
+                  s.lower().startswith(("wmi_", "wma_", "qdf_"))
+                  or "MGMT_TX" in s
+                  or "TX_COMP" in s
+              )
+          ]
+
+          out = []
+
+          for sym in refs:
+              import subprocess
+
+              r = subprocess.run(
+                  ["rg", "-n", "--fixed-strings", sym, str(motorola)],
+                  capture_output=True,
+                  text=True
+              )
+
+              if r.returncode == 0:
+                  out.append(f"[PRESENT] {sym}")
+                  out.extend("  " + x for x in r.stdout.splitlines()[:8])
+              else:
+                  out.append(f"[MISSING] {sym}")
+
+          Path(
+              "report/comparison/reference-wmi-symbols-vs-motorola.txt"
+          ).write_text("\n".join(out) + "\n")
+
+          print("Compared", len(refs), "reference symbols")
+          PY
+
+      - name: Compare management TX structures
+        shell: bash
+        run: |
+          set +e
+
+          {
+            echo "===== REFERENCE STRUCTURES ====="
+            echo
+
+            rg -n -C 10 \
+              'struct .*mgmt.*tx|struct .*tx.*mgmt|mgmt_tx.*params|tx.*mgmt.*params' \
+              oneplus-kernel/drivers/staging/qcacld-3.0 \
+              xiaomi-kernel/drivers/staging/qcacld-3.0 \
+              || true
+
+            echo
+            echo "===== MOTOROLA STRUCTURES ====="
+            echo
+
+            rg -n -C 10 \
+              'struct .*mgmt.*tx|struct .*tx.*mgmt|mgmt_tx.*params|tx.*mgmt.*params' \
+              motorola-qcacld3 \
+              || true
+          } > report/comparison/management-tx-structures.txt
+
+      - name: Compare firmware-facing identifiers
+        shell: bash
+        run: |
+          set +e
+
+          {
+            echo "===== FIRMWARE-FACING IDENTIFIERS ====="
+            echo
+
+            echo "--- OnePlus ---"
+            rg -o \
+              '\b(WMI_[A-Z0-9_]*(MGMT|TX|COMP)[A-Z0-9_]*|wmi_[a-z0-9_]*(mgmt|tx|comp)[a-z0-9_]*)\b' \
+              oneplus-kernel/drivers/staging/qcacld-3.0 \
+              | sort -u \
+              || true
+
+            echo
+            echo "--- Xiaomi ---"
+            rg -o \
+              '\b(WMI_[A-Z0-9_]*(MGMT|TX|COMP)[A-Z0-9_]*|wmi_[a-z0-9_]*(mgmt|tx|comp)[a-z0-9_]*)\b' \
+              xiaomi-kernel/drivers/staging/qcacld-3.0 \
+              | sort -u \
+              || true
+
+            echo
+            echo "--- Motorola ---"
+            rg -o \
+              '\b(WMI_[A-Z0-9_]*(MGMT|TX|COMP)[A-Z0-9_]*|wmi_[a-z0-9_]*(mgmt|tx|comp)[a-z0-9_]*)\b' \
+              motorola-qcacld3 \
+              | sort -u \
+              || true
+          } > report/comparison/firmware-facing-identifiers.txt
+
+      - name: Locate Motorola management TX implementation
+        shell: bash
+        run: |
+          set +e
+
+          {
+            echo "===== wlan_hdd_mgmt_tx ====="
+            rg -n -C 40 \
+              'wlan_hdd_mgmt_tx|__wlan_hdd_mgmt_tx' \
+              motorola-qcacld3 \
+              || true
+
+            echo
+            echo "===== WMA MGMT TX ====="
+            rg -n -C 40 \
+              'wma_mgmt_tx' \
+              motorola-qcacld3 \
+              || true
+
+            echo
+            echo "===== WMI MGMT SEND ====="
+            rg -n -C 30 \
+              'wmi_mgmt_unified_cmd_send' \
+              motorola-qcacld3 \
+              || true
+          } > report/motorola/management-tx-context.txt
+
+      - name: Build compatibility matrix
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path("report/comparison/reference-wmi-symbols-vs-motorola.txt")
+
+          present = []
+          missing = []
+
+          for line in p.read_text(errors="ignore").splitlines():
+              if line.startswith("[PRESENT]"):
+                  present.append(line[len("[PRESENT] "):])
+              elif line.startswith("[MISSING]"):
+                  missing.append(line[len("[MISSING] "):])
+
+          report = []
+
+          report.append("QCACLD3 WMI / FRAME-INJECTION COMPATIBILITY MATRIX")
+          report.append("=" * 60)
+          report.append("")
+          report.append(f"Reference symbols checked: {len(present)+len(missing)}")
+          report.append(f"Present in Motorola:       {len(present)}")
+          report.append(f"Missing from Motorola:     {len(missing)}")
+          report.append("")
+
+          report.append("PRESENT")
+          report.append("-------")
+          report.extend(present)
+          report.append("")
+
+          report.append("MISSING")
+          report.append("-------")
+          report.extend(missing)
+
+          Path(
+              "report/comparison/compatibility-matrix.txt"
+          ).write_text("\n".join(report) + "\n")
+          PY
+
+      - name: Create human-readable conclusion
+        run: |
+          cat > report/CONCLUSION.txt <<'EOF'
+          QCACLD3 WMI / FRAME-INJECTION AUDIT
+          ==================================
+
+          This workflow is source analysis only.
+
+          It does NOT:
+          - modify the Motorola source tree
+          - build a kernel
+          - modify firmware
+          - flash the phone
+
+          Questions this audit is intended to answer:
+
+          1. Which WMI/TX APIs does the working reference injection
+             implementation actually call?
+
+          2. Which of those APIs already exist in Motorola's QCACLD3?
+
+          3. Which management-TX structures are compatible?
+
+          4. Which firmware-facing command/event identifiers differ?
+
+          5. Can the reference injection path plausibly be adapted to
+             Motorola's existing management-TX implementation?
+
+          IMPORTANT:
+
+          Presence of matching kernel symbols does not prove that the
+          Moto G9 Power firmware supports actual frame injection.
+
+          A later source-port decision must therefore consider both:
+          - kernel/driver API compatibility
+          - firmware capability/behavior
+          EOF
+
+      - name: Show summary
+        if: always()
+        run: |
+          echo "===== COMPATIBILITY SUMMARY ====="
+          cat report/comparison/compatibility-matrix.txt || true
+
+          echo
+          echo "===== FIRMWARE IDENTIFIERS ====="
+          cat report/comparison/firmware-facing-identifiers.txt || true
+
+      - name: Package audit
+        if: always()
+        run: |
+          zip -r qcacld3-wmi-injection-compare.zip report
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcacld3-wmi-injection-compare
+          path: qcacld3-wmi-injection-compare.zip
+          if-no-files-found: error
