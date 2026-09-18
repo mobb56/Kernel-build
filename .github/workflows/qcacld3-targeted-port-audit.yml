@@ -1,0 +1,244 @@
+name: QCACLD3 Targeted Port Audit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git python3 zip
+
+      - name: Clone Motorola QCACLD3
+        run: |
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qcacld-3.0.git \
+            motorola
+
+      - name: Clone OnePlus reference
+        run: |
+          git clone --depth=1 \
+            --branch nethunter-lineage-23.2 \
+            https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git \
+            oneplus
+
+      - name: Clone Xiaomi reference
+        run: |
+          git clone --depth=1 \
+            --branch lineage-23.2 \
+            https://github.com/yesimxev/android_kernel_xiaomi_sm6125.git \
+            xiaomi
+
+      - name: Locate reference injection files
+        run: |
+          mkdir -p report
+
+          find oneplus/drivers/staging/qcacld-3.0 \
+            -type f \
+            \
+              -name 'wlan_hdd_frame_inject.c' \
+              -o -name 'wlan_hdd_frame_inject.h' \
+              -o -name 'wlan_hdd_frame_validate.c' \
+              -o -name 'wlan_hdd_frame_validate.h' \
+              -o -name 'wma_frame_inject.c' \
+              -o -name 'wma_frame_inject.h' \
+            \
+            | sort > report/reference-files.txt
+
+          echo "Reference injection files:"
+          cat report/reference-files.txt
+
+      - name: Analyze injection source
+        run: |
+          cat > analyze.py <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          MOTOROLA = Path("motorola")
+          ONEPLUS = Path("oneplus/drivers/staging/qcacld-3.0")
+          XIAOMI = Path("xiaomi/drivers/staging/qcacld-3.0")
+
+          TARGET_FILES = [
+              "core/hdd/src/wlan_hdd_frame_inject.c",
+              "core/hdd/inc/wlan_hdd_frame_inject.h",
+              "core/hdd/src/wlan_hdd_frame_validate.c",
+              "core/hdd/inc/wlan_hdd_frame_validate.h",
+              "core/wma/src/wma_frame_inject.c",
+              "core/wma/inc/wma_frame_inject.h",
+          ]
+
+          out = Path("report")
+          out.mkdir(exist_ok=True)
+
+          def read(path):
+              try:
+                  return path.read_text(errors="ignore")
+              except Exception:
+                  return ""
+
+          def find_symbol(symbol):
+              results = []
+              for p in MOTOROLA.rglob("*"):
+                  if p.is_file() and p.suffix in (".c", ".h"):
+                      try:
+                          text = p.read_text(errors="ignore")
+                      except Exception:
+                          continue
+                      if symbol in text:
+                          results.append(str(p))
+              return sorted(set(results))
+
+          def extract_includes(text):
+              return sorted(set(
+                  re.findall(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]',
+                             text, re.MULTILINE)
+              ))
+
+          def extract_definitions(text):
+              pattern = re.compile(
+                  r'\b(?:static\s+)?'
+                  r'(?:inline\s+)?'
+                  r'(?:const\s+)?'
+                  r'[A-Za-z_][A-Za-z0-9_\s\*]*\s+'
+                  r'([A-Za-z_][A-Za-z0-9_]*)\s*'
+                  r'[^;{}]*\s*\{',
+                  re.MULTILINE
+              )
+              return sorted(set(m.group(1) for m in pattern.finditer(text)))
+
+          def extract_calls(text):
+              names = re.findall(
+                  r'\b([A-Za-z_][A-Za-z0-9_]*)\s*\(',
+                  text
+              )
+
+              keywords = {
+                  "if", "for", "while", "switch", "return",
+                  "sizeof", "typeof", "do", "case"
+              }
+
+              return sorted(set(
+                  x for x in names
+                  if x not in keywords
+                  and not x.startswith("__")
+              ))
+
+          all_calls = set()
+          all_defs = set()
+
+          with open(out / "source-analysis.txt", "w") as report:
+              for rel in TARGET_FILES:
+                  ref = ONEPLUS / rel
+
+                  report.write("\n" + "=" * 70 + "\n")
+                  report.write(rel + "\n")
+                  report.write("=" * 70 + "\n")
+
+                  if not ref.exists():
+                      report.write("REFERENCE FILE: MISSING\n")
+                      continue
+
+                  text = read(ref)
+
+                  includes = extract_includes(text)
+                  defs = extract_definitions(text)
+                  calls = extract_calls(text)
+
+                  all_defs.update(defs)
+                  all_calls.update(calls)
+
+                  report.write("\nINCLUDES:\n")
+                  for x in includes:
+                      report.write(x + "\n")
+
+                  report.write("\nFUNCTION DEFINITIONS:\n")
+                  for x in defs:
+                      report.write(x + "\n")
+
+                  report.write("\nFUNCTION CALLS:\n")
+                  for x in calls:
+                      report.write(x + "\n")
+
+          injection_names = sorted(
+              x for x in all_calls
+              if (
+                  "inject" in x.lower()
+                  or "validate" in x.lower()
+                  or x.startswith("wma_")
+                  or x.startswith("wlan_hdd_")
+                  or x.startswith("qdf_")
+                  or x.startswith("cdp_")
+                  or x.startswith("wmi_")
+              )
+          )
+
+          with open(out / "motorola-api-check.txt", "w") as f:
+              f.write("=" * 70 + "\n")
+              f.write("MOTOROLA API AVAILABILITY\n")
+              f.write("=" * 70 + "\n\n")
+
+              for symbol in injection_names:
+                  locations = find_symbol(symbol)
+
+                  if locations:
+                      f.write("PRESENT  " + symbol + "\n")
+                      for loc in locations[:20]:
+                          f.write("    " + loc + "\n")
+                  else:
+                      f.write("MISSING  " + symbol + "\n")
+
+          # Check the actual reference injection files against Motorola
+          with open(out / "file-comparison.txt", "w") as f:
+              f.write("=" * 70 + "\n")
+              f.write("REFERENCE FILE / MOTOROLA COMPARISON\n")
+              f.write("=" * 70 + "\n\n")
+
+              for rel in TARGET_FILES:
+                  op = ONEPLUS / rel
+                  xi = XIAOMI / rel
+                  base = os.path.basename(rel)
+
+                  f.write("\n" + rel + "\n")
+                  f.write("-" * len(rel) + "\n")
+
+                  f.write("OnePlus: " +
+                          ("PRESENT" if op.exists() else "MISSING") + "\n")
+
+                  f.write("Xiaomi: " +
+                          ("PRESENT" if xi.exists() else "MISSING") + "\n")
+
+                  matches = list(MOTOROLA.rglob(base))
+
+                  f.write("Motorola basename matches:\n")
+                  if matches:
+                      for m in matches:
+                          f.write("  " + str(m) + "\n")
+                  else:
+                      f.write("  NONE\n")
+
+          # Extract structures associated with the injection path.
+          structure_pattern = re.compile(
+              r'\bstruct\s+([A-Za-z_][A-Za-z0-9_]*)'
+          )
+
+          structures = set()
+
+          for rel in TARGET_FILES:
+              text = read(ONEPLUS / rel)
+              for match in structure_pattern.finditer(text):
+                  name = match.group(1)
+                  if any(k in name.lower()
+                         for k in ("inject", "frame", "tx", "wma", "hdd",
+                                   "validate")):
+                      structures.add(name)
+
+          with open(out / "structures.txt", "w") as f:
+              f.write("=" * 70 + "\n
