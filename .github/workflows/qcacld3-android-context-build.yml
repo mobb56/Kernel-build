@@ -1,0 +1,461 @@
+name: QCACLD3 Android Context Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git \
+            make \
+            clang \
+            lld \
+            llvm \
+            python3 \
+            bc \
+            bison \
+            flex \
+            libssl-dev \
+            libelf-dev \
+            dwarves \
+            cpio \
+            zip
+
+      - name: Clone Motorola kernel
+        run: |
+          git clone --depth=1 \
+            --branch lineage-23.2 \
+            https://github.com/LineageOS/android_kernel_motorola_sm6225.git \
+            kernel
+
+      - name: Clone Motorola QCACLD3
+        run: |
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qcacld-3.0.git \
+            qcacld3
+
+      - name: Clone Motorola host common
+        run: |
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qca-wifi-host-cmn.git \
+            qca-wifi-host-cmn
+
+      - name: Clone Motorola firmware API
+        run: |
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-fw-api.git \
+            fw-api
+
+      - name: Prepare report
+        run: |
+          mkdir -p report/source
+          mkdir -p report/build
+          mkdir -p report/analysis
+
+      - name: Inspect source trees
+        run: |
+          {
+            echo "===== QCACLD3 ====="
+            find qcacld3 -maxdepth 2 -type f | sort | head -100
+
+            echo
+            echo "===== HOST COMMON ====="
+            find qca-wifi-host-cmn -maxdepth 2 -type f | sort | head -100
+
+            echo
+            echo "===== FW API ====="
+            find fw-api -maxdepth 2 -type f | sort | head -100
+
+            echo
+            echo "===== QCACLD BUILD FILES ====="
+            ls -la qcacld3
+          } > report/source/tree-layout.txt
+
+      - name: Copy prototype injection files
+        shell: bash
+        run: |
+          set -e
+
+          REF_REPO="https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git"
+
+          git clone --depth=1 \
+            --branch nethunter-lineage-23.2 \
+            "$REF_REPO" \
+            reference
+
+          REF="reference/drivers/staging/qcacld-3.0"
+
+          mkdir -p qcacld3/core/wma/inc
+          mkdir -p qcacld3/core/wma/src
+          mkdir -p qcacld3/core/hdd/inc
+          mkdir -p qcacld3/core/hdd/src
+
+          cp "$REF/core/wma/inc/wma_frame_inject.h" \
+            qcacld3/core/wma/inc/
+
+          cp "$REF/core/wma/src/wma_frame_inject.c" \
+            qcacld3/core/wma/src/
+
+          cp "$REF/core/hdd/inc/wlan_hdd_frame_inject.h" \
+            qcacld3/core/hdd/inc/
+
+          cp "$REF/core/hdd/src/wlan_hdd_frame_inject.c" \
+            qcacld3/core/hdd/src/
+
+          cp "$REF/core/hdd/inc/wlan_hdd_frame_validate.h" \
+            qcacld3/core/hdd/inc/
+
+          cp "$REF/core/hdd/src/wlan_hdd_frame_validate.c" \
+            qcacld3/core/hdd/src/
+
+      - name: Record prototype diff
+        if: always()
+        run: |
+          {
+            echo "===== MODIFIED QCACLD FILES ====="
+
+            git -C qcacld3 status --short || true
+
+            echo
+            echo "===== DIFF STAT ====="
+
+            git -C qcacld3 diff --stat || true
+
+          } > report/source/prototype-diff.txt
+
+      - name: Prepare kernel configuration
+        shell: bash
+        run: |
+          set +e
+
+          cd kernel
+
+          make \
+            O=out \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            vendor/bengal-perf_defconfig \
+            > ../report/build/kernel-defconfig.log 2>&1
+
+          STATUS=$?
+
+          echo "defconfig status: $STATUS" \
+            >> ../report/build/kernel-defconfig.log
+
+          exit 0
+
+      - name: Prepare kernel for external module
+        shell: bash
+        run: |
+          set +e
+
+          cd kernel
+
+          make \
+            O=out \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            modules_prepare \
+            > ../report/build/modules-prepare.log 2>&1
+
+          STATUS=$?
+
+          echo "modules_prepare status: $STATUS" \
+            >> ../report/build/modules-prepare.log
+
+          exit 0
+
+      - name: Build QCACLD3 using Motorola-style external module command
+        shell: bash
+        run: |
+          set +e
+
+          KERNEL="$GITHUB_WORKSPACE/kernel"
+          OUT="$KERNEL/out"
+          WLAN="$GITHUB_WORKSPACE/qcacld3"
+          COMMON="$GITHUB_WORKSPACE/qca-wifi-host-cmn"
+          FWAPI="$GITHUB_WORKSPACE/fw-api"
+
+          echo "KERNEL=$KERNEL"
+          echo "OUT=$OUT"
+          echo "WLAN=$WLAN"
+          echo "COMMON=$COMMON"
+          echo "FWAPI=$FWAPI"
+
+          make \
+            -C "$KERNEL" \
+            O="$OUT" \
+            M="$WLAN" \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            modules \
+            WLAN_ROOT="$WLAN" \
+            WLAN_COMMON_ROOT="$COMMON" \
+            WLAN_COMMON_INC="$COMMON" \
+            WLAN_FW_API="$FWAPI" \
+            WLAN_PROFILE=default \
+            DYNAMIC_SINGLE_CHIP= \
+            MODNAME=wlan \
+            BOARD_PLATFORM=bengal \
+            CONFIG_QCA_CLD_WLAN=m \
+            > "$GITHUB_WORKSPACE/report/build/qcacld3-build.log" \
+            2>&1
+
+          STATUS=$?
+
+          echo "$STATUS" \
+            > "$GITHUB_WORKSPACE/report/build/build-exit-status.txt"
+
+          echo "Build exit status: $STATUS"
+
+          exit 0
+
+      - name: Extract compiler diagnostics
+        if: always()
+        shell: bash
+        run: |
+          LOG="report/build/qcacld3-build.log"
+
+          {
+            echo "===== ERRORS ====="
+
+            rg -n --text \
+              "error:|fatal error:|undefined|undeclared|implicit declaration|unknown type name|No such file|No rule|incompatible type|too few arguments|too many arguments" \
+              "$LOG" \
+              || true
+
+            echo
+            echo "===== WARNINGS ====="
+
+            rg -n --text \
+              "warning:" \
+              "$LOG" \
+              || true
+
+          } > report/build/compiler-diagnostics.txt
+
+      - name: Extract injection-specific diagnostics
+        if: always()
+        shell: bash
+        run: |
+          LOG="report/build/qcacld3-build.log"
+
+          {
+            echo "===== INJECTION SOURCE ====="
+
+            rg -n --text \
+              "wma_frame_inject|wlan_hdd_frame_inject|wlan_hdd_frame_validate" \
+              "$LOG" \
+              || true
+
+            echo
+            echo "===== WMA INJECTION ====="
+
+            rg -n --text \
+              "wma_.*inject|injection.*queue|inject.*frame" \
+              "$LOG" \
+              || true
+
+            echo
+            echo "===== WMI ====="
+
+            rg -n --text \
+              "wmi_.*tx|WMI_.*TX|mgmt.*tx|MGMT.*TX" \
+              "$LOG" \
+              || true
+
+          } > report/analysis/injection-build-diagnostics.txt
+
+      - name: Find generated modules
+        if: always()
+        run: |
+          find kernel/out qcacld3 \
+            -type f \
+            \( \
+              -name "*.ko" \
+              -o -name "*.o" \
+              -o -name "Module.symvers" \
+            \) \
+            -print \
+            2>/dev/null \
+            > report/build/generated-files.txt \
+            || true
+
+      - name: Inspect resulting WLAN module
+        if: always()
+        shell: bash
+        run: |
+          set +e
+
+          {
+            echo "===== WLAN MODULES ====="
+
+            find kernel/out qcacld3 \
+              -type f \
+              -name "*.ko" \
+              -print \
+              2>/dev/null \
+              || true
+
+            echo
+            echo "===== MODULE INFO ====="
+
+            for module in $(find kernel/out qcacld3 \
+              -type f \
+              -name "*.ko" \
+              2>/dev/null); do
+
+              echo
+              echo "MODULE: $module"
+
+              llvm-readelf -h "$module" 2>/dev/null \
+                | head -20 \
+                || true
+
+              modinfo "$module" 2>/dev/null \
+                || true
+
+            done
+
+          } > report/build/module-inspection.txt
+
+      - name: Generate final result
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          status_file = Path(
+              "report/build/build-exit-status.txt"
+          )
+
+          if status_file.exists():
+              status = status_file.read_text().strip()
+          else:
+              status = "UNKNOWN"
+
+          diagnostics = Path(
+              "report/build/compiler-diagnostics.txt"
+          ).read_text(
+              encoding="utf-8",
+              errors="ignore"
+          )
+
+          generated = Path(
+              "report/build/generated-files.txt"
+          ).read_text(
+              encoding="utf-8",
+              errors="ignore"
+          )
+
+          errors = [
+              line for line in diagnostics.splitlines()
+              if "error:" in line.lower()
+              or "fatal error:" in line.lower()
+          ]
+
+          modules = [
+              line for line in generated.splitlines()
+              if line.endswith(".ko")
+          ]
+
+          lines = [
+              "QCACLD3 ANDROID-CONTEXT PROTOTYPE",
+              "=================================",
+              "",
+              "Build exit status: " + status,
+              "Compiler error lines: " + str(len(errors)),
+              "Generated kernel modules: " + str(len(modules)),
+              "",
+              "Build environment:",
+              "  Motorola SM6225 kernel",
+              "  Motorola QCACLD3",
+              "  Motorola qca-wifi-host-cmn",
+              "  Motorola wlan-fw-api",
+              "",
+              "Prototype sources:",
+              "  wma_frame_inject",
+              "  wlan_hdd_frame_inject",
+              "  wlan_hdd_frame_validate",
+              "",
+              "This workflow is compile-only.",
+              "No device was flashed.",
+              "No firmware was modified.",
+              ""
+          ]
+
+          if errors:
+              lines.extend([
+                  "RESULT: COMPILER ERRORS DETECTED.",
+                  "",
+                  "The next source-port changes should be based",
+                  "on report/build/compiler-diagnostics.txt."
+              ])
+          elif status == "0":
+              lines.extend([
+                  "RESULT: BUILD COMMAND COMPLETED.",
+                  "",
+                  "A successful build does NOT establish that",
+                  "the Qualcomm firmware will accept injected frames."
+              ])
+          else:
+              lines.extend([
+                  "RESULT: BUILD DID NOT COMPLETE CLEANLY.",
+                  "",
+                  "Inspect the complete build log."
+              ])
+
+          Path(
+              "report/RESULT.txt"
+          ).write_text(
+              "\n".join(lines) + "\n"
+          )
+          PY
+
+      - name: Show result
+        if: always()
+        run: |
+          echo "================================"
+          echo "RESULT"
+          echo "================================"
+
+          cat report/RESULT.txt || true
+
+          echo
+          echo "================================"
+          echo "COMPILER DIAGNOSTICS"
+          echo "================================"
+
+          cat report/build/compiler-diagnostics.txt || true
+
+          echo
+          echo "================================"
+          echo "MODULE INSPECTION"
+          echo "================================"
+
+          cat report/build/module-inspection.txt || true
+
+      - name: Package audit
+        if: always()
+        run: |
+          zip -r \
+            qcacld3-android-context-build.zip \
+            report
+
+      - name: Upload audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcacld3-android-context-build
+          path: qcacld3-android-context-build.zip
+          if-no-files-found: error
