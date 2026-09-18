@@ -720,3 +720,144 @@ jobs:
           echo
           echo "Modules:"
           find "$ANYKERNEL_DIR/modules" 
+                # ============================================================
+      # 23. Create flashable ZIP
+      # ============================================================
+      - name: Create flashable ZIP
+        working-directory: ${{ env.ANYKERNEL_DIR }}
+        run: |
+          set -e
+
+          ZIP_FILE="${{ github.workspace }}/moto-g9-power-cebu-nethunter-flashable.zip"
+
+          rm -f "$ZIP_FILE"
+
+          echo "Creating flashable ZIP..."
+
+          zip -r9 "$ZIP_FILE" . -x ".git/*" ".github/*" "README.md"
+
+          echo
+          echo "Testing ZIP integrity..."
+
+          unzip -t "$ZIP_FILE"
+
+          echo
+          echo "ZIP successfully created:"
+          ls -lh "$ZIP_FILE"
+
+      # ============================================================
+      # 24. Verify upload files
+      # ============================================================
+      - name: Verify upload files
+        run: |
+          set -e
+
+          ZIP_FILE="${{ github.workspace }}/moto-g9-power-cebu-nethunter-flashable.zip"
+
+          echo "Checking flashable ZIP..."
+          test -f "$ZIP_FILE"
+          ls -lh "$ZIP_FILE"
+
+          echo
+          echo "Checking kernel Image..."
+          test -f "${{ github.workspace }}/kernel-out/arch/arm64/boot/Image"
+
+          echo
+          echo "Checking kernel config..."
+          test -f "${{ github.workspace }}/kernel.config"
+
+          echo
+          echo "Checking NetHunter config..."
+          test -f "${{ github.workspace }}/nethunter-final.config"
+
+          echo
+          echo "Checking kernel release..."
+          test -f "${{ github.workspace }}/kernel-release.txt"
+
+          echo
+          echo "Checking modules..."
+          find "${{ github.workspace }}/ak-modules/vendor/lib/modules" \
+            -type f \
+            -name '*.ko' \
+            -print
+
+          echo
+          echo "All artifact files exist."
+
+      # ============================================================
+      # 25. Upload flashable kernel
+      # ============================================================
+      - name: Upload flashable kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: moto-g9-power-cebu-nethunter-flashable
+          if-no-files-found: error
+          compression-level: 6
+          path: |
+            ${{ github.workspace }}/moto-g9-power-cebu-nethunter-flashable.zip
+            ${{ github.workspace }}/kernel-release.txt
+            ${{ github.workspace }}/kernel.config
+            ${{ github.workspace }}/nethunter-final.config
+
+      # ============================================================
+      # 26. Upload raw kernel
+      # ============================================================
+      - name: Upload raw kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: moto-g9-power-cebu-nethunter-kernel
+          if-no-files-found: error
+          compression-level: 6
+          path: |
+            ${{ github.workspace }}/kernel-out/arch/arm64/boot/Image
+            ${{ github.workspace }}/kernel.config
+            ${{ github.workspace }}/nethunter-final.config
+            ${{ github.workspace }}/kernel-release.txt
+            ${{ github.workspace }}/ak-modules/vendor/lib/modules/*.ko
+
+      # ============================================================
+      # 27. Final verification
+      # ============================================================
+      - name: Final verification
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          set -e
+
+          RELEASE="$(cat "${{ github.workspace }}/kernel-release.txt")"
+
+          echo "=========================================="
+          echo "FINAL BUILD VERIFICATION"
+          echo "=========================================="
+
+          echo
+          echo "Kernel release:"
+          echo "$RELEASE"
+
+          case "$RELEASE" in
+            *-dirty)
+              echo "ERROR: Dirty kernel release detected."
+              exit 1
+              ;;
+          esac
+
+          echo
+          echo "Kernel source status:"
+          git status --short
+
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "ERROR: Kernel source tree is dirty."
+            exit 1
+          fi
+
+          echo
+          echo "Kernel Image:"
+          ls -lh "${{ github.workspace }}/kernel-out/arch/arm64/boot/Image"
+
+          echo
+          echo "Flashable ZIP:"
+          ls -lh "${{ github.workspace }}/moto-g9-power-cebu-nethunter-flashable.zip"
+
+          echo
+          echo "=========================================="
+          echo "BUILD COMPLETE"
+          echo "=========================================="
