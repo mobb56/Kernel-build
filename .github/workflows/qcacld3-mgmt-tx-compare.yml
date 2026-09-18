@@ -1,0 +1,440 @@
+name: QCACLD3 Management TX Compare
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Initialize
+        if: always()
+        run: |
+          mkdir -p report
+          echo "Started" > report/status.txt
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git python3 zip unzip
+
+      - name: Clone Motorola QCACLD3
+        run: |
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qcacld-3.0.git \
+            motorola
+
+      - name: Clone OnePlus reference
+        run: |
+          git clone --depth=1 \
+            --branch nethunter-lineage-23.2 \
+            https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git \
+            oneplus
+
+      - name: Clone Xiaomi reference
+        run: |
+          git clone --depth=1 \
+            --branch lineage-23.2 \
+            https://github.com/yesimxev/android_kernel_xiaomi_sm6125.git \
+            xiaomi
+
+      - name: Record revisions
+        run: |
+          {
+            echo "=== MOTOROLA ==="
+            git -C motorola rev-parse HEAD
+            git -C motorola log -1 --oneline
+
+            echo
+            echo "=== ONEPLUS ==="
+            git -C oneplus rev-parse HEAD
+            git -C oneplus log -1 --oneline
+
+            echo
+            echo "=== XIAOMI ==="
+            git -C xiaomi rev-parse HEAD
+            git -C xiaomi log -1 --oneline
+          } > report/revisions.txt
+
+      - name: Locate management TX files
+        run: |
+          {
+            echo "=== MOTOROLA ==="
+            find motorola -type f \
+              \( -name '*mgmt*tx*' \
+              -o -name '*mgmt*' \
+              -o -name 'wma*.c' \
+              -o -name 'wma*.h' \
+              -o -name 'wmi*.c' \
+              -o -name 'wmi*.h' \
+              \) | sort
+
+            echo
+            echo "=== ONEPLUS ==="
+            find oneplus/drivers/staging/qcacld-3.0 -type f \
+              \( -name 'wlan_hdd_frame_inject.c' \
+              -o -name 'wlan_hdd_frame_inject.h' \
+              -o -name 'wma_frame_inject.c' \
+              -o -name 'wma_frame_inject.h' \
+              -o -name '*mgmt*' \
+              \) | sort
+
+            echo
+            echo "=== XIAOMI ==="
+            find xiaomi/drivers/staging/qcacld-3.0 -type f \
+              \( -name 'wlan_hdd_frame_inject.c' \
+              -o -name 'wlan_hdd_frame_inject.h' \
+              -o -name 'wma_frame_inject.c' \
+              -o -name 'wma_frame_inject.h' \
+              -o -name '*mgmt*' \
+              \) | sort
+
+          } > report/file-inventory.txt
+
+      - name: Extract exact reference injection calls
+        run: |
+          cat > extract_calls.py <<'PY'
+          import re
+          from pathlib import Path
+
+          ROOT = Path("oneplus/drivers/staging/qcacld-3.0")
+          REPORT = Path("report")
+
+          files = [
+              ROOT / "core/wma/src/wma_frame_inject.c",
+              ROOT / "core/wma/inc/wma_frame_inject.h",
+              ROOT / "core/hdd/src/wlan_hdd_frame_inject.c",
+              ROOT / "core/hdd/inc/wlan_hdd_frame_inject.h",
+          ]
+
+          calls = set()
+          definitions = set()
+          includes = set()
+
+          for path in files:
+
+              if not path.exists():
+                  continue
+
+              text = path.read_text(errors="ignore")
+
+              includes.update(
+                  re.findall(
+                      r'^\s*#\s*include\s*[<"]([^>"]+)[>"]',
+                      text,
+                      re.MULTILINE
+                  )
+              )
+
+              definitions.update(
+                  re.findall(
+                      r'\b([A-Za-z_][A-Za-z0-9_]*)\s*'
+                      r'\([^;{}]*\)\s*\{',
+                      text
+                  )
+              )
+
+              calls.update(
+                  re.findall(
+                      r'\b([A-Za-z_][A-Za-z0-9_]*)\s*\(',
+                      text
+                  )
+              )
+
+          excluded = {
+              "if", "else", "for", "while", "switch",
+              "return", "sizeof", "typeof", "do"
+          }
+
+          calls = {
+              x for x in calls
+              if x not in excluded
+          }
+
+          interesting = sorted(
+              x for x in calls
+              if (
+                  x.startswith("wma_")
+                  or x.startswith("wlan_hdd_")
+                  or x.startswith("wmi_")
+                  or x.startswith("WMI_")
+                  or x.startswith("qdf_")
+                  or x.startswith("qca_")
+                  or x.startswith("cdp_")
+                  or "tx" in x.lower()
+                  or "inject" in x.lower()
+                  or "vdev" in x.lower()
+              )
+          )
+
+          with open(REPORT / "reference-injection-calls.txt", "w") as f:
+              for x in interesting:
+                  f.write(x + "\n")
+
+          with open(REPORT / "reference-injection-definitions.txt", "w") as f:
+              for x in sorted(definitions):
+                  if (
+                      "inject" in x.lower()
+                      or "tx" in x.lower()
+                      or x.startswith("wma_")
+                      or x.startswith("wlan_hdd_")
+                  ):
+                      f.write(x + "\n")
+
+          with open(REPORT / "reference-injection-includes.txt", "w") as f:
+              for x in sorted(includes):
+                  f.write(x + "\n")
+          PY
+
+          python3 extract_calls.py
+
+      - name: Compare exact APIs against Motorola
+        run: |
+          cat > compare_apis.py <<'PY'
+          from pathlib import Path
+
+          MOTOROLA = Path("motorola")
+
+          symbols = []
+
+          for line in Path(
+              "report/reference-injection-calls.txt"
+          ).read_text().splitlines():
+
+              line = line.strip()
+
+              if line:
+                  symbols.append(line)
+
+          def source_files(root):
+              for p in root.rglob("*"):
+                  if p.is_file() and p.suffix in (".c", ".h"):
+                      yield p
+
+          def find_symbol(symbol):
+              matches = []
+
+              for p in source_files(MOTOROLA):
+
+                  try:
+                      text = p.read_text(errors="ignore")
+                  except Exception:
+                      continue
+
+                  if symbol in text:
+                      matches.append(str(p))
+
+              return sorted(set(matches))
+
+          with open(
+              "report/motorola-exact-api-results.txt",
+              "w"
+          ) as out:
+
+              for symbol in sorted(set(symbols)):
+
+                  matches = find_symbol(symbol)
+
+                  if matches:
+                      out.write(
+                          "PRESENT " + symbol + "\n"
+                      )
+
+                      for m in matches[:10]:
+                          out.write("    " + m + "\n")
+
+                  else:
+                      out.write(
+                          "MISSING " + symbol + "\n"
+                      )
+          PY
+
+          python3 compare_apis.py
+
+      - name: Extract Motorola management TX implementations
+        run: |
+          {
+            echo "=================================================="
+            echo "MOTOROLA MANAGEMENT TX IMPLEMENTATION"
+            echo "=================================================="
+
+            grep -RniE \
+              'wlan_hdd_mgmt_tx|__wlan_hdd_mgmt_tx|cfg80211_mgmt_tx|wma_mgmt_tx|mgmt_tx' \
+              motorola \
+              --include='*.c' \
+              --include='*.h' \
+              2>/dev/null || true
+
+            echo
+            echo "=================================================="
+            echo "MOTOROLA WMI MANAGEMENT TX"
+            echo "=================================================="
+
+            grep -RniE \
+              'wmi_.*mgmt.*tx|WMI_.*MGMT.*TX|mgmt.*tx.*send' \
+              motorola \
+              --include='*.c' \
+              --include='*.h' \
+              2>/dev/null || true
+
+          } > report/motorola-management-tx.txt
+
+      - name: Extract Motorola WMI TX definitions
+        run: |
+          {
+            echo "=================================================="
+            echo "MOTOROLA WMI TX DEFINITIONS"
+            echo "=================================================="
+
+            grep -RniE \
+              'WMI_[A-Za-z0-9_]*(MGMT|TX|VDEV)[A-Za-z0-9_]*' \
+              motorola \
+              --include='*.h' \
+              --include='*.c' \
+              2>/dev/null || true
+
+          } > report/motorola-wmi-tx-definitions.txt
+
+      - name: Compare key TX structures
+        run: |
+          {
+            echo "=================================================="
+            echo "ONEPLUS TX STRUCTURES"
+            echo "=================================================="
+
+            grep -RniE \
+              'struct[[:space:]]+[A-Za-z0-9_]*(inject|injection|mgmt|tx|vdev)[A-Za-z0-9_]*' \
+              oneplus/drivers/staging/qcacld-3.0 \
+              --include='*.h' \
+              --include='*.c' \
+              2>/dev/null || true
+
+            echo
+            echo "=================================================="
+            echo "XIAOMI TX STRUCTURES"
+            echo "=================================================="
+
+            grep -RniE \
+              'struct[[:space:]]+[A-Za-z0-9_]*(inject|injection|mgmt|tx|vdev)[A-Za-z0-9_]*' \
+              xiaomi/drivers/staging/qcacld-3.0 \
+              --include='*.h' \
+              --include='*.c' \
+              2>/dev/null || true
+
+            echo
+            echo "=================================================="
+            echo "MOTOROLA TX STRUCTURES"
+            echo "=================================================="
+
+            grep -RniE \
+              'struct[[:space:]]+[A-Za-z0-9_]*(inject|injection|mgmt|tx|vdev)[A-Za-z0-9_]*' \
+              motorola \
+              --include='*.h' \
+              --include='*.c' \
+              2>/dev/null || true
+
+          } > report/tx-structures-comparison.txt
+
+      - name: Compare injection and management TX paths
+        run: |
+          {
+            echo "============================================================"
+            echo "QCACLD3 MANAGEMENT TX / INJECTION PATH AUDIT"
+            echo "============================================================"
+            echo
+
+            echo "=== REFERENCE INJECTION CALLS ==="
+            cat report/reference-injection-calls.txt || true
+
+            echo
+            echo "=== REFERENCE INJECTION DEFINITIONS ==="
+            cat report/reference-injection-definitions.txt || true
+
+            echo
+            echo "=== REFERENCE INCLUDES ==="
+            cat report/reference-injection-includes.txt || true
+
+            echo
+            echo "=== MOTOROLA EXACT API RESULTS ==="
+            cat report/motorola-exact-api-results.txt || true
+
+            echo
+            echo "=== MOTOROLA MANAGEMENT TX ==="
+            cat report/motorola-management-tx.txt || true
+
+            echo
+            echo "=== MOTOROLA WMI TX ==="
+            cat report/motorola-wmi-tx-definitions.txt || true
+
+            echo
+            echo "=== TX STRUCTURES ==="
+            cat report/tx-structures-comparison.txt || true
+
+          } > report/COMPLETE-AUDIT.txt
+
+      - name: Generate summary
+        if: always()
+        run: |
+          {
+            echo "QCACLD3 MANAGEMENT TX AUDIT"
+            echo "==========================="
+            echo
+            echo "Target: Motorola Moto G9 Power / cebu"
+            echo "Platform: Qualcomm SM6225"
+            echo "Kernel: Linux 4.19"
+            echo
+            echo "This audit compares the reference injection"
+            echo "implementation with Motorola's existing"
+            echo "management-TX/WMI infrastructure."
+            echo
+            echo "It does not modify or flash the device."
+            echo
+            echo "=== API RESULTS ==="
+            cat report/motorola-exact-api-results.txt || true
+            echo
+            echo "=== MOTOROLA MANAGEMENT TX ==="
+            cat report/motorola-management-tx.txt || true
+          } > report/FINAL-RESULT.txt
+
+      - name: Update status
+        if: always()
+        run: |
+          echo "Audit finished." >> report/status.txt
+          date -u >> report/status.txt
+
+      - name: Package report
+        if: always()
+        run: |
+          zip -r qcacld3-mgmt-tx-audit.zip report
+          unzip -t qcacld3-mgmt-tx-audit.zip
+
+      - name: Upload report directory
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcacld3-mgmt-tx-audit-report
+          path: report/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload report ZIP
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcacld3-mgmt-tx-audit-zip
+          path: qcacld3-mgmt-tx-audit.zip
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Final verification
+        if: always()
+        run: |
+          echo "=================================================="
+          echo "AUDIT FINISHED"
+          echo "=================================================="
+          find report -type f | sort
+          ls -lh qcacld3-mgmt-tx-audit.zip || true
