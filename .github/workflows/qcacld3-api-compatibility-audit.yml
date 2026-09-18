@@ -1,0 +1,637 @@
+name: QCACLD3 API Compatibility Audit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Audit Motorola QCACLD3 compatibility
+    runs-on: ubuntu-24.04
+
+    steps:
+
+      # ============================================================
+      # SETUP
+      # ============================================================
+
+      - name: Install tools
+        shell: bash
+        run: |
+          set -e
+
+          sudo apt-get update
+          sudo apt-get install -y \
+            git \
+            ripgrep \
+            diffutils \
+            zip \
+            unzip
+
+      - name: Clone Motorola QCACLD3
+        shell: bash
+        run: |
+          set -e
+
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qcacld-3.0.git \
+            motorola-qcacld3
+
+      - name: Clone OnePlus NetHunter reference
+        shell: bash
+        run: |
+          set -e
+
+          git clone --depth=1 \
+            --branch nethunter-lineage-23.2 \
+            https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git \
+            oneplus
+
+      - name: Clone Xiaomi NetHunter reference
+        shell: bash
+        run: |
+          set -e
+
+          git clone --depth=1 \
+            --branch lineage-23.2 \
+            https://github.com/yesimxev/android_kernel_xiaomi_sm6125.git \
+            xiaomi
+
+      - name: Create report directories
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p report/reference
+          mkdir -p report/motorola
+          mkdir -p report/comparison
+          mkdir -p report/diffs
+
+      # ============================================================
+      # BASIC SOURCE INFORMATION
+      # ============================================================
+
+      - name: Record source information
+        shell: bash
+        run: |
+          set +e
+
+          {
+            echo "=================================================="
+            echo "SOURCE INFORMATION"
+            echo "=================================================="
+            echo
+
+            echo "Motorola QCACLD3:"
+            git -C motorola-qcacld3 log -1 --oneline
+            git -C motorola-qcacld3 rev-parse HEAD
+
+            echo
+            echo "OnePlus reference:"
+            git -C oneplus log -1 --oneline
+            git -C oneplus rev-parse HEAD
+
+            echo
+            echo "Xiaomi reference:"
+            git -C xiaomi log -1 --oneline
+            git -C xiaomi rev-parse HEAD
+
+          } > report/source-information.txt
+
+      # ============================================================
+      # INJECTION FILE INVENTORY
+      # ============================================================
+
+      - name: Inventory injection implementation
+        shell: bash
+        run: |
+          set +e
+
+          {
+            echo "=================================================="
+            echo "MOTOROLA QCACLD3 INJECTION FILES"
+            echo "=================================================="
+
+            find motorola-qcacld3 \
+              -type f \
+              \( \
+                -name '*frame_inject*' \
+                -o -name '*frame_validate*' \
+                -o -name '*inject_security*' \
+                -o -name 'wma_frame_inject*' \
+              \) \
+              | sort
+
+            echo
+            echo "=================================================="
+            echo "ONEPLUS QCACLD3 INJECTION FILES"
+            echo "=================================================="
+
+            find oneplus/drivers/staging/qcacld-3.0 \
+              -type f \
+              \( \
+                -name '*frame_inject*' \
+                -o -name '*frame_validate*' \
+                -o -name '*inject_security*' \
+                -o -name 'wma_frame_inject*' \
+              \) \
+              | sort
+
+            echo
+            echo "=================================================="
+            echo "XIAOMI QCACLD3 INJECTION FILES"
+            echo "=================================================="
+
+            find xiaomi/drivers/staging/qcacld-3.0 \
+              -type f \
+              \( \
+                -name '*frame_inject*' \
+                -o -name '*frame_validate*' \
+                -o -name '*inject_security*' \
+                -o -name 'wma_frame_inject*' \
+              \) \
+              | sort
+
+          } > report/comparison/injection-files.txt
+
+      # ============================================================
+      # EXTRACT CLEAN SYMBOL LIST
+      #
+      # IMPORTANT:
+      # We extract bare identifiers only.
+      # No "file:symbol" strings.
+      # ============================================================
+
+      - name: Extract clean reference symbols
+        shell: bash
+        run: |
+          set +e
+
+          : > report/reference/raw-symbols.txt
+
+          echo "=== HDD FRAME INJECTION SYMBOLS ===" \
+            >> report/reference/raw-symbols.txt
+
+          rg -o \
+            'wlan_hdd_[A-Za-z0-9_]*(inject|validate)[A-Za-z0-9_]*' \
+            oneplus/drivers/staging/qcacld-3.0/core/hdd \
+            xiaomi/drivers/staging/qcacld-3.0/core/hdd \
+            2>/dev/null \
+            >> report/reference/raw-symbols.txt
+
+          echo "=== WMA INJECTION SYMBOLS ===" \
+            >> report/reference/raw-symbols.txt
+
+          rg -o \
+            'wma_[A-Za-z0-9_]*(inject|injection)[A-Za-z0-9_]*' \
+            oneplus/drivers/staging/qcacld-3.0/core/wma \
+            xiaomi/drivers/staging/qcacld-3.0/core/wma \
+            2>/dev/null \
+            >> report/reference/raw-symbols.txt
+
+          echo "=== FRAME INJECTION MACROS ===" \
+            >> report/reference/raw-symbols.txt
+
+          rg -o \
+            '[A-Za-z0-9_]*FRAME_INJECTION[A-Za-z0-9_]*' \
+            oneplus/drivers/staging/qcacld-3.0 \
+            xiaomi/drivers/staging/qcacld-3.0 \
+            2>/dev/null \
+            >> report/reference/raw-symbols.txt
+
+          # Explicit production-path symbols.
+          cat >> report/reference/raw-symbols.txt <<'EOF'
+wlan_hdd_frame_inject
+wlan_hdd_frame_validate
+wma_frame_inject
+wma_init_injection_queue
+wma_queue_injection_frame
+wma_send_injection_frame_to_fw
+EOF
+
+          # Keep only valid C identifiers.
+          grep -E \
+            '^[A-Za-z_][A-Za-z0-9_]*$' \
+            report/reference/raw-symbols.txt \
+            | sort -u \
+            > report/reference/reference-symbols.txt || true
+
+          {
+            echo "Reference symbol count:"
+            wc -l < report/reference/reference-symbols.txt
+
+            echo
+            echo "Reference symbols:"
+            cat report/reference/reference-symbols.txt
+
+          } > report/reference/reference-symbol-list.txt
+
+      # ============================================================
+      # CHECK EACH CLEAN SYMBOL AGAINST MOTOROLA
+      # ============================================================
+
+      - name: Check reference symbols in Motorola
+        shell: bash
+        run: |
+          set +e
+
+          : > report/comparison/motorola-symbol-availability.txt
+
+          while IFS= read -r symbol; do
+
+            [ -z "$symbol" ] && continue
+
+            if rg -q \
+              --fixed-strings \
+              --glob '*.c' \
+              --glob '*.h' \
+              --glob '*.cc' \
+              --glob '*.cpp' \
+              "$symbol" \
+              motorola-qcacld3 \
+              2>/dev/null
+            then
+
+              echo "PRESENT $symbol" \
+                >> report/comparison/motorola-symbol-availability.txt
+
+            else
+
+              echo "MISSING $symbol" \
+                >> report/comparison/motorola-symbol-availability.txt
+
+            fi
+
+          done < report/reference/reference-symbols.txt
+
+          {
+            echo "=================================================="
+            echo "MOTOROLA SYMBOL AVAILABILITY"
+            echo "=================================================="
+            echo
+
+            echo "PRESENT:"
+            grep '^PRESENT ' \
+              report/comparison/motorola-symbol-availability.txt \
+              || true
+
+            echo
+            echo "MISSING:"
+            grep '^MISSING ' \
+              report/comparison/motorola-symbol-availability.txt \
+              || true
+
+            echo
+            echo "Counts:"
+            echo -n "Present: "
+            grep -c '^PRESENT ' \
+              report/comparison/motorola-symbol-availability.txt \
+              || true
+
+            echo -n "Missing: "
+            grep -c '^MISSING ' \
+              report/comparison/motorola-symbol-availability.txt \
+              || true
+
+          } > report/comparison/motorola-symbol-summary.txt
+
+      # ============================================================
+      # RESOLVE MOTOROLA LOCATIONS
+      # ============================================================
+
+      - name: Resolve Motorola symbol locations
+        shell: bash
+        run: |
+          set +e
+
+          : > report/motorola/symbol-locations.txt
+
+          while IFS= read -r symbol; do
+
+            [ -z "$symbol" ] && continue
+
+            echo "==================================================" \
+              >> report/motorola/symbol-locations.txt
+
+            echo "SYMBOL: $symbol" \
+              >> report/motorola/symbol-locations.txt
+
+            rg -n \
+              --fixed-strings \
+              --glob '*.c' \
+              --glob '*.h' \
+              "$symbol" \
+              motorola-qcacld3 \
+              2>/dev/null \
+              >> report/motorola/symbol-locations.txt \
+              || true
+
+            echo \
+              >> report/motorola/symbol-locations.txt
+
+          done < report/reference/reference-symbols.txt
+
+      # ============================================================
+      # EXTRACT ACTUAL FUNCTION DEFINITIONS
+      # ============================================================
+
+      - name: Extract reference function definitions
+        shell: bash
+        run: |
+          set +e
+
+          {
+            echo "=================================================="
+            echo "ONEPLUS INJECTION FUNCTION DEFINITIONS"
+            echo "=================================================="
+
+            rg -n \
+              '^[[:space:]]*(static[[:space:]]+)?(inline[[:space:]]+)?[A-Za-z_][A-Za-z0-9_[:space:]\*]*[[:space:]]+(wlan_hdd_[A-Za-z0-9_]*(inject|validate)[A-Za-z0-9_]*|wma_[A-Za-z0-9_]*(inject|injection)[A-Za-z0-9_]*)[[:space:]]*\(' \
+              oneplus/drivers/staging/qcacld-3.0/core/hdd \
+              oneplus/drivers/staging/qcacld-3.0/core/wma \
+              2>/dev/null \
+              || true
+
+            echo
+            echo "=================================================="
+            echo "XIAOMI INJECTION FUNCTION DEFINITIONS"
+            echo "=================================================="
+
+            rg -n \
+              '^[[:space:]]*(static[[:space:]]+)?(inline[[:space:]]+)?[A-Za-z_][A-Za-z0-9_[:space:]\*]*[[:space:]]+(wlan_hdd_[A-Za-z0-9_]*(inject|validate)[A-Za-z0-9_]*|wma_[A-Za-z0-9_]*(inject|injection)[A-Za-z0-9_]*)[[:space:]]*\(' \
+              xiaomi/drivers/staging/qcacld-3.0/core/hdd \
+              xiaomi/drivers/staging/qcacld-3.0/core/wma \
+              2>/dev/null \
+              || true
+
+          } > report/reference/function-definitions.txt
+
+      # ============================================================
+      # FIND KEY FUNCTION DEFINITIONS DIRECTLY
+      # ============================================================
+
+      - name: Locate production path functions
+        shell: bash
+        run: |
+          set +e
+
+          {
+            echo "=================================================="
+            echo "MOTOROLA PRODUCTION-PATH FUNCTIONS"
+            echo "=================================================="
+
+            for symbol in \
+              wlan_hdd_frame_inject \
+              wlan_hdd_frame_validate \
+              wma_frame_inject \
+              wma_init_injection_queue \
+              wma_queue_injection_frame \
+              wma_send_injection_frame_to_fw
+            do
+
+              echo
+              echo "----- $symbol -----"
+
+              rg -n \
+                --fixed-strings \
+                "$symbol" \
+                motorola-qcacld3 \
+                2>/dev/null \
+                || true
+
+            done
+
+            echo
+            echo "=================================================="
+            echo "ONEPLUS PRODUCTION-PATH FUNCTIONS"
+            echo "=================================================="
+
+            for symbol in \
+              wlan_hdd_frame_inject \
+              wlan_hdd_frame_validate \
+              wma_frame_inject \
+              wma_init_injection_queue \
+              wma_queue_injection_frame \
+              wma_send_injection_frame_to_fw
+            do
+
+              echo
+              echo "----- $symbol -----"
+
+              rg -n \
+                --fixed-strings \
+                "$symbol" \
+                oneplus/drivers/staging/qcacld-3.0 \
+                2>/dev/null \
+                || true
+
+            done
+
+            echo
+            echo "=================================================="
+            echo "XIAOMI PRODUCTION-PATH FUNCTIONS"
+            echo "=================================================="
+
+            for symbol in \
+              wlan_hdd_frame_inject \
+              wlan_hdd_frame_validate \
+              wma_frame_inject \
+              wma_init_injection_queue \
+              wma_queue_injection_frame \
+              wma_send_injection_frame_to_fw
+            do
+
+              echo
+              echo "----- $symbol -----"
+
+              rg -n \
+                --fixed-strings \
+                "$symbol" \
+                xiaomi/drivers/staging/qcacld-3.0 \
+                2>/dev/null \
+                || true
+
+            done
+
+          } > report/comparison/production-path-functions.txt
+
+      # ============================================================
+      # LOWER LEVEL API AUDIT
+      # ============================================================
+
+      - name: Audit qdf and TX APIs
+        shell: bash
+        run: |
+          set +e
+
+          {
+            echo "=================================================="
+            echo "MOTOROLA QDF NBUF APIs"
+            echo "=================================================="
+
+            rg -n \
+              'qdf_nbuf_[A-Za-z0-9_]+' \
+              motorola-qcacld3 \
+              2>/dev/null \
+              || true
+
+            echo
+            echo "=================================================="
+            echo "MOTOROLA TX APIs"
+            echo "=================================================="
+
+            rg -n \
+              'ndo_start_xmit|netdev_ops|tx_complete|tx_completion|tx_comp' \
+              motorola-qcacld3 \
+              2>/dev/null \
+              || true
+
+            echo
+            echo "=================================================="
+            echo "MOTOROLA MONITOR MODE"
+            echo "=================================================="
+
+            rg -n \
+              'monitor_mode|monitor.*mode|MONITOR' \
+              motorola-qcacld3 \
+              2>/dev/null \
+              || true
+
+            echo
+            echo "=================================================="
+            echo "MOTOROLA MANAGEMENT TX"
+            echo "=================================================="
+
+            rg -n \
+              'mgmt_tx|mgmt.*tx|tx.*mgmt' \
+              motorola-qcacld3 \
+              2>/dev/null \
+              || true
+
+          } > report/motorola/lower-level-apis.txt
+
+      # ============================================================
+      # FIRMWARE-FACING API AUDIT
+      # ============================================================
+
+      - name: Audit firmware-facing APIs
+        shell: bash
+        run: |
+          set +e
+
+          {
+            echo "=================================================="
+            echo "ONEPLUS FIRMWARE-FACING APIs"
+            echo "=================================================="
+
+            rg -n \
+              'WMI_[A-Za-z0-9_]*(TX|INJECT|FRAME|MGMT)[A-Za-z0-9_]*|FRAME_INJECT|INJECT.*CMD|TX.*COMPLETION|TX.*STATUS' \
+              oneplus/drivers/staging/qcacld-3.0/core/wma \
+              oneplus/drivers/staging/qcacld-3.0/core/hdd \
+              2>/dev/null \
+              || true
+
+            echo
+            echo "=================================================="
+            echo "XIAOMI FIRMWARE-FACING APIs"
+            echo "=================================================="
+
+            rg -n \
+              'WMI_[A-Za-z0-9_]*(TX|INJECT|FRAME|MGMT)[A-Za-z0-9_]*|FRAME_INJECT|INJECT.*CMD|TX.*COMPLETION|TX.*STATUS' \
+              xiaomi/drivers/staging/qcacld-3.0/core/wma \
+              xiaomi/drivers/staging/qcacld-3.0/core/hdd \
+              2>/dev/null \
+              || true
+
+            echo
+            echo "=================================================="
+            echo "MOTOROLA FIRMWARE-FACING APIs"
+            echo "=================================================="
+
+            rg -n \
+              'WMI_[A-Za-z0-9_]*(TX|INJECT|FRAME|MGMT)[A-Za-z0-9_]*|FRAME_INJECT|INJECT.*CMD|TX.*COMPLETION|TX.*STATUS' \
+              motorola-qcacld3 \
+              2>/dev/null \
+              || true
+
+          } > report/comparison/firmware-facing-api.txt
+
+      # ============================================================
+      # WMI / FW HEADER SEARCH
+      # ============================================================
+
+      - name: Locate WMI and firmware definitions
+        shell: bash
+        run: |
+          set +e
+
+          {
+            echo "=================================================="
+            echo "ONEPLUS WMI DEFINITIONS"
+            echo "=================================================="
+
+            rg -n \
+              'WMI_.*(INJECT|TX|MGMT)|FRAME_INJECT|INJECTION' \
+              oneplus \
+              --glob '*.h' \
+              --glob '*.c' \
+              2>/dev/null \
+              || true
+
+            echo
+            echo "=================================================="
+            echo "XIAOMI WMI DEFINITIONS"
+            echo "=================================================="
+
+            rg -n \
+              'WMI_.*(INJECT|TX|MGMT)|FRAME_INJECT|INJECTION' \
+              xiaomi \
+              --glob '*.h' \
+              --glob '*.c' \
+              2>/dev/null \
+              || true
+
+            echo
+            echo "=================================================="
+            echo "MOTOROLA WMI DEFINITIONS"
+            echo "=================================================="
+
+            rg -n \
+              'WMI_.*(INJECT|TX|MGMT)|FRAME_INJECT|INJECTION' \
+              motorola-qcacld3 \
+              --glob '*.h' \
+              --glob '*.c' \
+              2>/dev/null \
+              || true
+
+          } > report/comparison/wmi-definitions.txt
+
+      # ============================================================
+      # CONFIGURATION AUDIT
+      # ============================================================
+
+      - name: Audit injection configuration
+        shell: bash
+        run: |
+          set +e
+
+          {
+            echo "=================================================="
+            echo "MOTOROLA CONFIGURATION"
+            echo "=================================================="
+
+            rg -n \
+              'FEATURE_FRAME_INJECTION_SUPPORT|QCA_CLD_WLAN|CLD_WLAN' \
+              motorola-qcacld3 \
+              2>/dev/null \
+              || true
+
+            echo
+            echo "=================================================="
+            echo "ONEPLUS CONFIGURATION"
+            echo "=================================================="
+
+            rg -n \
+              'FEATURE_FRAME_INJECTION_SUPPO
