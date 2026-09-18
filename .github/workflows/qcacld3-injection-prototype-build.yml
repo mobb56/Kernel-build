@@ -1,0 +1,425 @@
+name: QCACLD3 Injection Prototype Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  prototype:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git \
+            make \
+            gcc \
+            clang \
+            lld \
+            llvm \
+            python3 \
+            bc \
+            bison \
+            flex \
+            libssl-dev \
+            libelf-dev \
+            dwarves \
+            zip
+
+      - name: Clone Motorola QCACLD3
+        run: |
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qcacld-3.0.git \
+            motorola-qcacld3
+
+      - name: Clone OnePlus reference
+        run: |
+          git clone --depth=1 \
+            --branch nethunter-lineage-23.2 \
+            https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git \
+            oneplus
+
+      - name: Clone Motorola kernel
+        run: |
+          git clone --depth=1 \
+            --branch lineage-23.2 \
+            https://github.com/LineageOS/android_kernel_motorola_sm6225.git \
+            kernel
+
+      - name: Create report directories
+        run: |
+          mkdir -p report
+          mkdir -p report/reference
+          mkdir -p report/port
+          mkdir -p report/build
+
+      - name: Copy only core injection implementation
+        run: |
+          set -e
+
+          REF="oneplus/drivers/staging/qcacld-3.0"
+
+          mkdir -p \
+            report/reference/hdd \
+            report/reference/wma
+
+          cp "$REF/core/wma/inc/wma_frame_inject.h" \
+            report/reference/wma/wma_frame_inject.h
+
+          cp "$REF/core/wma/src/wma_frame_inject.c" \
+            report/reference/wma/wma_frame_inject.c
+
+          cp "$REF/core/hdd/inc/wlan_hdd_frame_inject.h" \
+            report/reference/hdd/wlan_hdd_frame_inject.h
+
+          cp "$REF/core/hdd/src/wlan_hdd_frame_inject.c" \
+            report/reference/hdd/wlan_hdd_frame_inject.c
+
+          cp "$REF/core/hdd/inc/wlan_hdd_frame_validate.h" \
+            report/reference/hdd/wlan_hdd_frame_validate.h
+
+          cp "$REF/core/hdd/src/wlan_hdd_frame_validate.c" \
+            report/reference/hdd/wlan_hdd_frame_validate.c
+
+      - name: Copy prototype files into Motorola tree
+        run: |
+          set -e
+
+          DEST="motorola-qcacld3/drivers/staging/qcacld-3.0"
+
+          mkdir -p \
+            "$DEST/core/wma/inc" \
+            "$DEST/core/wma/src" \
+            "$DEST/core/hdd/inc" \
+            "$DEST/core/hdd/src"
+
+          cp report/reference/wma/wma_frame_inject.h \
+            "$DEST/core/wma/inc/"
+
+          cp report/reference/wma/wma_frame_inject.c \
+            "$DEST/core/wma/src/"
+
+          cp report/reference/hdd/wlan_hdd_frame_inject.h \
+            "$DEST/core/hdd/inc/"
+
+          cp report/reference/hdd/wlan_hdd_frame_inject.c \
+            "$DEST/core/hdd/src/"
+
+          cp report/reference/hdd/wlan_hdd_frame_validate.h \
+            "$DEST/core/hdd/inc/"
+
+          cp report/reference/hdd/wlan_hdd_frame_validate.c \
+            "$DEST/core/hdd/src/"
+
+      - name: Record prototype diff
+        run: |
+          git -C motorola-qcacld3 status --short \
+            > report/port/motorola-status.txt
+
+          git -C motorola-qcacld3 diff --stat \
+            > report/port/prototype-diff-stat.txt
+
+      - name: Analyze includes and dependencies
+        shell: bash
+        run: |
+          set +e
+
+          {
+            echo "===== wma_frame_inject.c ====="
+            sed -n '1,240p' \
+              motorola-qcacld3/drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c
+
+            echo
+            echo "===== wlan_hdd_frame_inject.c ====="
+            sed -n '1,260p' \
+              motorola-qcacld3/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.c
+
+            echo
+            echo "===== wlan_hdd_frame_validate.c ====="
+            sed -n '1,260p' \
+              motorola-qcacld3/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_validate.c
+
+          } > report/port/prototype-source-context.txt
+
+          {
+            echo "===== INCLUDES ====="
+
+            rg -n --text \
+              '^#include' \
+              motorola-qcacld3/drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c \
+              motorola-qcacld3/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.c \
+              motorola-qcacld3/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_validate.c \
+              || true
+
+            echo
+            echo "===== EXTERNAL SYMBOLS ====="
+
+            rg -o --text \
+              '\b(?:wma|wlan_hdd|qdf|qca|wmi)_[A-Za-z0-9_]+\b' \
+              motorola-qcacld3/drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c \
+              motorola-qcacld3/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.c \
+              motorola-qcacld3/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_validate.c \
+              | sort -u \
+              || true
+
+          } > report/port/prototype-dependencies.txt
+
+      - name: Check prototype symbols in Motorola
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import re
+          import subprocess
+          from pathlib import Path
+
+          files = [
+              Path(
+                  "motorola-qcacld3/"
+                  "drivers/staging/qcacld-3.0/"
+                  "core/wma/src/wma_frame_inject.c"
+              ),
+              Path(
+                  "motorola-qcacld3/"
+                  "drivers/staging/qcacld-3.0/"
+                  "core/hdd/src/wlan_hdd_frame_inject.c"
+              ),
+              Path(
+                  "motorola-qcacld3/"
+                  "drivers/staging/qcacld-3.0/"
+                  "core/hdd/src/wlan_hdd_frame_validate.c"
+              )
+          ]
+
+          symbols = set()
+
+          for path in files:
+              text = path.read_text(
+                  encoding="utf-8",
+                  errors="ignore"
+              )
+
+              found = re.findall(
+                  r"\b(?:wma|wlan_hdd|qdf|qca|wmi)_[A-Za-z0-9_]+\b",
+                  text
+              )
+
+              symbols.update(found)
+
+          results = []
+
+          for symbol in sorted(symbols):
+              result = subprocess.run(
+                  [
+                      "rg",
+                      "-n",
+                      "--text",
+                      "--fixed-strings",
+                      symbol,
+                      "motorola-qcacld3"
+                  ],
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.PIPE
+              )
+
+              if result.returncode == 0:
+                  results.append("[PRESENT] " + symbol)
+              else:
+                  results.append("[MISSING] " + symbol)
+
+          Path(
+              "report/port/prototype-symbol-check.txt"
+          ).write_text(
+              "\n".join(results) + "\n"
+          )
+
+          print(
+              "Prototype symbols checked:",
+              len(symbols)
+          )
+          PY
+
+      - name: Locate Motorola Kbuild integration points
+        shell: bash
+        run: |
+          set +e
+
+          {
+            echo "===== WMA KBUILD ====="
+
+            rg -n -C 10 --text \
+              "wma.*\.o|obj.*wma|core/wma" \
+              motorola-qcacld3/drivers/staging/qcacld-3.0 \
+              || true
+
+            echo
+            echo "===== HDD KBUILD ====="
+
+            rg -n -C 10 --text \
+              "hdd.*\.o|obj.*hdd|core/hdd" \
+              motorola-qcacld3/drivers/staging/qcacld-3.0 \
+              || true
+
+            echo
+            echo "===== INJECTION CONFIG ====="
+
+            rg -n --text \
+              "FEATURE_FRAME_INJECTION_SUPPORT|FRAME_INJECTION" \
+              motorola-qcacld3 \
+              || true
+
+          } > report/port/kbuild-integration.txt
+
+      - name: Attempt standalone Motorola QCACLD3 module build
+        shell: bash
+        run: |
+          set +e
+
+          cd motorola-qcacld3
+
+          make \
+            -C "$(pwd)/../../../kernel" \
+            M="$(pwd)/drivers/staging/qcacld-3.0" \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            modules \
+            > ../report/build/qcacld3-build.log 2>&1
+
+          STATUS=$?
+
+          echo "$STATUS" \
+            > ../report/build/qcacld3-build-status.txt
+
+          exit 0
+
+      - name: Extract compiler errors
+        if: always()
+        shell: bash
+        run: |
+          set +e
+
+          {
+            echo "===== ERRORS ====="
+
+            rg -n --text \
+              "error:|fatal error:|undefined|undeclared|implicit declaration|No such file|No rule" \
+              report/build/qcacld3-build.log \
+              || true
+
+            echo
+            echo "===== WARNINGS ====="
+
+            rg -n --text \
+              "warning:" \
+              report/build/qcacld3-build.log \
+              || true
+
+          } > report/build/compiler-errors.txt
+
+      - name: Check generated modules
+        if: always()
+        run: |
+          find motorola-qcacld3 \
+            -type f \
+            \( -name "*.ko" -o -name "*.o" \) \
+            -print \
+            > report/build/generated-objects.txt \
+            || true
+
+      - name: Generate prototype conclusion
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          status_path = Path(
+              "report/build/qcacld3-build-status.txt"
+          )
+
+          if status_path.exists():
+              status = status_path.read_text().strip()
+          else:
+              status = "not-run"
+
+          errors = Path(
+              "report/build/compiler-errors.txt"
+          ).read_text(
+              encoding="utf-8",
+              errors="ignore"
+          )
+
+          missing = Path(
+              "report/port/prototype-symbol-check.txt"
+          ).read_text(
+              encoding="utf-8",
+              errors="ignore"
+          ).count("[MISSING]")
+
+          lines = [
+              "QCACLD3 INJECTION PROTOTYPE BUILD",
+              "=================================",
+              "",
+              "Build command exit status: " + status,
+              "",
+              "Missing prototype symbols detected: "
+              + str(missing),
+              "",
+              "This is a compile-only prototype.",
+              "",
+              "No kernel image was flashed.",
+              "No Wi-Fi firmware was modified.",
+              "No device was modified.",
+              "",
+              "A successful compilation would only prove that",
+              "the driver sources can be integrated at compile time.",
+              "",
+              "It would NOT prove that the Moto G9 Power firmware",
+              "actually transmits injected frames."
+          ]
+
+          if "error:" in errors or "fatal error:" in errors:
+              lines.extend([
+                  "",
+                  "COMPILER ERRORS WERE DETECTED.",
+                  "See report/build/compiler-errors.txt."
+              ])
+          else:
+              lines.extend([
+                  "",
+                  "No compiler error was detected in the captured",
+                  "build output."
+              ])
+
+          Path(
+              "report/PROTOTYPE_RESULT.txt"
+          ).write_text(
+              "\n".join(lines) + "\n"
+          )
+          PY
+
+      - name: Show result
+        if: always()
+        run: |
+          echo "===== PROTOTYPE RESULT ====="
+          cat report/PROTOTYPE_RESULT.txt || true
+
+          echo
+          echo "===== COMPILER ERRORS ====="
+          cat report/build/compiler-errors.txt || true
+
+      - name: Package report
+        if: always()
+        run: |
+          zip -r \
+            qcacld3-injection-prototype-audit.zip \
+            report
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcacld3-injection-prototype-audit
+          path: qcacld3-injection-prototype-audit.zip
+          if-no-files-found: error
