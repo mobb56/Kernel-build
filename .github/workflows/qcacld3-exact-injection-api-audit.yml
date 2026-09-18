@@ -1,0 +1,399 @@
+name: QCACLD3 Exact Injection API Audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git ripgrep python3
+
+      - name: Clone Motorola QCACLD3
+        run: |
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qcacld-3.0.git \
+            motorola
+
+      - name: Clone OnePlus reference
+        run: |
+          git clone --depth=1 \
+            --branch nethunter-lineage-23.2 \
+            https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git \
+            oneplus
+
+      - name: Clone Xiaomi reference
+        run: |
+          git clone --depth=1 \
+            --branch lineage-23.2 \
+            https://github.com/yesimxev/android_kernel_xiaomi_sm6125.git \
+            xiaomi
+
+      - name: Prepare report
+        run: |
+          mkdir -p report/reference
+          mkdir -p report/motorola
+          mkdir -p report/comparison
+
+      - name: Extract exact injection sources
+        run: |
+          cp oneplus/drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c \
+             report/reference/oneplus-wma_frame_inject.c
+
+          cp oneplus/drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h \
+             report/reference/oneplus-wma_frame_inject.h
+
+          cp xiaomi/drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c \
+             report/reference/xiaomi-wma_frame_inject.c
+
+          cp xiaomi/drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h \
+             report/reference/xiaomi-wma_frame_inject.h
+
+      - name: Extract reference function calls
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import re
+          from pathlib import Path
+
+          files = [
+              Path("report/reference/oneplus-wma_frame_inject.c"),
+              Path("report/reference/xiaomi-wma_frame_inject.c"),
+          ]
+
+          calls = {}
+
+          for f in files:
+              text = f.read_text(errors="ignore")
+
+              # C function calls.
+              found = re.findall(
+                  r'\b([A-Za-z_][A-Za-z0-9_]*)\s*\(',
+                  text
+              )
+
+              # Remove language/control constructs.
+              ignore = {
+                  "if", "for", "while", "switch", "sizeof",
+                  "return", "do", "typeof"
+              }
+
+              symbols = sorted(
+                  set(x for x in found if x not in ignore)
+              )
+
+              calls[f.name] = symbols
+
+              Path(
+                  f"report/comparison/{f.stem}-calls.txt"
+              ).write_text(
+                  "\n".join(symbols) + "\n"
+              )
+
+          common = sorted(
+              set(calls[files[0].name]) &
+              set(calls[files[1].name])
+          )
+
+          only_oneplus = sorted(
+              set(calls[files[0].name]) -
+              set(calls[files[1].name])
+          )
+
+          only_xiaomi = sorted(
+              set(calls[files[1].name]) -
+              set(calls[files[0].name])
+          )
+
+          out = []
+
+          out.append("COMMON REFERENCE INJECTION CALLS")
+          out.append("=" * 40)
+          out.extend(common)
+
+          out.append("")
+          out.append("ONEPLUS ONLY")
+          out.append("=" * 40)
+          out.extend(only_oneplus)
+
+          out.append("")
+          out.append("XIAOMI ONLY")
+          out.append("=" * 40)
+          out.extend(only_xiaomi)
+
+          Path(
+              "report/comparison/reference-call-set.txt"
+          ).write_text("\n".join(out) + "\n")
+          PY
+
+      - name: Check every reference call in Motorola
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import re
+          import subprocess
+          from pathlib import Path
+
+          src = Path("motorola")
+          symbols_file = Path(
+              "report/comparison/reference-call-set.txt"
+          )
+
+          # Only inspect the common call section.
+          text = symbols_file.read_text(errors="ignore")
+          section = text.split(
+              "ONEPLUS ONLY",
+              1
+          )[0]
+
+          symbols = []
+
+          for line in section.splitlines():
+              line = line.strip()
+
+              if not line:
+                  continue
+
+              if line.startswith("COMMON"):
+                  continue
+              if line.startswith("="):
+                  continue
+
+              if re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', line):
+                  symbols.append(line)
+
+          results = []
+
+          for sym in symbols:
+              r = subprocess.run(
+                  [
+                      "rg",
+                      "-n",
+                      "--fixed-strings",
+                      sym,
+                      str(src)
+                  ],
+                  capture_output=True,
+                  text=True
+              )
+
+              if r.returncode == 0:
+                  results.append(
+                      f"[PRESENT] {sym}\n" +
+                      "\n".join(
+                          "  " + x
+                          for x in r.stdout.splitlines()[:10]
+                      )
+                  )
+              else:
+                  results.append(f"[MISSING] {sym}")
+
+          Path(
+              "report/comparison/motorola-call-compatibility.txt"
+          ).write_text(
+              "\n\n".join(results) + "\n"
+          )
+
+          print(
+              "Reference calls checked:",
+              len(symbols)
+          )
+          PY
+
+      - name: Extract reference WMI and TX types
+        shell: bash
+        run: |
+          {
+            echo "===== ONEPLUS WMA INJECTION ====="
+            rg -n -C 5 \
+              'wmi_|WMI_|tx_|TX_|mgmt_|MGMT_|vdev_|VDEV_' \
+              report/reference/oneplus-wma_frame_inject.c \
+              || true
+
+            echo
+            echo "===== XIAOMI WMA INJECTION ====="
+            rg -n -C 5 \
+              'wmi_|WMI_|tx_|TX_|mgmt_|MGMT_|vdev_|VDEV_' \
+              report/reference/xiaomi-wma_frame_inject.c \
+              || true
+          } > report/reference/reference-wmi-tx-context.txt
+
+      - name: Extract Motorola corresponding APIs
+        shell: bash
+        run: |
+          {
+            echo "===== MOTOROLA MANAGEMENT TX ====="
+
+            rg -n -C 60 \
+              'wlan_hdd_mgmt_tx|__wlan_hdd_mgmt_tx' \
+              motorola \
+              || true
+
+            echo
+            echo "===== MOTOROLA WMA MANAGEMENT TX ====="
+
+            rg -n -C 60 \
+              'wma_mgmt_tx' \
+              motorola \
+              || true
+
+            echo
+            echo "===== MOTOROLA WMI MGMT TX ====="
+
+            rg -n -C 60 \
+              'wmi_mgmt_unified_cmd_send' \
+              motorola \
+              || true
+
+          } > report/motorola/mgmt-tx-context.txt
+
+      - name: Compare exact WMI identifiers
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import re
+          import subprocess
+          from pathlib import Path
+
+          refs = set()
+
+          for f in [
+              Path("report/reference/oneplus-wma_frame_inject.c"),
+              Path("report/reference/xiaomi-wma_frame_inject.c"),
+          ]:
+              text = f.read_text(errors="ignore")
+
+              for x in re.findall(
+                  r'\b(?:WMI|wmi|WMA|wma)_[A-Za-z0-9_]+\b',
+                  text
+              ):
+                  refs.add(x)
+
+          results = []
+
+          for sym in sorted(refs):
+              r = subprocess.run(
+                  [
+                      "rg",
+                      "-n",
+                      "--fixed-strings",
+                      sym,
+                      "motorola"
+                  ],
+                  capture_output=True,
+                  text=True
+              )
+
+              if r.returncode == 0:
+                  results.append(
+                      f"[PRESENT] {sym}\n" +
+                      "\n".join(
+                          "  " + x
+                          for x in r.stdout.splitlines()[:8]
+                      )
+                  )
+              else:
+                  results.append(
+                      f"[MISSING] {sym}"
+                  )
+
+          Path(
+              "report/comparison/exact-wmi-identifiers.txt"
+          ).write_text(
+              "\n\n".join(results) + "\n"
+          )
+          PY
+
+      - name: Compare injection source between references
+        run: |
+          diff -u \
+            report/reference/oneplus-wma_frame_inject.c \
+            report/reference/xiaomi-wma_frame_inject.c \
+            > report/comparison/oneplus-vs-xiaomi-wma.diff \
+            || true
+
+      - name: Generate decision report
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path(
+              "report/comparison/motorola-call-compatibility.txt"
+          )
+
+          text = p.read_text(errors="ignore")
+
+          present = text.count("[PRESENT]")
+          missing = text.count("[MISSING]")
+
+          wmi = Path(
+              "report/comparison/exact-wmi-identifiers.txt"
+          ).read_text(errors="ignore")
+
+          wp = wmi.count("[PRESENT]")
+          wm = wmi.count("[MISSING]")
+
+          report = f"""
+QCACLD3 EXACT INJECTION API AUDIT
+=================================
+
+Reference injection calls checked:
+  Present in Motorola: {present}
+  Missing in Motorola: {missing}
+
+Reference WMI/WMA identifiers checked:
+  Present in Motorola: {wp}
+  Missing in Motorola: {wm}
+
+INTERPRETATION
+--------------
+
+This is an API compatibility audit only.
+
+A high number of PRESENT symbols does NOT prove firmware
+compatibility.
+
+A high number of MISSING symbols indicates that the reference
+injection implementation cannot simply be copied unchanged.
+
+The next source-port decision should be based on the actual
+firmware-facing WMI commands, structures, and completion events.
+
+No kernel was modified or flashed by this workflow.
+"""
+
+          Path(
+              "report/DECISION.txt"
+          ).write_text(report)
+          PY
+
+      - name: Show decision
+        if: always()
+        run: |
+          cat report/DECISION.txt || true
+
+          echo
+          echo "===== EXACT WMI RESULTS ====="
+          cat report/comparison/exact-wmi-identifiers.txt || true
+
+          echo
+          echo "===== CALL COMPATIBILITY ====="
+          cat report/comparison/motorola-call-compatibility.txt || true
+
+      - name: Package report
+        if: always()
+        run: |
+          zip -r qcacld3-exact-injection-api-audit.zip report
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcacld3-exact-injection-api-audit
+          path: qcacld3-exact-injection-api-audit.zip
+          if-no-files-found: error
