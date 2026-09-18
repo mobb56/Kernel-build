@@ -1,0 +1,224 @@
+name: QCACLD3 API Compatibility Audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git ripgrep diffutils
+
+      - name: Clone Motorola QCACLD3
+        run: |
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qcacld-3.0.git \
+            motorola-qcacld3
+
+      - name: Clone OnePlus reference
+        run: |
+          git clone --depth=1 \
+            --branch nethunter-lineage-23.2 \
+            https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git \
+            oneplus
+
+      - name: Clone Xiaomi reference
+        run: |
+          git clone --depth=1 \
+            --branch lineage-23.2 \
+            https://github.com/yesimxev/android_kernel_xiaomi_sm6125.git \
+            xiaomi
+
+      - name: Prepare report
+        run: |
+          mkdir -p report
+
+      - name: Locate injection implementation
+        run: |
+          {
+            echo "=== MOTOROLA ==="
+            find motorola-qcacld3 \
+              -type f \( \
+              -name '*frame_inject*' -o \
+              -name '*frame_validate*' -o \
+              -name '*inject_security*' -o \
+              -name 'wma_frame_inject*' \
+              \) | sort
+
+            echo
+            echo "=== ONEPLUS ==="
+            find oneplus/drivers/staging/qcacld-3.0 \
+              -type f \( \
+              -name '*frame_inject*' -o \
+              -name '*frame_validate*' -o \
+              -name '*inject_security*' -o \
+              -name 'wma_frame_inject*' \
+              \) | sort
+
+            echo
+            echo "=== XIAOMI ==="
+            find xiaomi/drivers/staging/qcacld-3.0 \
+              -type f \( \
+              -name '*frame_inject*' -o \
+              -name '*frame_validate*' -o \
+              -name '*inject_security*' -o \
+              -name 'wma_frame_inject*' \
+              \) | sort
+          } > report/injection-files.txt
+
+      - name: Extract production-path symbols
+        run: |
+          {
+            echo "=== Motorola ==="
+            rg -n \
+              'wlan_hdd_frame_inject|wlan_hdd_frame_validate|wma_frame_inject|wma_queue_injection_frame|wma_send_injection_frame_to_fw|ndo_start_xmit|monitor' \
+              motorola-qcacld3 || true
+
+            echo
+            echo "=== OnePlus ==="
+            rg -n \
+              'wlan_hdd_frame_inject|wlan_hdd_frame_validate|wma_frame_inject|wma_queue_injection_frame|wma_send_injection_frame_to_fw|ndo_start_xmit' \
+              oneplus/drivers/staging/qcacld-3.0 || true
+
+            echo
+            echo "=== Xiaomi ==="
+            rg -n \
+              'wlan_hdd_frame_inject|wlan_hdd_frame_validate|wma_frame_inject|wma_queue_injection_frame|wma_send_injection_frame_to_fw|ndo_start_xmit' \
+              xiaomi/drivers/staging/qcacld-3.0 || true
+          } > report/production-path-symbols.txt
+
+      - name: Extract underlying API usage
+        run: |
+          {
+            echo "=== qdf_nbuf ==="
+            rg -o \
+              'qdf_nbuf_[A-Za-z0-9_]+' \
+              oneplus/drivers/staging/qcacld-3.0/core/hdd \
+              oneplus/drivers/staging/qcacld-3.0/core/wma \
+              | sort -u
+
+            echo
+            echo "=== WMA injection ==="
+            rg -o \
+              'wma_[A-Za-z0-9_]*inject[A-Za-z0-9_]*|wma_[A-Za-z0-9_]*frame[A-Za-z0-9_]*' \
+              oneplus/drivers/staging/qcacld-3.0/core/wma \
+              | sort -u
+
+            echo
+            echo "=== HDD injection ==="
+            rg -o \
+              'wlan_hdd_[A-Za-z0-9_]*(inject|validate)[A-Za-z0-9_]*' \
+              oneplus/drivers/staging/qcacld-3.0/core/hdd \
+              | sort -u
+          } > report/reference-api-symbols.txt
+
+      - name: Check APIs against Motorola tree
+        run: |
+          : > report/motorola-api-availability.txt
+
+          while read -r symbol; do
+            [ -z "$symbol" ] && continue
+
+            if rg -q \
+              --glob '!*.o' \
+              --glob '!*.ko' \
+              --glob '!*.a' \
+              "$symbol" motorola-qcacld3; then
+              echo "PRESENT $symbol" \
+                >> report/motorola-api-availability.txt
+            else
+              echo "MISSING $symbol" \
+                >> report/motorola-api-availability.txt
+            fi
+          done < report/reference-api-symbols.txt
+
+      - name: Compare key reference files
+        run: |
+          mkdir -p report/reference-diffs
+
+          for f in \
+            core/wma/inc/wma_frame_inject.h \
+            core/wma/src/wma_frame_inject.c \
+            core/hdd/inc/wlan_hdd_frame_inject.h \
+            core/hdd/src/wlan_hdd_frame_inject.c \
+            core/hdd/inc/wlan_hdd_frame_validate.h \
+            core/hdd/src/wlan_hdd_frame_validate.c
+          do
+            {
+              echo "=================================================="
+              echo "$f"
+              echo "=================================================="
+
+              if [ -f "oneplus/drivers/staging/qcacld-3.0/$f" ]; then
+                echo "OnePlus: PRESENT"
+              else
+                echo "OnePlus: MISSING"
+              fi
+
+              if [ -f "xiaomi/drivers/staging/qcacld-3.0/$f" ]; then
+                echo "Xiaomi: PRESENT"
+              else
+                echo "Xiaomi: MISSING"
+              fi
+
+              echo
+              echo "--- Motorola matching basename/search ---"
+              base="$(basename "$f")"
+              find motorola-qcacld3 -type f -name "$base" -print
+            } >> report/reference-diffs/key-files.txt
+          done
+
+      - name: Search firmware-facing APIs
+        run: |
+          {
+            echo "=== Firmware/WMA-facing symbols in references ==="
+
+            rg -n \
+              'WMI_.*TX|WMI_.*INJECT|FRAME_INJECT|INJECT.*CMD|TX.*COMPLETION|TX.*STATUS|mgmt.*tx|mgmt_tx' \
+              oneplus/drivers/staging/qcacld-3.0/core/wma \
+              oneplus/drivers/staging/qcacld-3.0/core/hdd \
+              || true
+
+            echo
+            echo "=== Same searches in Motorola ==="
+
+            rg -n \
+              'WMI_.*TX|WMI_.*INJECT|FRAME_INJECT|INJECT.*CMD|TX.*COMPLETION|TX.*STATUS|mgmt.*tx|mgmt_tx' \
+              motorola-qcacld3 \
+              || true
+          } > report/firmware-facing-api.txt
+
+      - name: Generate decision report
+        run: |
+          {
+            echo "QCACLD3 API COMPATIBILITY AUDIT"
+            echo
+            echo "Motorola QCACLD3 vs OnePlus/Xiaomi NetHunter references"
+            echo
+            echo "=== Injection implementation ==="
+            cat report/injection-files.txt
+            echo
+            echo "=== Production path ==="
+            cat report/production-path-symbols.txt
+            echo
+            echo "=== Motorola API availability ==="
+            cat report/motorola-api-availability.txt
+            echo
+            echo "=== Firmware-facing comparison ==="
+            cat report/firmware-facing-api.txt
+          } > report/PORTABILITY-REPORT.txt
+
+      - name: Package report
+        run: |
+          zip -r cebu-qcacld3-api-compatibility-audit.zip report
+
+      - name: Upload audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: cebu-qcacld3-api-compatibility-audit
+          path: cebu-qcacld3-api-compatibility-audit.zip
+          if-no-files-found: error
