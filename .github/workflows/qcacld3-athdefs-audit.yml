@@ -1,0 +1,356 @@
+name: QCACLD3 athdefs Dependency Audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout workflow repository
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git \
+            ripgrep \
+            python3 \
+            unzip
+
+      - name: Clone LineageOS SM6225 kernel
+        run: |
+          git clone --depth=1 \
+            --branch lineage-23.2 \
+            https://github.com/LineageOS/android_kernel_motorola_sm6225.git \
+            kernel
+
+      - name: Clone Motorola QCACLD3
+        run: |
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qcacld-3.0.git \
+            qcacld3
+
+      - name: Clone Motorola WLAN host common
+        run: |
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qca-wifi-host-cmn.git \
+            qca-wifi-host-cmn
+
+      - name: Clone Motorola firmware API
+        run: |
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-fw-api.git \
+            fw-api
+
+      - name: Create report directories
+        run: |
+          mkdir -p report
+          mkdir -p report/search
+          mkdir -p report/includes
+          mkdir -p report/versions
+          mkdir -p report/kbuild
+
+      - name: Record repository revisions
+        run: |
+          {
+            echo "=== Kernel ==="
+            git -C kernel rev-parse HEAD
+            git -C kernel log -1 --oneline
+
+            echo
+            echo "=== QCACLD3 ==="
+            git -C qcacld3 rev-parse HEAD
+            git -C qcacld3 log -1 --oneline
+
+            echo
+            echo "=== qca-wifi-host-cmn ==="
+            git -C qca-wifi-host-cmn rev-parse HEAD
+            git -C qca-wifi-host-cmn log -1 --oneline
+
+            echo
+            echo "=== fw-api ==="
+            git -C fw-api rev-parse HEAD
+            git -C fw-api log -1 --oneline
+          } > report/versions/revisions.txt
+
+      - name: Locate athdefs.h everywhere
+        shell: bash
+        run: |
+          {
+            echo "=== qcacld3 ==="
+            find qcacld3 -type f -name 'athdefs.h' -print
+
+            echo
+            echo "=== qca-wifi-host-cmn ==="
+            find qca-wifi-host-cmn -type f -name 'athdefs.h' -print
+
+            echo
+            echo "=== fw-api ==="
+            find fw-api -type f -name 'athdefs.h' -print
+
+            echo
+            echo "=== kernel ==="
+            find kernel -type f -name 'athdefs.h' -print
+          } > report/search/athdefs-locations.txt
+
+      - name: Search every athdefs include
+        shell: bash
+        run: |
+          {
+            echo "=== QCACLD3 includes ==="
+            rg -n --text '#[[:space:]]*include[[:space:]]*[<"]athdefs\.h[>"]' \
+              qcacld3 || true
+
+            echo
+            echo "=== Host common includes ==="
+            rg -n --text '#[[:space:]]*include[[:space:]]*[<"]athdefs\.h[>"]' \
+              qca-wifi-host-cmn || true
+
+            echo
+            echo "=== FW API includes ==="
+            rg -n --text '#[[:space:]]*include[[:space:]]*[<"]athdefs\.h[>"]' \
+              fw-api || true
+
+            echo
+            echo "=== Kernel includes ==="
+            rg -n --text '#[[:space:]]*include[[:space:]]*[<"]athdefs\.h[>"]' \
+              kernel || true
+          } > report/search/athdefs-includes.txt
+
+      - name: Search for athdefs symbols and definitions
+        shell: bash
+        run: |
+          {
+            echo "=== athdefs references in QCACLD3 ==="
+            rg -n --text -i 'athdefs|ATH_|A_TH|ATH_' qcacld3/core \
+              | head -n 1000 || true
+
+            echo
+            echo "=== athdefs references in host common ==="
+            rg -n --text -i 'athdefs|ATH_|A_TH|ATH_' qca-wifi-host-cmn \
+              | head -n 1000 || true
+
+            echo
+            echo "=== athdefs references in fw-api ==="
+            rg -n --text -i 'athdefs|ATH_|A_TH|ATH_' fw-api \
+              | head -n 1000 || true
+          } > report/search/athdefs-symbols.txt
+
+      - name: Inspect QCACLD3 include configuration
+        shell: bash
+        run: |
+          {
+            echo "=== QCACLD3 Kbuild ==="
+            sed -n '1,260p' qcacld3/Kbuild
+
+            echo
+            echo "=== QCACLD3 Makefile ==="
+            sed -n '1,220p' qcacld3/Makefile
+
+            echo
+            echo "=== QCACLD3 Android.mk ==="
+            sed -n '1,260p' qcacld3/Android.mk
+          } > report/kbuild/qcacld3-build-files.txt
+
+      - name: Extract include flags from Kbuild
+        shell: bash
+        run: |
+          rg -n --text \
+            'WLAN_COMMON|WLAN_FW|WLAN_ROOT|QDF_INC|UMAC_COMMON_INC|CDE|INCLUDES|ccflags|EXTRA_CFLAGS' \
+            qcacld3/Kbuild \
+            > report/includes/qcacld3-include-flags.txt || true
+
+      - name: Inspect athdefs include context
+        shell: bash
+        run: |
+          TARGET="qcacld3/core/dp/ol/inc/ol_txrx_ctrl_api.h"
+
+          {
+            echo "=== Target ==="
+            echo "$TARGET"
+
+            echo
+            echo "=== First 120 lines ==="
+            sed -n '1,120p' "$TARGET"
+
+            echo
+            echo "=== Direct includes ==="
+            rg -n --text \
+              '^#[[:space:]]*include' \
+              "$TARGET" || true
+          } > report/includes/athdefs-context.txt
+
+      - name: Find likely Qualcomm definitions
+        shell: bash
+        run: |
+          {
+            echo "=== typedefs / structs / macros potentially supplied by athdefs.h ==="
+
+            rg -n --text \
+              'ATH[A-Za-z0-9_]*|A_UINT[A-Za-z0-9_]*|A_INT[A-Za-z0-9_]*|A_BOOL|A_STATUS|A_UCHAR|A_CHAR|A_UINT8|A_UINT16|A_UINT32|A_UINT64' \
+              qcacld3/core/dp/ol/inc/ol_txrx_ctrl_api.h \
+              > /tmp/athdefs-target-symbols.txt || true
+
+            cat /tmp/athdefs-target-symbols.txt
+
+            echo
+            echo "=== Definitions across source trees ==="
+
+            while read -r symbol; do
+              [ -z "$symbol" ] && continue
+              echo
+              echo "--- $symbol ---"
+              rg -n --text \
+                "define[[:space:]]+$symbol|typedef.*$symbol|struct[[:space:]]+$symbol|enum[[:space:]]+$symbol" \
+                qcacld3 qca-wifi-host-cmn fw-api kernel \
+                | head -n 100 || true
+            done < <(
+              sed -E 's/.*\b(ATH[A-Za-z0-9_]*|A_UINT[0-9]+|A_INT[0-9]+|A_BOOL|A_STATUS|A_UCHAR|A_CHAR)\b.*/\1/' \
+                /tmp/athdefs-target-symbols.txt \
+                | sort -u
+            )
+          } > report/search/athdefs-symbol-definition-search.txt
+
+      - name: Search Qualcomm 4.19 reference for athdefs
+        shell: bash
+        run: |
+          git clone --depth=1 \
+            --branch android-msm-barbet-4.19-android11-d2 \
+            https://android.googlesource.com/kernel/msm-modules/qca-wfi-host-cmn \
+            reference-host-cmn || true
+
+          {
+            echo "=== Reference host-common athdefs ==="
+            find reference-host-cmn -type f -name 'athdefs.h' -print 2>/dev/null || true
+
+            echo
+            echo "=== Reference athdefs references ==="
+            rg -n --text 'athdefs\.h' reference-host-cmn \
+              | head -n 500 || true
+          } > report/search/reference-4.19-athdefs.txt
+
+      - name: Compare directory layouts
+        shell: bash
+        run: |
+          {
+            echo "=== Motorola host-common top level ==="
+            find qca-wifi-host-cmn -maxdepth 2 -type d | sort | head -n 300
+
+            echo
+            echo "=== Reference 4.19 host-common top level ==="
+            find reference-host-cmn -maxdepth 2 -type d | sort | head -n 300 2>/dev/null || true
+          } > report/search/host-common-layout.txt
+
+      - name: Check expected include roots
+        shell: bash
+        run: |
+          {
+            echo "QCACLD3:"
+            realpath qcacld3
+
+            echo
+            echo "HOST COMMON:"
+            realpath qca-wifi-host-cmn
+
+            echo
+            echo "FW API:"
+            realpath fw-api
+
+            echo
+            echo "Expected include candidates:"
+            echo "$(realpath qca-wifi-host-cmn)/qdf/inc"
+            echo "$(realpath qca-wifi-host-cmn)/qdf/linux/src"
+            echo "$(realpath qca-wifi-host-cmn)/umac"
+            echo "$(realpath qca-wifi-host-cmn)/wmi"
+            echo "$(realpath fw-api)"
+            echo "$(realpath fw-api)/inc"
+          } > report/includes/include-roots.txt
+
+      - name: Attempt header-only dependency check
+        shell: bash
+        run: |
+          cat > /tmp/check_athdefs.c <<'EOF'
+          #include <athdefs.h>
+          int main(void) { return 0; }
+          EOF
+
+          {
+            echo "=== Test 1: no explicit include path ==="
+            clang -fsyntax-only /tmp/check_athdefs.c 2>&1 || true
+
+            echo
+            echo "=== Test 2: Motorola host-common include paths ==="
+            clang -fsyntax-only \
+              -Iqca-wifi-host-cmn \
+              -Iqca-wifi-host-cmn/qdf/inc \
+              -Iqca-wifi-host-cmn/qdf/linux/src \
+              -Ifw-api \
+              /tmp/check_athdefs.c 2>&1 || true
+
+            echo
+            echo "=== Test 3: broad dependency search paths ==="
+            clang -fsyntax-only \
+              -Iqcacld3 \
+              -Iqca-wifi-host-cmn \
+              -Iqca-wifi-host-cmn/qdf/inc \
+              -Iqca-wifi-host-cmn/qdf/linux/src \
+              -Iqca-wifi-host-cmn/umac \
+              -Iqca-wifi-host-cmn/wmi \
+              -Ifw-api \
+              /tmp/check_athdefs.c 2>&1 || true
+          } > report/includes/athdefs-header-check.txt
+
+      - name: Determine conclusion
+        shell: bash
+        run: |
+          {
+            echo "=== QCACLD3 athdefs Dependency Audit ==="
+            echo
+
+            if find qcacld3 qca-wifi-host-cmn fw-api kernel \
+              -type f -name 'athdefs.h' | grep -q .; then
+              echo "athdefs.h FOUND somewhere in the supplied source trees."
+              echo
+              echo "Locations:"
+              find qcacld3 qca-wifi-host-cmn fw-api kernel \
+                -type f -name 'athdefs.h' -print
+            else
+              echo "athdefs.h NOT FOUND in the supplied Motorola/kernel source trees."
+              echo
+              echo "This indicates the current Motorola source bundle does not contain"
+              echo "the header required by ol_txrx_ctrl_api.h."
+            fi
+
+            echo
+            echo "=== Direct include references ==="
+            rg -n --text 'athdefs\.h' qcacld3 qca-wifi-host-cmn fw-api kernel \
+              | head -n 100 || true
+
+            echo
+            echo "=== Prototype status ==="
+            echo "NO injection prototype compilation was attempted by this audit."
+            echo "This workflow only identifies the missing dependency and its source."
+          } > report/CONCLUSION.txt
+
+      - name: Package audit
+        if: always()
+        run: |
+          mkdir -p artifact
+          cp -r report artifact/
+          cp -r qcacld3/Kbuild artifact/qcacld3-Kbuild.txt
+          cp -r qcacld3/Android.mk artifact/qcacld3-Android.mk.txt
+          cp -r qcacld3/Makefile artifact/qcacld3-Makefile.txt
+
+          cd artifact
+          zip -r ../qcacld3-athdefs-dependency-audit.zip .
+
+      - name: Upload audit artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcacld3-athdefs-dependency-audit
+          path: qcacld3-athdefs-dependency-audit.zip
+          if-no-files-found: error
