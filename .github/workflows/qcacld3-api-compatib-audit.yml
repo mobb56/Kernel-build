@@ -1,0 +1,67 @@
+name: QCACLD3 API Audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y git ripgrep zip
+
+      - name: Clone Motorola
+        run: git clone --depth=1 https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qcacld-3.0.git motorola
+
+      - name: Clone OnePlus
+        run: git clone --depth=1 --branch nethunter-lineage-23.2 https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git oneplus
+
+      - name: Clone Xiaomi
+        run: git clone --depth=1 --branch lineage-23.2 https://github.com/yesimxev/android_kernel_xiaomi_sm6125.git xiaomi
+
+      - name: Run audit
+        run: |
+          mkdir -p report
+
+          echo "=== MOTOROLA INJECTION FILES ===" > report/audit.txt
+          find motorola -type f \( -name '*frame_inject*' -o -name '*frame_validate*' -o -name 'wma_frame_inject*' \) | sort >> report/audit.txt
+
+          echo "" >> report/audit.txt
+          echo "=== ONEPLUS INJECTION FILES ===" >> report/audit.txt
+          find oneplus/drivers/staging/qcacld-3.0 -type f \( -name '*frame_inject*' -o -name '*frame_validate*' -o -name 'wma_frame_inject*' \) | sort >> report/audit.txt
+
+          echo "" >> report/audit.txt
+          echo "=== XIAOMI INJECTION FILES ===" >> report/audit.txt
+          find xiaomi/drivers/staging/qcacld-3.0 -type f \( -name '*frame_inject*' -o -name '*frame_validate*' -o -name 'wma_frame_inject*' \) | sort >> report/audit.txt
+
+          echo "" >> report/audit.txt
+          echo "=== MOTOROLA PRODUCTION SYMBOLS ===" >> report/audit.txt
+          rg -n 'wlan_hdd_frame_inject|wlan_hdd_frame_validate|wma_frame_inject|wma_queue_injection_frame|wma_send_injection_frame_to_fw' motorola || true >> report/audit.txt
+
+          echo "" >> report/audit.txt
+          echo "=== ONEPLUS PRODUCTION SYMBOLS ===" >> report/audit.txt
+          rg -n 'wlan_hdd_frame_inject|wlan_hdd_frame_validate|wma_frame_inject|wma_queue_injection_frame|wma_send_injection_frame_to_fw' oneplus/drivers/staging/qcacld-3.0 || true >> report/audit.txt
+
+          echo "" >> report/audit.txt
+          echo "=== XIAOMI PRODUCTION SYMBOLS ===" >> report/audit.txt
+          rg -n 'wlan_hdd_frame_inject|wlan_hdd_frame_validate|wma_frame_inject|wma_queue_injection_frame|wma_send_injection_frame_to_fw' xiaomi/drivers/staging/qcacld-3.0 || true >> report/audit.txt
+
+          echo "" >> report/audit.txt
+          echo "=== MOTOROLA CONFIG ===" >> report/audit.txt
+          rg -n 'FEATURE_FRAME_INJECTION_SUPPORT|CONFIG_QCA_CLD_WLAN|QCA_CLD_WLAN' motorola || true >> report/audit.txt
+
+          echo "" >> report/audit.txt
+          echo "=== REFERENCE CONFIG ===" >> report/audit.txt
+          rg -n 'FEATURE_FRAME_INJECTION_SUPPORT|CONFIG_QCA_CLD_WLAN|QCA_CLD_WLAN' oneplus xiaomi || true >> report/audit.txt
+
+          cat report/audit.txt
+
+      - name: Package report
+        run: zip -r qcacld3-api-audit.zip report
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcacld3-api-audit
+          path: qcacld3-api-audit.zip
