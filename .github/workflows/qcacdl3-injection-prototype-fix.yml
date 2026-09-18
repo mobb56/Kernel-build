@@ -1,4 +1,4 @@
-name: QCACLD3 Injection Prototype - FW API Fix
+name: QCACLD3 Injection Prototype - QDF Fix
 
 on:
   workflow_dispatch:
@@ -15,22 +15,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            git \
-            clang \
-            lld \
-            llvm \
+            git clang lld llvm \
             gcc-aarch64-linux-gnu \
             binutils-aarch64-linux-gnu \
-            bc \
-            bison \
-            flex \
-            libssl-dev \
-            libelf-dev \
-            pahole \
-            cpio \
-            python3 \
-            rsync \
-            ripgrep
+            bc bison flex \
+            libssl-dev libelf-dev pahole \
+            cpio python3 rsync ripgrep
 
       - name: Clone kernel
         run: |
@@ -112,39 +102,26 @@ jobs:
             LLVM_IAS=1 \
             modules_prepare
 
-      - name: Verify athdefs
+      - name: Verify required headers
         run: |
           set -e
 
+          echo "=== athdefs.h ==="
           test -f kernel/drivers/staging/fw-api/fw/athdefs.h
-
-          echo "athdefs.h:"
-          ls -l kernel/drivers/staging/fw-api/fw/athdefs.h
+          realpath kernel/drivers/staging/fw-api/fw/athdefs.h
 
           echo
-          echo "SHA256:"
-          sha256sum kernel/drivers/staging/fw-api/fw/athdefs.h
+          echo "=== qdf_nbuf.h ==="
+          find qca-wifi-host-cmn kernel \
+            -type f \
+            -name qdf_nbuf.h \
+            -print
 
-      - name: Test athdefs include path
-        run: |
-          set -e
+          test -f qca-wifi-host-cmn/qdf/inc/qdf_nbuf.h
 
-          cat > /tmp/athdefs-test.c <<'EOF'
-          #include <athdefs.h>
-
-          int main(void)
-          {
-              A_STATUS status = 0;
-              return status;
-          }
-          EOF
-
-          clang \
-            -fsyntax-only \
-            -I"$PWD/kernel/drivers/staging/fw-api/fw" \
-            /tmp/athdefs-test.c
-
-          echo "athdefs.h include test PASSED"
+          echo
+          echo "=== QDF include directory ==="
+          realpath qca-wifi-host-cmn/qdf/inc
 
       - name: Build QCACLD3
         id: qcacld-build
@@ -152,21 +129,36 @@ jobs:
         run: |
           set -o pipefail
 
-          mkdir -p report
-
           KERNEL="$PWD/kernel"
           OUT="$PWD/out"
           WLAN="$PWD/qcacld3"
           COMMON="$PWD/qca-wifi-host-cmn"
           FWAPI="$PWD/fw-api"
-          FWAPI_INC="$KERNEL/drivers/staging/fw-api/fw"
 
+          FWAPI_INC="$KERNEL/drivers/staging/fw-api/fw"
+          QDF_INC="$COMMON/qdf/inc"
+          QDF_LINUX="$COMMON/qdf/linux/src"
+          QDF_LINUX_INC="$COMMON/qdf/linux/inc"
+
+          echo "=== Build paths ==="
           echo "KERNEL=$KERNEL"
           echo "OUT=$OUT"
           echo "WLAN=$WLAN"
           echo "COMMON=$COMMON"
           echo "FWAPI=$FWAPI"
           echo "FWAPI_INC=$FWAPI_INC"
+          echo "QDF_INC=$QDF_INC"
+          echo "QDF_LINUX=$QDF_LINUX"
+          echo "QDF_LINUX_INC=$QDF_LINUX_INC"
+
+          KCFLAGS="\
+          -I$FWAPI_INC \
+          -I$QDF_INC \
+          -I$QDF_LINUX \
+          -I$QDF_LINUX_INC"
+
+          echo
+          echo "KCFLAGS=$KCFLAGS"
 
           make -C "$KERNEL" \
             O="$OUT" \
@@ -174,7 +166,7 @@ jobs:
             ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
-            KCFLAGS="-I$FWAPI_INC" \
+            KCFLAGS="$KCFLAGS" \
             modules \
             WLAN_ROOT="$WLAN" \
             WLAN_COMMON_ROOT="$COMMON" \
@@ -185,115 +177,114 @@ jobs:
             MODNAME=wlan \
             BOARD_PLATFORM=bengal \
             CONFIG_QCA_CLD_WLAN=m \
-            2>&1 | tee report/qcacld3-build.log
+            2>&1 | tee report-build.log
 
-      - name: Capture compiler diagnostics
+      - name: Capture diagnostics
         if: always()
         run: |
+          mkdir -p report
+
+          cp report-build.log report/qcacld3-build.log 2>/dev/null || true
+
           {
-            echo "=== athdefs errors ==="
-            grep -n -C 5 \
-              "athdefs.h" \
-              report/qcacld3-build.log || true
-
-            echo
             echo "=== fatal errors ==="
-            grep -n -C 4 \
-              "fatal error" \
-              report/qcacld3-build.log || true
+            grep -n -C 5 "fatal error" \
+              report-build.log || true
 
             echo
-            echo "=== errors ==="
-            grep -n -C 3 \
-              "error:" \
-              report/qcacld3-build.log || true
+            echo "=== compiler errors ==="
+            grep -n -C 4 "error:" \
+              report-build.log || true
 
             echo
             echo "=== warnings ==="
-            grep -n -C 2 \
-              "warning:" \
-              report/qcacld3-build.log | head -n 300 || true
+            grep -n -C 2 "warning:" \
+              report-build.log | head -n 300 || true
+
+            echo
+            echo "=== missing headers ==="
+            grep -n \
+              "file not found" \
+              report-build.log || true
           } > report/compiler-diagnostics.txt
+
+      - name: Search QDF headers
+        if: always()
+        run: |
+          {
+            echo "=== qdf_nbuf.h ==="
+            find qca-wifi-host-cmn -type f \
+              \( -name 'qdf_nbuf.h' \
+              -o -name 'i_qdf_nbuf.h' \
+              -o -name 'qdf_types.h' \
+              -o -name 'qdf_util.h' \
+              -o -name 'qdf_lock.h' \) \
+              -print
+
+            echo
+            echo "=== QDF include tree ==="
+            find qca-wifi-host-cmn/qdf/inc \
+              -maxdepth 1 \
+              -type f \
+              -printf '%f\n' \
+              | sort
+          } > report/qdf-headers.txt
 
       - name: Locate generated modules
         if: always()
         run: |
           {
-            echo "=== QCACLD3 modules ==="
-            find qcacld3 -type f -name '*.ko' -print || true
-
-            echo
-            echo "=== Kernel output modules ==="
-            find out -type f -name '*.ko' -print | head -n 200 || true
-          } > report/generated-modules.txt
-
-      - name: Check wlan module
-        if: always()
-        run: |
-          {
-            echo "=== wlan module search ==="
-
+            echo "=== qca_cld3_wlan.ko ==="
             find . \
               -type f \
-              -name 'qca_cld3_wlan.ko' \
-              -o \
-              -type f \
-              -name 'wlan.ko' \
+              -name qca_cld3_wlan.ko \
               -print || true
 
             echo
-            echo "=== all generated KO files ==="
-            find . -type f -name '*.ko' -print || true
-          } > report/module-check.txt
+            echo "=== all kernel modules ==="
+            find . \
+              -type f \
+              -name '*.ko' \
+              -print || true
+          } > report/generated-modules.txt
 
-      - name: Final conclusion
+      - name: Conclusion
         if: always()
         run: |
           {
-            echo "=== QCACLD3 Injection Prototype ==="
+            echo "=== QCACLD3 QDF dependency test ==="
             echo
 
-            if find . -type f -name 'qca_cld3_wlan.ko' | grep -q .; then
+            if find . -type f -name qca_cld3_wlan.ko | grep -q .; then
               echo "RESULT: QCACLD3 MODULE GENERATED"
-              echo
-              find . -type f -name 'qca_cld3_wlan.ko' -print
+              find . -type f -name qca_cld3_wlan.ko -print
             else
-              echo "RESULT: NO QCACLD3 MODULE GENERATED"
+              echo "RESULT: MODULE NOT GENERATED"
               echo
-              echo "The next compiler error must be investigated."
+              echo "Inspect compiler-diagnostics.txt for the next dependency/API barrier."
             fi
 
             echo
-            echo "athdefs source:"
-            echo "kernel/drivers/staging/fw-api/fw/athdefs.h"
-
-            echo
-            echo "athdefs include path supplied:"
-            echo "$PWD/kernel/drivers/staging/fw-api/fw"
-
-            echo
-            echo "Prototype injection files:"
-            find qcacld3/core \
-              \( -name 'wma_frame_inject.*' \
-              -o -name 'wlan_hdd_frame_inject.*' \
-              -o -name 'wlan_hdd_frame_validate.*' \) \
-              -print
+            echo "Headers supplied:"
+            echo "  $PWD/kernel/drivers/staging/fw-api/fw"
+            echo "  $PWD/qca-wifi-host-cmn/qdf/inc"
+            echo "  $PWD/qca-wifi-host-cmn/qdf/linux/src"
+            echo "  $PWD/qca-wifi-host-cmn/qdf/linux/inc"
           } > report/CONCLUSION.txt
 
       - name: Package report
         if: always()
         run: |
           mkdir -p artifact
-
           cp -r report artifact/
 
           cd artifact
-          zip -r ../qcacld3-injection-fwapi-fix.zip .
+          zip -r ../qcacld3-qdf-fix-report.zip .
 
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: qcacld3-injection-fwapi-fix
-          path: qcacld3-injection-fwapi-fix.zip
+          name: qcacld3-qdf-fix-report
+          path: qcacld3-qdf-fix-report.zip
           if-no-files-found: error
