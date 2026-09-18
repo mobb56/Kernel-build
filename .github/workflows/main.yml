@@ -15,11 +15,14 @@ jobs:
     steps:
 
       # ============================================================
-      # 1. Dependencies
+      # 1. Checkout workflow repository
       # ============================================================
       - name: Set up job
         uses: actions/checkout@v4
 
+      # ============================================================
+      # 2. Install build dependencies
+      # ============================================================
       - name: Install dependencies
         run: |
           set -e
@@ -49,12 +52,13 @@ jobs:
 
           echo "/usr/lib/llvm-14/bin" >> "$GITHUB_PATH"
 
+          echo "Toolchain:"
           clang-14 --version
           ld.lld-14 --version
           aarch64-linux-gnu-gcc --version
 
       # ============================================================
-      # 2. Clone official LineageOS SM6225 kernel
+      # 3. Clone official LineageOS SM6225 kernel
       # ============================================================
       - name: Clone LineageOS kernel
         run: |
@@ -71,13 +75,19 @@ jobs:
 
           cd "$KERNEL_DIR"
 
-          echo "Kernel source:"
+          echo "Remote:"
           git remote -v
+
+          echo
+          echo "Branch:"
           git branch --show-current
+
+          echo
+          echo "Commit:"
           git rev-parse HEAD
 
       # ============================================================
-      # 3. Prepare build directories
+      # 4. Prepare clean OUT directory
       # ============================================================
       - name: Prepare build directories
         run: |
@@ -90,23 +100,25 @@ jobs:
           echo "OUT_DIR=$OUT_DIR"
 
       # ============================================================
-      # 4. Verify base defconfig
+      # 5. Verify base defconfig
       # ============================================================
       - name: Verify Bengal base configuration
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           set -e
 
-          if [ ! -f arch/arm64/configs/vendor/bengal-perf_defconfig ]; then
-            echo "ERROR: vendor/bengal-perf_defconfig not found"
+          CONFIG_FILE="arch/arm64/configs/vendor/bengal-perf_defconfig"
+
+          if [ ! -f "$CONFIG_FILE" ]; then
+            echo "ERROR: $CONFIG_FILE not found."
             exit 1
           fi
 
-          echo "Base defconfig found:"
-          ls -lh arch/arm64/configs/vendor/bengal-perf_defconfig
+          echo "Base configuration found:"
+          ls -lh "$CONFIG_FILE"
 
       # ============================================================
-      # 5. Create NetHunter configuration OUTSIDE source tree
+      # 6. Create NetHunter configuration OUTSIDE kernel tree
       # ============================================================
       - name: Create NetHunter configuration
         run: |
@@ -148,7 +160,7 @@ jobs:
 
 
           # ==========================================================
-          # Input / userspace interfaces
+          # Userspace input
           # ==========================================================
 
           CONFIG_INPUT_UINPUT=y
@@ -169,9 +181,6 @@ jobs:
           CONFIG_CFG80211=y
           CONFIG_RFKILL=y
 
-          # Wireless test mode support.
-          # NOTE:
-          # This does NOT by itself add QCACLD-3 injection support.
           CONFIG_NL80211_TESTMODE=y
 
 
@@ -183,11 +192,11 @@ jobs:
           CONFIG_SENSORS_CLASS=m
           EOF
 
-          echo "Created:"
+          echo "NetHunter configuration:"
           cat "$NH_CONFIG"
 
       # ============================================================
-      # 6. Configure kernel
+      # 7. Configure kernel
       # ============================================================
       - name: Configure kernel
         working-directory: ${{ env.KERNEL_DIR }}
@@ -196,7 +205,7 @@ jobs:
 
           rm -f "$OUT_DIR/.config"
 
-          echo "Creating base configuration..."
+          echo "Generating Bengal base configuration..."
 
           make \
             O="$OUT_DIR" \
@@ -206,6 +215,7 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             vendor/bengal-perf_defconfig
 
+          echo
           echo "Merging NetHunter configuration..."
 
           scripts/kconfig/merge_config.sh \
@@ -214,7 +224,8 @@ jobs:
             "$OUT_DIR/.config" \
             "$GITHUB_WORKSPACE/nethunter.config"
 
-          echo "Resolving configuration..."
+          echo
+          echo "Running olddefconfig..."
 
           make \
             O="$OUT_DIR" \
@@ -225,7 +236,7 @@ jobs:
             olddefconfig
 
       # ============================================================
-      # 7. Verify NetHunter configuration
+      # 8. Verify NetHunter configuration
       # ============================================================
       - name: Verify NetHunter configuration
         run: |
@@ -233,20 +244,29 @@ jobs:
 
           CONFIG="$OUT_DIR/.config"
 
-          echo "Checking important configuration symbols..."
-
           check_config() {
             SYMBOL="$1"
 
-            if ! grep -qx "$SYMBOL=y" "$CONFIG" \
-              && ! grep -qx "$SYMBOL=m" "$CONFIG"; then
-              echo "ERROR: $SYMBOL is not enabled"
-              grep -E "^${SYMBOL%%=*}=" "$CONFIG" || true
+            VALUE="$(grep -E "^${SYMBOL}=" "$CONFIG" || true)"
+
+            if [ -z "$VALUE" ]; then
+              echo "ERROR: $SYMBOL is missing"
               exit 1
             fi
 
-            echo "OK: $(grep -E "^${SYMBOL%%=*}=" "$CONFIG")"
+            case "$VALUE" in
+              "$SYMBOL=y"|"$SYMBOL=m")
+                echo "OK: $VALUE"
+                ;;
+              *)
+                echo "ERROR: $VALUE"
+                exit 1
+                ;;
+            esac
           }
+
+          echo "Checking required configuration..."
+          echo
 
           check_config CONFIG_BT
           check_config CONFIG_BT_BREDR
@@ -269,33 +289,30 @@ jobs:
           check_config CONFIG_SENSORS_CLASS
 
           echo
-          echo "Selected Bluetooth / USB / networking configuration:"
-          grep -E \
-            '^(CONFIG_BT|CONFIG_USB_CONFIGFS|CONFIG_INPUT_UINPUT|CONFIG_TUN|CONFIG_VETH|CONFIG_CFG80211|CONFIG_RFKILL|CONFIG_NL80211_TESTMODE|CONFIG_SENSORS_)' \
-            "$CONFIG" || true
+          echo "Configuration verification passed."
 
       # ============================================================
-      # 8. Verify source tree is still clean
+      # 9. Verify source tree is clean
       # ============================================================
       - name: Verify clean kernel source
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           set -e
 
-          echo "Git status before build:"
+          echo "Git status:"
           git status --short
 
           if [ -n "$(git status --porcelain)" ]; then
+            echo
             echo "ERROR: Kernel source tree is dirty."
             exit 1
           fi
 
+          echo
           echo "Kernel source tree is clean."
 
       # ============================================================
-      # 9. IMPORTANT:
-      #    Get the release directly from Kbuild.
-      #    DO NOT hard-code it.
+      # 10. Get release directly from Kbuild
       # ============================================================
       - name: Verify kernel release
         working-directory: ${{ env.KERNEL_DIR }}
@@ -313,29 +330,30 @@ jobs:
           )"
 
           echo "=========================================="
-          echo "Kernel release from Kbuild:"
+          echo "KERNEL RELEASE"
+          echo "=========================================="
           echo "$BUILT_RELEASE"
           echo "=========================================="
 
           if [ -z "$BUILT_RELEASE" ]; then
-            echo "ERROR: kernelrelease returned empty"
+            echo "ERROR: kernelrelease is empty."
             exit 1
           fi
 
           case "$BUILT_RELEASE" in
             *-dirty)
-              echo "ERROR: Kernel release contains -dirty:"
-              echo "$BUILT_RELEASE"
+              echo "ERROR: kernel release contains -dirty."
               exit 1
               ;;
           esac
 
-          echo "$BUILT_RELEASE" > "$GITHUB_WORKSPACE/kernel-release.txt"
+          printf '%s\n' "$BUILT_RELEASE" \
+            > "$GITHUB_WORKSPACE/kernel-release.txt"
 
-          echo "Kernel release verification passed."
+          echo "Kernel release accepted."
 
       # ============================================================
-      # 10. Save final kernel config
+      # 11. Save configuration
       # ============================================================
       - name: Save final kernel config
         run: |
@@ -349,10 +367,10 @@ jobs:
             "$GITHUB_WORKSPACE/nethunter.config" \
             "$GITHUB_WORKSPACE/nethunter-final.config"
 
-          echo "Saved kernel configuration."
+          echo "Saved final configuration files."
 
       # ============================================================
-      # 11. Build kernel Image
+      # 12. Build kernel Image
       # ============================================================
       - name: Build kernel Image
         working-directory: ${{ env.KERNEL_DIR }}
@@ -369,7 +387,7 @@ jobs:
             Image
 
       # ============================================================
-      # 12. Verify Image
+      # 13. Verify Image
       # ============================================================
       - name: Verify kernel Image
         run: |
@@ -378,7 +396,7 @@ jobs:
           IMAGE="$OUT_DIR/arch/arm64/boot/Image"
 
           if [ ! -f "$IMAGE" ]; then
-            echo "ERROR: Kernel Image was not produced."
+            echo "ERROR: Image was not produced."
             exit 1
           fi
 
@@ -386,7 +404,7 @@ jobs:
           ls -lh "$IMAGE"
 
       # ============================================================
-      # 13. Build modules
+      # 14. Build modules
       # ============================================================
       - name: Build kernel modules
         working-directory: ${{ env.KERNEL_DIR }}
@@ -403,7 +421,7 @@ jobs:
             modules
 
       # ============================================================
-      # 14. Prepare module staging
+      # 15. Install modules into staging directory
       # ============================================================
       - name: Install kernel modules
         working-directory: ${{ env.KERNEL_DIR }}
@@ -425,51 +443,48 @@ jobs:
             INSTALL_MOD_PATH="$MODULE_STAGE" \
             INSTALL_MOD_STRIP=1
 
-          RELEASE="$(
-            cat "$GITHUB_WORKSPACE/kernel-release.txt"
-          )"
-
-          echo "Installed module release:"
-          find "$MODULE_STAGE/lib/modules" -maxdepth 2 -type f 2>/dev/null || true
+          RELEASE="$(cat "$GITHUB_WORKSPACE/kernel-release.txt")"
 
           MODULE_DIR="$MODULE_STAGE/lib/modules/$RELEASE"
 
+          echo "Expected module directory:"
+          echo "$MODULE_DIR"
+
           if [ ! -d "$MODULE_DIR" ]; then
-            echo "ERROR: Expected module directory not found:"
-            echo "$MODULE_DIR"
-            find "$MODULE_STAGE" -maxdepth 5 -type f | head -100
+            echo "ERROR: Module directory was not created."
+            find "$MODULE_STAGE" -maxdepth 5 -type f | sort
             exit 1
           fi
 
-          echo "Module directory:"
-          ls -la "$MODULE_DIR"
+          echo
+          echo "Installed modules:"
+          find "$MODULE_DIR" \
+            -type f \
+            -name '*.ko' \
+            -printf '%f\n' \
+            | sort
 
       # ============================================================
-      # 15. Prepare Android vendor module tree
+      # 16. Prepare vendor/lib/modules tree
       # ============================================================
       - name: Prepare vendor modules
         run: |
           set -e
 
-          RELEASE="$(
-            cat "$GITHUB_WORKSPACE/kernel-release.txt"
-          )"
+          RELEASE="$(cat "$GITHUB_WORKSPACE/kernel-release.txt")"
 
           MODULE_DIR="$GITHUB_WORKSPACE/module-stage/lib/modules/$RELEASE"
 
           AK_MODULE_DIR="$GITHUB_WORKSPACE/ak-modules/vendor/lib/modules"
 
           rm -rf "$GITHUB_WORKSPACE/ak-modules"
+
           mkdir -p "$AK_MODULE_DIR"
 
-          # Copy the modules built by this kernel.
           find "$MODULE_DIR" \
             -type f \
             -name '*.ko' \
             -exec cp -f {} "$AK_MODULE_DIR/" \;
-
-          echo "Modules going into AnyKernel3:"
-          find "$AK_MODULE_DIR" -type f -name '*.ko' -printf '%f\n' | sort
 
           MODULE_COUNT="$(
             find "$AK_MODULE_DIR" \
@@ -481,50 +496,49 @@ jobs:
           echo "Module count: $MODULE_COUNT"
 
           if [ "$MODULE_COUNT" -eq 0 ]; then
-            echo "ERROR: No kernel modules were produced."
+            echo "ERROR: No .ko modules found."
             exit 1
           fi
 
+          echo
+          echo "Modules:"
+          find "$AK_MODULE_DIR" \
+            -type f \
+            -name '*.ko' \
+            -printf '%f\n' \
+            | sort
+
       # ============================================================
-      # 16. Verify sensors_class module
+      # 17. Verify sensors_class
       # ============================================================
       - name: Verify sensors_class module
         run: |
           set -e
 
-          SENSOR_MODULE="$GITHUB_WORKSPACE/ak-modules/vendor/lib/modules/sensors_class.ko"
+          SENSOR="$GITHUB_WORKSPACE/ak-modules/vendor/lib/modules/sensors_class.ko"
 
-          if [ ! -f "$SENSOR_MODULE" ]; then
-            echo "ERROR: sensors_class.ko was not produced."
-            echo
-            echo "Available modules:"
-            find "$GITHUB_WORKSPACE/ak-modules" \
-              -type f \
-              -name '*.ko' \
-              -printf '%p\n' \
-              | sort
+          if [ ! -f "$SENSOR" ]; then
+            echo "ERROR: sensors_class.ko missing."
             exit 1
           fi
 
           echo "sensors_class.ko:"
-          ls -lh "$SENSOR_MODULE"
+          ls -lh "$SENSOR"
 
           echo
-          echo "Module vermagic:"
-          modinfo "$SENSOR_MODULE" 2>/dev/null \
+          echo "Module information:"
+          modinfo "$SENSOR" 2>/dev/null \
             | grep -E '^(filename|version|vermagic|depends):' \
             || true
 
       # ============================================================
-      # 17. Verify module vermagic matches Kbuild release
+      # 18. Verify every module vermagic
       # ============================================================
       - name: Verify module vermagic
         run: |
           set -e
 
-          RELEASE="$(
-            cat "$GITHUB_WORKSPACE/kernel-release.txt"
-          )"
+          RELEASE="$(cat "$GITHUB_WORKSPACE/kernel-release.txt")"
 
           echo "Expected release:"
           echo "$RELEASE"
@@ -532,22 +546,17 @@ jobs:
           FAILED=0
 
           while IFS= read -r MODULE; do
+
             VERMAGIC="$(
               modinfo "$MODULE" 2>/dev/null \
                 | sed -n 's/^vermagic: //p'
             )"
 
+            MODULE_RELEASE="$(printf '%s\n' "$VERMAGIC" | awk '{print $1}')"
+
             echo
             echo "Module: $(basename "$MODULE")"
             echo "Vermagic: $VERMAGIC"
-
-            if [ -z "$VERMAGIC" ]; then
-              echo "ERROR: Could not read vermagic."
-              FAILED=1
-              continue
-            fi
-
-            MODULE_RELEASE="$(printf '%s\n' "$VERMAGIC" | awk '{print $1}')"
 
             if [ "$MODULE_RELEASE" != "$RELEASE" ]; then
               echo "ERROR: Release mismatch."
@@ -555,7 +564,7 @@ jobs:
               echo "Actual:   $MODULE_RELEASE"
               FAILED=1
             else
-              echo "OK: release matches."
+              echo "OK"
             fi
 
           done < <(
@@ -566,14 +575,16 @@ jobs:
           )
 
           if [ "$FAILED" -ne 0 ]; then
+            echo
+            echo "ERROR: One or more modules have incorrect vermagic."
             exit 1
           fi
 
           echo
-          echo "All module releases match Kbuild."
+          echo "All module vermagic values match."
 
       # ============================================================
-      # 18. Clone AnyKernel3
+      # 19. Clone AnyKernel3
       # ============================================================
       - name: Prepare AnyKernel3
         run: |
@@ -593,7 +604,7 @@ jobs:
           echo "AnyKernel3 prepared."
 
       # ============================================================
-      # 19. Configure AnyKernel3
+      # 20. Configure AnyKernel3
       # ============================================================
       - name: Configure AnyKernel3
         run: |
@@ -636,11 +647,11 @@ jobs:
 
           chmod +x anykernel.sh
 
-          echo "AnyKernel3 configuration:"
+          echo "AnyKernel script:"
           cat anykernel.sh
 
       # ============================================================
-      # 20. Put kernel Image into AnyKernel3
+      # 21. Put Image + modules into AnyKernel3
       # ============================================================
       - name: Prepare AnyKernel kernel files
         run: |
@@ -650,7 +661,8 @@ jobs:
             "$OUT_DIR/arch/arm64/boot/Image" \
             "$ANYKERNEL_DIR/Image"
 
-          mkdir -p "$ANYKERNEL_DIR/modules/vendor/lib/modules"
+          mkdir -p \
+            "$ANYKERNEL_DIR/modules/vendor/lib/modules"
 
           cp \
             "$GITHUB_WORKSPACE/ak-modules/vendor/lib/modules/"*.ko \
@@ -668,14 +680,10 @@ jobs:
             "$GITHUB_WORKSPACE/nethunter-final.config" \
             "$ANYKERNEL_DIR/nethunter.config"
 
-          echo "AnyKernel contents:"
-          find "$ANYKERNEL_DIR" \
-            -maxdepth 4 \
-            -type f \
-            | sort
+          echo "AnyKernel kernel files prepared."
 
       # ============================================================
-      # 21. Verify AnyKernel package contents
+      # 22. Verify files BEFORE ZIP creation
       # ============================================================
       - name: Verify AnyKernel package
         run: |
@@ -683,14 +691,28 @@ jobs:
 
           test -f "$ANYKERNEL_DIR/Image"
           test -f "$ANYKERNEL_DIR/anykernel.sh"
-          test -f "$ANYKERNEL_DIR/modules/vendor/lib/modules/sensors_class.ko"
+          test -f \
+            "$ANYKERNEL_DIR/modules/vendor/lib/modules/sensors_class.ko"
 
           echo "Image:"
           ls -lh "$ANYKERNEL_DIR/Image"
 
           echo
-          echo "Modules:"
+          echo "AnyKernel modules:"
           find "$ANYKERNEL_DIR/modules" \
             -type f \
             -name '*.ko' \
-          
+            -printf '%p\n' \
+            | sort
+
+          echo
+          echo "AnyKernel package structure verified."
+
+      # ============================================================
+      # 23. Create flashable ZIP
+      # ============================================================
+      - name: Create flashable ZIP
+        run: |
+          set -e
+
+          ZIP_FILE="$GITHUB_WORKSPACE/moto-g9-power-cebu-
