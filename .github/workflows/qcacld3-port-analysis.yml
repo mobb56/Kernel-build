@@ -10,7 +10,7 @@ jobs:
     steps:
 
       # ============================================================
-      # 1. MOTOROLA QCACLD-3 SOURCE
+      # MOTOROLA QCACLD-3.0
       # ============================================================
 
       - name: Clone Motorola QCACLD3
@@ -26,7 +26,7 @@ jobs:
 
 
       # ============================================================
-      # 2. MOTOROLA HOST COMMON
+      # MOTOROLA HOST COMMON
       # ============================================================
 
       - name: Clone Motorola QCA host common
@@ -40,7 +40,7 @@ jobs:
 
 
       # ============================================================
-      # 3. MOTOROLA FW API
+      # MOTOROLA FW API
       # ============================================================
 
       - name: Clone Motorola FW API
@@ -54,7 +54,7 @@ jobs:
 
 
       # ============================================================
-      # 4. CLONE THE KNOWN NET HUNTER SOURCE
+      # CLONE REFERENCE KERNEL
       # ============================================================
 
       - name: Clone NetHunter reference kernel
@@ -65,111 +65,101 @@ jobs:
           mkdir -p reference
 
           git clone \
-            --branch patches \
-            --single-branch \
-            --depth=100 \
+            --depth=1 \
             https://github.com/Loukious/android_kernel_xiaomi_sm8150.git \
             reference/android_kernel_xiaomi_sm8150
+
+          echo
+          echo "Reference repository:"
+          git -C reference/android_kernel_xiaomi_sm8150 remote get-url origin
 
           echo
           echo "Reference commit:"
           git -C reference/android_kernel_xiaomi_sm8150 rev-parse HEAD
 
-          echo
-          echo "Reference remote:"
-          git -C reference/android_kernel_xiaomi_sm8150 remote get-url origin
-
 
       # ============================================================
-      # 5. LOCATE INJECTION PATCH
+      # DIRECTLY DOWNLOAD PATCH
+      #
+      # This avoids the path/branch problem from the previous run.
       # ============================================================
 
-      - name: Locate NetHunter injection patch
+      - name: Download NetHunter injection patch
         shell: bash
         run: |
           set -euxo pipefail
 
-          PATCH="reference/android_kernel_xiaomi_sm8150/patches/patches/nethunter/07_packet_injection.patch"
+          mkdir -p patches
 
-          test -f "$PATCH"
+          PATCH_URL="https://raw.githubusercontent.com/Loukious/android_kernel_xiaomi_sm8150/patches/patches/nethunter/07_packet_injection.patch"
 
-          cp "$PATCH" \
-            nethunter-qcacld3-injection.patch
+          echo "Downloading:"
+          echo "$PATCH_URL"
+
+          curl \
+            --location \
+            --fail \
+            --retry 5 \
+            --retry-delay 2 \
+            --connect-timeout 15 \
+            --max-time 120 \
+            "$PATCH_URL" \
+            --output patches/07_packet_injection.patch
+
+          test -s patches/07_packet_injection.patch
 
           echo
-          echo "Patch found:"
-          ls -lh nethunter-qcacld3-injection.patch
+          echo "PATCH DOWNLOADED SUCCESSFULLY"
+          echo "============================="
+
+          ls -lh patches/07_packet_injection.patch
 
           echo
-          echo "Patch SHA256:"
-          sha256sum nethunter-qcacld3-injection.patch
+          echo "SHA256:"
+          sha256sum patches/07_packet_injection.patch
 
           echo
-          echo "Patch line count:"
-          wc -l nethunter-qcacld3-injection.patch
+          echo "Lines:"
+          wc -l patches/07_packet_injection.patch
 
 
       # ============================================================
-      # 6. FIND THE PATCH COMMIT
+      # VERIFY PATCH
       # ============================================================
 
-      - name: Identify patch history
+      - name: Verify patch contents
         shell: bash
         run: |
-          set +e
+          set -euxo pipefail
 
-          REPO="reference/android_kernel_xiaomi_sm8150"
+          PATCH="patches/07_packet_injection.patch"
 
-          {
-            echo "NETHUNTER QCACLD3 PATCH HISTORY"
-            echo "================================"
-            echo
+          echo
+          echo "PATCH HEADER"
+          echo "============"
 
-            git -C "$REPO" log \
-              --all \
-              --oneline \
-              --decorate \
-              -- \
-              patches/patches/nethunter/07_packet_injection.patch \
-              | head -30
+          sed -n '1,75p' "$PATCH"
 
-            echo
-            echo "Recent reference commits:"
-            git -C "$REPO" log \
-              --oneline \
-              --decorate \
-              -20
+          echo
+          echo "FILES MODIFIED"
+          echo "=============="
 
-          } > patch-history.txt
+          grep '^diff --git ' "$PATCH"
 
-          cat patch-history.txt
+          echo
+          echo "INJECTION CONFIG"
+          echo "================"
 
-
-      # ============================================================
-      # 7. LIST PATCH FILES
-      # ============================================================
-
-      - name: Extract affected files
-        shell: bash
-        run: |
-          set -u
-
-          {
-            echo "FILES MODIFIED BY NETHUNTER QCACLD3 PATCH"
-            echo "=========================================="
-            echo
-
-            grep '^diff --git ' \
-              nethunter-qcacld3-injection.patch \
-              || true
-
-          } > affected-files.txt
-
-          cat affected-files.txt
+          grep -n \
+            -E \
+            'FEATURE_FRAME_INJECTION|FRAME_INJECTION|INJECTION' \
+            "$PATCH" \
+            | head -200 \
+            || true
 
 
       # ============================================================
-      # 8. CREATE ISOLATED MOTOROLA TREE
+      # CREATE ISOLATED MOTOROLA TREE
       # ============================================================
 
       - name: Create isolated Motorola tree
@@ -204,10 +194,7 @@ jobs:
 
 
       # ============================================================
-      # 9. APPLY PATCH TO ISOLATED COPY
-      #
-      # --reject deliberately creates .rej files instead of
-      # stopping at the first failure.
+      # TEST PATCH WITHOUT STOPPING AT FIRST CONFLICT
       # ============================================================
 
       - name: Generate patch rejection files
@@ -220,13 +207,13 @@ jobs:
           git apply \
             --reject \
             --whitespace=nowarn \
-            "$GITHUB_WORKSPACE/nethunter-qcacld3-injection.patch" \
+            "$GITHUB_WORKSPACE/patches/07_packet_injection.patch" \
             > "$GITHUB_WORKSPACE/patch-apply-output.txt" \
             2>&1
 
           STATUS=$?
 
-          echo "Patch application exit code: $STATUS"
+          echo "Patch apply exit code: $STATUS"
 
           find . \
             -name '*.rej' \
@@ -235,14 +222,25 @@ jobs:
             > "$GITHUB_WORKSPACE/rejection-files.txt"
 
           echo
-          echo "Rejection files:"
+          echo "REJECTION FILES"
+          echo "==============="
+
           cat "$GITHUB_WORKSPACE/rejection-files.txt"
+
+          echo
+          echo "PATCH OUTPUT"
+          echo "============"
+
+          cat "$GITHUB_WORKSPACE/patch-apply-output.txt"
+
+          echo "$STATUS" \
+            > "$GITHUB_WORKSPACE/patch-status.txt"
 
           exit 0
 
 
       # ============================================================
-      # 10. EXTRACT FAILED HUNKS
+      # ANALYZE REJECTED HUNKS
       # ============================================================
 
       - name: Analyze rejected hunks
@@ -262,11 +260,13 @@ jobs:
               [ -z "$FILE" ] && continue
 
               echo
-              echo "================================================"
+              echo "=============================================="
               echo "REJECTION: $FILE"
-              echo "================================================"
+              echo "=============================================="
 
-              cat "/tmp/motorola-qcacld3/$FILE" 2>/dev/null || true
+              cat "/tmp/motorola-qcacld3/$FILE" \
+                2>/dev/null \
+                || true
 
             done < "$GITHUB_WORKSPACE/rejection-files.txt"
 
@@ -276,37 +276,27 @@ jobs:
 
 
       # ============================================================
-      # 11. EXTRACT FUNCTION NAMES FROM PATCH
+      # EXTRACT PATCH SYMBOLS
       # ============================================================
 
-      - name: Extract functions from patch
+      - name: Extract patch symbols
         shell: bash
         run: |
           set -u
 
-          REPORT="$GITHUB_WORKSPACE/patch-functions.txt"
+          REPORT="$GITHUB_WORKSPACE/patch-symbols.txt"
 
           {
-            echo "FUNCTIONS / SYMBOLS REFERENCED BY PATCH"
-            echo "======================================="
-            echo
-
-            grep -E \
-              '^[+-][a-zA-Z_][a-zA-Z0-9_ *&:<>(),\[\]]*\(' \
-              nethunter-qcacld3-injection.patch \
-              | head -1000 \
-              || true
-
-            echo
-            echo "Likely WLAN symbols:"
+            echo "PATCH WLAN SYMBOLS"
+            echo "=================="
             echo
 
             grep -E \
               -o \
               '\b(wlan_[A-Za-z0-9_]+|wma_[A-Za-z0-9_]+|ol_[A-Za-z0-9_]+|qdf_[A-Za-z0-9_]+|wmi_[A-Za-z0-9_]+)\b' \
-              nethunter-qcacld3-injection.patch \
+              patches/07_packet_injection.patch \
               | sort -u \
-              | head -1000 \
+              | head -1500 \
               || true
 
           } > "$REPORT"
@@ -315,10 +305,10 @@ jobs:
 
 
       # ============================================================
-      # 12. FIND PATCH SYMBOLS IN MOTOROLA SOURCE
+      # MAP PATCH SYMBOLS INTO MOTOROLA SOURCE
       # ============================================================
 
-      - name: Map patch symbols into Motorola source
+      - name: Map symbols into Motorola source
         shell: bash
         run: |
           set -u
@@ -333,7 +323,7 @@ jobs:
             grep -E \
               -o \
               '\b(wlan_[A-Za-z0-9_]+|wma_[A-Za-z0-9_]+|ol_[A-Za-z0-9_]+|qdf_[A-Za-z0-9_]+|wmi_[A-Za-z0-9_]+)\b' \
-              nethunter-qcacld3-injection.patch \
+              patches/07_packet_injection.patch \
               | sort -u \
               | while read -r SYMBOL
             do
@@ -341,9 +331,9 @@ jobs:
               [ -z "$SYMBOL" ] && continue
 
               echo
-              echo "------------------------------------------------"
+              echo "----------------------------------------------"
               echo "$SYMBOL"
-              echo "------------------------------------------------"
+              echo "----------------------------------------------"
 
               grep -Rni \
                 --exclude-dir=.git \
@@ -363,25 +353,25 @@ jobs:
 
 
       # ============================================================
-      # 13. FIND EQUIVALENT FUNCTIONS IN MOTOROLA SOURCE
+      # SEARCH MOTOROLA INJECTION-RELATED CODE
       # ============================================================
 
-      - name: Search Motorola source for injection-related functions
+      - name: Search Motorola injection functions
         shell: bash
         run: |
           set -u
 
-          REPORT="$GITHUB_WORKSPACE/motorola-injection-functions.txt"
+          REPORT="$GITHUB_WORKSPACE/motorola-injection-search.txt"
 
           {
-            echo "MOTOROLA INJECTION-RELATED FUNCTIONS"
-            echo "====================================="
+            echo "MOTOROLA INJECTION-RELATED CODE"
+            echo "================================"
             echo
 
             grep -Rni \
               --exclude-dir=.git \
               -E \
-              'mgmt_tx|mgmt.*tx|tx.*mgmt|monitor|radiotap|frame.*inject|inject.*frame|testmode|raw.*80211|80211.*raw|txrx|wmi.*tx' \
+              'mgmt_tx|mgmt.*tx|tx.*mgmt|monitor|radiotap|frame.*inject|inject.*frame|testmode|raw.*80211|80211.*raw|ndo_start_xmit' \
               vendor/qcom/opensource/wlan/qcacld-3.0 \
               vendor/qcom/opensource/wlan/qca-wifi-host-cmn \
               2>/dev/null \
@@ -394,43 +384,7 @@ jobs:
 
 
       # ============================================================
-      # 14. COMPARE KEY SOURCE DIRECTORIES
-      # ============================================================
-
-      - name: Compare QCACLD3 directory structure
-        shell: bash
-        run: |
-          set -u
-
-          {
-            echo "MOTOROLA QCACLD3 DIRECTORY STRUCTURE"
-            echo "===================================="
-            echo
-
-            find vendor/qcom/opensource/wlan/qcacld-3.0 \
-              -maxdepth 3 \
-              -type d \
-              | sort \
-              | head -2000
-
-            echo
-            echo "REFERENCE QCACLD3 DIRECTORY STRUCTURE"
-            echo "====================================="
-
-            find reference/android_kernel_xiaomi_sm8150 \
-              -path '*qcacld-3.0*' \
-              -maxdepth 6 \
-              -type d \
-              | sort \
-              | head -2000
-
-          } > directory-comparison.txt
-
-          cat directory-comparison.txt
-
-
-      # ============================================================
-      # 15. SEARCH CONFIG DIFFERENCES
+      # COMPARE CONFIGURATION
       # ============================================================
 
       - name: Compare injection configuration
@@ -438,22 +392,24 @@ jobs:
         run: |
           set -u
 
+          REPORT="$GITHUB_WORKSPACE/config-comparison.txt"
+
           {
-            echo "INJECTION CONFIGURATION COMPARISON"
-            echo "==================================="
+            echo "INJECTION CONFIGURATION"
+            echo "======================="
             echo
 
-            echo "=== PATCH CONFIG ==="
+            echo "=== PATCH ==="
 
             grep -n \
               -E \
               'CONFIG_|FRAME_INJECTION|INJECTION' \
-              nethunter-qcacld3-injection.patch \
+              patches/07_packet_injection.patch \
               | head -1000 \
               || true
 
             echo
-            echo "=== MOTOROLA CONFIG REFERENCES ==="
+            echo "=== MOTOROLA SOURCE ==="
 
             grep -Rni \
               --exclude-dir=.git \
@@ -465,59 +421,21 @@ jobs:
               | head -2000 \
               || true
 
-          } > config-comparison.txt
+          } > "$REPORT"
 
-          cat config-comparison.txt
+          cat "$REPORT"
 
 
       # ============================================================
-      # 16. CHECK WHETHER PATCH ADDED FILES ARE ABSENT
+      # FINAL SUMMARY
       # ============================================================
 
-      - name: Identify patch-added files
+      - name: Create final report
         shell: bash
         run: |
           set -u
 
-          {
-            echo "PATCH-ADDED FILES"
-            echo "================="
-            echo
-
-            grep '^diff --git ' \
-              nethunter-qcacld3-injection.patch \
-              | while read -r LINE
-            do
-
-              A=$(echo "$LINE" | sed 's/^diff --git a\///' | cut -d' ' -f1)
-
-              if grep -q "^new file mode" \
-                <(
-                  grep -A2 \
-                    -F "$LINE" \
-                    nethunter-qcacld3-injection.patch
-                )
-              then
-                echo "$A"
-              fi
-
-            done
-
-          } > patch-added-files.txt
-
-          cat patch-added-files.txt
-
-
-      # ============================================================
-      # 17. CREATE SUMMARY
-      # ============================================================
-
-      - name: Create porting summary
-        shell: bash
-        run: |
-          set -u
-
-          SUMMARY="$GITHUB_WORKSPACE/PORTING-SUMMARY.txt"
+          REPORT="$GITHUB_WORKSPACE/PORTING-SUMMARY.txt"
 
           {
             echo "Moto G9 Power cebu"
@@ -528,90 +446,80 @@ jobs:
             echo "Motorola QCACLD3:"
             git -C vendor/qcom/opensource/wlan/qcacld-3.0 \
               rev-parse HEAD \
-              2>/dev/null || true
+              2>/dev/null \
+              || true
 
             echo
-            echo "Motorola host-common:"
+            echo "Motorola QCA host common:"
             git -C vendor/qcom/opensource/wlan/qca-wifi-host-cmn \
               rev-parse HEAD \
-              2>/dev/null || true
+              2>/dev/null \
+              || true
 
             echo
             echo "Reference kernel:"
             git -C reference/android_kernel_xiaomi_sm8150 \
               rev-parse HEAD \
-              2>/dev/null || true
+              2>/dev/null \
+              || true
 
             echo
-            echo "Patch:"
-            sha256sum nethunter-qcacld3-injection.patch
+            echo "Patch SHA256:"
+            sha256sum patches/07_packet_injection.patch
 
             echo
-            echo "Rejected hunks:"
-            wc -l rejection-files.txt
+            echo "Patch status:"
+            cat patch-status.txt
+
+            echo
+            echo "Rejection files:"
             cat rejection-files.txt
 
             echo
-            echo "================================================"
-            echo "IMPORTANT"
-            echo "================================================"
-            echo
-            echo "This is an analysis-only workflow."
-            echo "No real source tree was modified."
-            echo "No kernel was built."
-            echo "No WLAN module was built."
-            echo "No flashable ZIP was created."
-            echo "Nothing was flashed to the phone."
-            echo
-            echo "The reports identify where the reference"
-            echo "injection implementation differs from the"
-            echo "Motorola QCACLD3 source."
+            echo "This workflow is analysis-only."
+            echo "It does not build or flash anything."
 
-          } > "$SUMMARY"
+          } > "$REPORT"
 
-          cat "$SUMMARY"
+          cat "$REPORT"
 
 
       # ============================================================
-      # 18. UPLOAD EVERYTHING
+      # UPLOAD REPORT
       # ============================================================
 
-      - name: Upload porting analysis
+      - name: Upload port analysis
         uses: actions/upload-artifact@v4
         with:
           name: cebu-qcacld3-port-analysis
           path: |
             PORTING-SUMMARY.txt
-            nethunter-qcacld3-injection.patch
-            patch-history.txt
-            affected-files.txt
+            patches/07_packet_injection.patch
             patch-apply-output.txt
+            patch-status.txt
             rejection-files.txt
             rejected-hunks.txt
-            patch-functions.txt
+            patch-symbols.txt
             motorola-symbol-map.txt
-            motorola-injection-functions.txt
-            directory-comparison.txt
+            motorola-injection-search.txt
             config-comparison.txt
-            patch-added-files.txt
           if-no-files-found: error
           retention-days: 14
 
 
       # ============================================================
-      # 19. FINISH
+      # FINISH
       # ============================================================
 
       - name: Finish
         shell: bash
         run: |
           echo
-          echo "================================================"
+          echo "=============================================="
           echo "QCACLD3 PORT ANALYSIS COMPLETE"
-          echo "================================================"
+          echo "=============================================="
           echo
           echo "Artifact:"
-          echo
           echo "cebu-qcacld3-port-analysis"
           echo
-          echo "Upload that artifact here for the next step."
+          echo "Upload that artifact here."
