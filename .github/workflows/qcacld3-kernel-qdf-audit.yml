@@ -1,0 +1,372 @@
+name: QCACLD3 Kernel QDF Audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git \
+            ripgrep \
+            python3
+
+      - name: Clone LineageOS SM6225 kernel
+        run: |
+          git clone --depth=1 \
+            --branch lineage-23.2 \
+            https://github.com/LineageOS/android_kernel_motorola_sm6225.git \
+            kernel
+
+      - name: Clone Motorola QCACLD3
+        run: |
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qcacld-3.0.git \
+            qcacld3
+
+      - name: Create report directories
+        run: |
+          mkdir -p report/qdf
+          mkdir -p report/qcacld
+          mkdir -p report/includes
+          mkdir -p report/layout
+
+      - name: Record revisions
+        run: |
+          {
+            echo "=== Kernel ==="
+            git -C kernel rev-parse HEAD
+            git -C kernel log -1 --oneline
+
+            echo
+            echo "=== QCACLD3 ==="
+            git -C qcacld3 rev-parse HEAD
+            git -C qcacld3 log -1 --oneline
+          } > report/revisions.txt
+
+      - name: Inspect kernel staging tree
+        run: |
+          {
+            echo "=== drivers/staging directories ==="
+            find kernel/drivers/staging \
+              -maxdepth 2 \
+              -type d \
+              | sort
+
+            echo
+            echo "=== QCA-related directories ==="
+            find kernel/drivers/staging \
+              -type d \
+              \( -iname '*qca*' \
+              -o -iname '*qdf*' \
+              -o -iname '*wlan*' \
+              -o -iname '*wifi*' \
+              -o -iname '*fw-api*' \) \
+              | sort
+          } > report/layout/kernel-staging.txt
+
+      - name: Locate QDF headers in kernel
+        run: |
+          {
+            echo "=== qdf_nbuf.h ==="
+            find kernel \
+              -type f \
+              -name 'qdf_nbuf.h' \
+              -print
+
+            echo
+            echo "=== QDF core headers ==="
+            find kernel \
+              -type f \
+              \( -name 'qdf_types.h' \
+              -o -name 'qdf_status.h' \
+              -o -name 'qdf_mem.h' \
+              -o -name 'qdf_lock.h' \
+              -o -name 'qdf_util.h' \
+              -o -name 'qdf_timer.h' \
+              -o -name 'qdf_trace.h' \
+              -o -name 'qdf_module.h' \
+              -o -name 'qdf_nbuf.h' \) \
+              -print \
+              | sort
+
+            echo
+            echo "=== All QDF directories ==="
+            find kernel \
+              -type d \
+              -iname '*qdf*' \
+              | sort
+          } > report/qdf/kernel-qdf-headers.txt
+
+      - name: Locate Qualcomm host-common tree
+        run: |
+          {
+            echo "=== Exact host-common directory ==="
+
+            for d in \
+              kernel/drivers/staging/qca-wifi-host-cmn \
+              kernel/drivers/staging/qcacld-3.0 \
+              kernel/drivers/staging/qca \
+              kernel/drivers/staging/wlan \
+              kernel/drivers/staging/wifi; do
+
+              if [ -d "$d" ]; then
+                echo "FOUND: $d"
+              else
+                echo "ABSENT: $d"
+              fi
+            done
+
+            echo
+            echo "=== Directories containing qdf ==="
+            find kernel \
+              -type d \
+              -path '*qdf*' \
+              | sort
+          } > report/qdf/host-common-location.txt
+
+      - name: Locate athdefs and FW API
+        run: |
+          {
+            echo "=== athdefs.h ==="
+            find kernel \
+              -type f \
+              -name 'athdefs.h' \
+              -print
+
+            echo
+            echo "=== FW API directories ==="
+            find kernel \
+              -type d \
+              \( -iname '*fw-api*' \
+              -o -path '*/fw-api/*' \) \
+              | sort
+
+            echo
+            echo "=== FW API headers ==="
+            find kernel \
+              -type f \
+              \( -name 'athdefs.h' \
+              -o -name 'wmi_unified*.h' \
+              -o -name 'wmi*.h' \) \
+              | head -n 500
+          } > report/qdf/fw-api-location.txt
+
+      - name: Inspect QCACLD3 include requirements
+        run: |
+          {
+            echo "=== athdefs includes ==="
+            rg -n --text \
+              '#[[:space:]]*include[[:space:]]*[<"]athdefs\.h[>"]' \
+              qcacld3 || true
+
+            echo
+            echo "=== QDF includes ==="
+            rg -n --text \
+              '#[[:space:]]*include[[:space:]]*[<"]qdf_[^>"]+\.h[>"]' \
+              qcacld3/core \
+              | head -n 1000 || true
+
+            echo
+            echo "=== host-common variables ==="
+            rg -n --text \
+              'WLAN_COMMON|QDF_INC|QDF_ROOT|HOST_COMMON|FW_API' \
+              qcacld3/Kbuild \
+              qcacld3/Makefile \
+              qcacld3/Android.mk \
+              | head -n 1000 || true
+          } > report/includes/qcacld3-include-requirements.txt
+
+      - name: Map every qdf_nbuf include
+        run: |
+          {
+            echo "=== QCACLD3 qdf_nbuf includes ==="
+
+            rg -n --text \
+              'qdf_nbuf\.h' \
+              qcacld3 \
+              | head -n 1000 || true
+
+            echo
+            echo "=== Kernel qdf_nbuf includes ==="
+
+            rg -n --text \
+              'qdf_nbuf\.h' \
+              kernel \
+              | head -n 1000 || true
+          } > report/qdf/qdf-nbuf-usage.txt
+
+      - name: Inspect QDF directory contents
+        run: |
+          {
+            for d in $(find kernel -type d -iname '*qdf*' | sort); do
+              echo
+              echo "========================================"
+              echo "$d"
+              echo "========================================"
+
+              find "$d" \
+                -maxdepth 2 \
+                -type f \
+                | sort \
+                | head -n 300
+            done
+          } > report/qdf/qdf-directory-contents.txt
+
+      - name: Compare expected QDF headers
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          root = Path("kernel")
+
+          wanted = [
+              "qdf_nbuf.h",
+              "qdf_types.h",
+              "qdf_status.h",
+              "qdf_mem.h",
+              "qdf_lock.h",
+              "qdf_util.h",
+              "qdf_timer.h",
+              "qdf_trace.h",
+              "qdf_module.h",
+          ]
+
+          out = []
+
+          for name in wanted:
+              matches = list(root.rglob(name))
+
+              out.append(f"=== {name} ===")
+
+              if matches:
+                  for p in matches:
+                      out.append(f"FOUND: {p}")
+              else:
+                  out.append("NOT FOUND")
+
+              out.append("")
+
+          Path("report/qdf/header-matrix.txt").write_text(
+              "\n".join(out),
+              encoding="utf-8"
+          )
+          PY
+
+      - name: Inspect kernel QDF Kbuild files
+        run: |
+          {
+            echo "=== Kbuild files referencing QDF ==="
+
+            rg -n --text \
+              'qdf|QDF|qca-wifi-host-cmn' \
+              kernel/drivers/staging \
+              --glob 'Kbuild' \
+              --glob 'Makefile' \
+              2>/dev/null \
+              | head -n 2000 || true
+
+            echo
+            echo "=== Kernel include flags referencing QDF ==="
+
+            rg -n --text \
+              'qdf|QDF|qca-wifi-host-cmn' \
+              kernel/drivers \
+              --glob 'Kbuild' \
+              --glob 'Makefile' \
+              2>/dev/null \
+              | head -n 2000 || true
+          } > report/qdf/kernel-kbuild-qdf.txt
+
+      - name: Check source completeness
+        run: |
+          {
+            echo "=== Kernel QDF source statistics ==="
+
+            QDF_FILES=$(find kernel \
+              -type f \
+              \( -name 'qdf_*.h' -o -name 'qdf_*.c' \) \
+              | wc -l)
+
+            echo "QDF files: $QDF_FILES"
+
+            echo
+            echo "=== QCACLD3 source statistics ==="
+
+            QCACLD_FILES=$(find qcacld3 \
+              -type f \
+              \( -name '*.c' -o -name '*.h' \) \
+              | wc -l)
+
+            echo "QCACLD3 C/H files: $QCACLD_FILES"
+          } > report/qdf/source-statistics.txt
+
+      - name: Determine result
+        if: always()
+        run: |
+          {
+            echo "=== QCACLD3 Kernel QDF Audit ==="
+            echo
+
+            if find kernel \
+              -type f \
+              -name 'qdf_nbuf.h' \
+              | grep -q .; then
+
+              echo "qdf_nbuf.h: FOUND in kernel tree"
+
+              echo
+              find kernel \
+                -type f \
+                -name 'qdf_nbuf.h' \
+                -print
+
+            else
+              echo "qdf_nbuf.h: NOT FOUND in kernel tree"
+            fi
+
+            echo
+
+            if [ -d kernel/drivers/staging/qca-wifi-host-cmn ]; then
+              echo "Integrated qca-wifi-host-cmn: FOUND"
+            else
+              echo "Integrated qca-wifi-host-cmn: NOT FOUND"
+            fi
+
+            echo
+
+            if [ -d kernel/drivers/staging/fw-api ]; then
+              echo "Integrated fw-api: FOUND"
+            else
+              echo "Integrated fw-api: NOT FOUND"
+            fi
+
+            echo
+            echo "No QCACLD3 compilation was performed."
+            echo "This audit only determines where the matching QDF dependency lives."
+          } > report/CONCLUSION.txt
+
+      - name: Package report
+        if: always()
+        run: |
+          mkdir -p artifact
+          cp -r report artifact/
+
+          cd artifact
+          zip -r ../qcacld3-kernel-qdf-audit.zip .
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcacld3-kernel-qdf-audit
+          path: qcacld3-kernel-qdf-audit.zip
+          if-no-files-found: error
