@@ -8,13 +8,23 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout Moto G9 Power kernel
+
+      # ============================================================
+      # 1. CHECKOUT LINEAGEOS KERNEL
+      # ============================================================
+
+      - name: Checkout SM6225 kernel
         uses: actions/checkout@v4
         with:
           repository: LineageOS/android_kernel_motorola_sm6225
           ref: lineage-23.2
           path: kernel/motorola/sm6225
           fetch-depth: 1
+
+
+      # ============================================================
+      # 2. CHECKOUT CEBU DEVICE TREE
+      # ============================================================
 
       - name: Checkout cebu device tree
         uses: actions/checkout@v4
@@ -24,6 +34,11 @@ jobs:
           path: device/motorola/cebu
           fetch-depth: 1
 
+
+      # ============================================================
+      # 3. CHECKOUT SM6225 COMMON DEVICE TREE
+      # ============================================================
+
       - name: Checkout SM6225 common device tree
         uses: actions/checkout@v4
         with:
@@ -31,6 +46,11 @@ jobs:
           ref: lineage-23.2
           path: device/motorola/sm6225-common
           fetch-depth: 1
+
+
+      # ============================================================
+      # 4. CLONE MOTOROLA QCACLD-3.0
+      # ============================================================
 
       - name: Clone Motorola QCACLD3
         shell: bash
@@ -43,6 +63,11 @@ jobs:
             https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qcacld-3.0.git \
             vendor/qcom/opensource/wlan/qcacld-3.0
 
+
+      # ============================================================
+      # 5. CLONE QCA WIFI HOST COMMON
+      # ============================================================
+
       - name: Clone Motorola QCA WiFi host common
         shell: bash
         run: |
@@ -51,6 +76,11 @@ jobs:
           git clone --depth=1 \
             https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qca-wifi-host-cmn.git \
             vendor/qcom/opensource/wlan/qca-wifi-host-cmn
+
+
+      # ============================================================
+      # 6. CLONE FW API
+      # ============================================================
 
       - name: Clone Motorola FW API
         shell: bash
@@ -61,31 +91,51 @@ jobs:
             https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-fw-api.git \
             vendor/qcom/opensource/wlan/fw-api
 
-      - name: Download NetHunter QCACLD3 patch source
+
+      # ============================================================
+      # 7. DOWNLOAD NETHUNTER PATCH
+      # ============================================================
+
+      - name: Download NetHunter QCACLD3 injection patch
         shell: bash
         run: |
           set -euxo pipefail
 
           mkdir -p patches
 
-          # Known NetHunter QCACLD-3 frame-injection implementation.
-          curl -L --fail --retry 3 \
+          PATCH_URL="https://raw.githubusercontent.com/Loukious/android_kernel_xiaomi_sm8150/patches/patches/nethunter/07_packet_injection.patch"
+
+          curl -L \
+            --fail \
+            --retry 5 \
+            --retry-delay 2 \
             -o patches/nethunter-qcacld3-injection.patch \
-            https://raw.githubusercontent.com/Loukious/android_kernel_xiaomi_sm8150/main/patches/patches/nethunter/07_packet_injection.patch
+            "$PATCH_URL"
+
+          test -s patches/nethunter-qcacld3-injection.patch
 
           echo
-          echo "Patch downloaded:"
-          wc -l patches/nethunter-qcacld3-injection.patch
+          echo "Patch successfully downloaded:"
           ls -lh patches/nethunter-qcacld3-injection.patch
+
+          echo
+          echo "Patch line count:"
+          wc -l patches/nethunter-qcacld3-injection.patch
+
+
+      # ============================================================
+      # 8. SHOW SOURCE REVISIONS
+      # ============================================================
 
       - name: Show source revisions
         shell: bash
         run: |
           set -u
 
-          echo "=============================================="
+          echo
+          echo "================================================"
           echo "SOURCE REVISIONS"
-          echo "=============================================="
+          echo "================================================"
 
           for repo in \
             kernel/motorola/sm6225 \
@@ -95,71 +145,127 @@ jobs:
             vendor/qcom/opensource/wlan/qca-wifi-host-cmn \
             vendor/qcom/opensource/wlan/fw-api
           do
+
             echo
             echo "----- $repo -----"
 
             if [ -d "$repo/.git" ]; then
+              echo "Commit:"
               git -C "$repo" rev-parse HEAD
-              git -C "$repo" remote -v | head -2
+
+              echo "Remote:"
+              git -C "$repo" remote get-url origin 2>/dev/null || true
             else
-              echo "NOT A GIT REPOSITORY"
+              echo "NOT FOUND"
             fi
+
           done
 
-      - name: Inspect patch contents
+
+      # ============================================================
+      # 9. INSPECT PATCH
+      # ============================================================
+
+      - name: Inspect NetHunter patch
         shell: bash
         run: |
           set -u
 
           echo
-          echo "=============================================="
-          echo "PATCH FILES"
-          echo "=============================================="
+          echo "================================================"
+          echo "PATCH INFORMATION"
+          echo "================================================"
 
+          echo
+          echo "Patch header:"
+          sed -n '1,80p' \
+            patches/nethunter-qcacld3-injection.patch
+
+          echo
+          echo "Files changed:"
           grep '^diff --git ' \
             patches/nethunter-qcacld3-injection.patch \
             || true
 
           echo
-          echo "=============================================="
-          echo "PATCH CONFIG OPTIONS"
-          echo "=============================================="
-
+          echo "Configuration changes:"
           grep -n -E \
-            'CONFIG_|FEATURE_FRAME_INJECTION|INJECTION|INJECT' \
+            'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT|FEATURE_FRAME_INJECTION_SUPPORT|INJECTION|inject' \
             patches/nethunter-qcacld3-injection.patch \
             | head -300 \
             || true
+
+
+      # ============================================================
+      # 10. BUILD A SYNTHETIC TREE
+      #
+      # The NetHunter patch expects:
+      #
+      # drivers/staging/qcacld-3.0
+      # drivers/staging/qca-wifi-host-cmn
+      #
+      # Motorola stores these as external repositories.
+      #
+      # This step creates an isolated temporary tree containing
+      # both repositories in the paths expected by the patch.
+      # ============================================================
 
       - name: Prepare isolated patch tree
         shell: bash
         run: |
           set -euxo pipefail
 
-          rm -rf /tmp/qcacld3-test
-          mkdir -p /tmp/qcacld3-test
+          rm -rf /tmp/qcacld3-patch-test
 
-          cp -a vendor/qcom/opensource/wlan/qcacld-3.0 \
-            /tmp/qcacld3-test/qcacld-3.0
+          mkdir -p \
+            /tmp/qcacld3-patch-test/drivers/staging
 
-          cp -a vendor/qcom/opensource/wlan/qca-wifi-host-cmn \
-            /tmp/qcacld3-test/qca-wifi-host-cmn
+          cp -a \
+            vendor/qcom/opensource/wlan/qcacld-3.0 \
+            /tmp/qcacld3-patch-test/drivers/staging/qcacld-3.0
 
-          cp -a vendor/qcom/opensource/wlan/fw-api \
-            /tmp/qcacld3-test/fw-api
+          cp -a \
+            vendor/qcom/opensource/wlan/qca-wifi-host-cmn \
+            /tmp/qcacld3-patch-test/drivers/staging/qca-wifi-host-cmn
 
-      - name: Check patch against QCACLD3
+          cd /tmp/qcacld3-patch-test
+
+          git init
+
+          git config user.name "Patch Compatibility Test"
+
+          git config user.email "patch-test@example.invalid"
+
+          git add drivers
+
+          git commit \
+            -m "QCACLD3 compatibility test baseline"
+
+          echo
+          echo "Synthetic tree created."
+
+          find drivers/staging \
+            -maxdepth 2 \
+            -type d \
+            | sort \
+            | head -100
+
+
+      # ============================================================
+      # 11. CHECK PATCH WITHOUT APPLYING IT
+      # ============================================================
+
+      - name: Check NetHunter patch compatibility
         shell: bash
         run: |
           set +e
 
-          cd /tmp/qcacld3-test/qcacld-3.0
+          cd /tmp/qcacld3-patch-test
 
-          echo "=============================================="
-          echo "QCACLD3 PATCH CHECK"
-          echo "=============================================="
-
-          git status --short
+          echo
+          echo "================================================"
+          echo "RUNNING PATCH COMPATIBILITY CHECK"
+          echo "================================================"
 
           git apply \
             --check \
@@ -171,47 +277,76 @@ jobs:
           STATUS=$?
 
           echo
+          echo "================================================"
+          echo "PATCH CHECK OUTPUT"
+          echo "================================================"
+
           cat "$GITHUB_WORKSPACE/qcacld3-patch-check.txt"
 
           echo
-          echo "Patch check exit code: $STATUS"
+          echo "Patch check exit code:"
+          echo "$STATUS"
 
-          echo "$STATUS" > "$GITHUB_WORKSPACE/qcacld3-patch-status.txt"
+          echo "$STATUS" \
+            > "$GITHUB_WORKSPACE/qcacld3-patch-status.txt"
 
+          # IMPORTANT:
           # Do not fail the workflow here.
-          # We want the complete diagnostic report even if the patch conflicts.
+          #
+          # A non-zero status is useful information because it
+          # tells us which files require adaptation.
 
           exit 0
 
-      - name: Search patch paths against source
+
+      # ============================================================
+      # 12. CHECK WHICH PATCH FILES EXIST
+      # ============================================================
+
+      - name: Compare patch paths with Motorola source
         shell: bash
         run: |
           set -u
 
           REPORT="$GITHUB_WORKSPACE/path-comparison.txt"
 
-          echo "QCACLD3 PATCH PATH COMPARISON" > "$REPORT"
-          echo "================================" >> "$REPORT"
-          echo >> "$REPORT"
+          {
+            echo "QCACLD3 PATCH PATH COMPARISON"
+            echo "=============================="
+            echo
 
-          grep '^diff --git ' \
-            patches/nethunter-qcacld3-injection.patch \
-            | sed 's/^diff --git a\///' \
-            | sed 's/ b\/.*$//' \
-            | while read -r FILE
-          do
-            if [ -f "vendor/qcom/opensource/wlan/qcacld-3.0/$FILE" ]; then
-              echo "MATCH: $FILE" >> "$REPORT"
-            elif [ -f "vendor/qcom/opensource/wlan/qca-wifi-host-cmn/$FILE" ]; then
-              echo "MATCH-HOST-CMN: $FILE" >> "$REPORT"
-            else
-              echo "MISSING: $FILE" >> "$REPORT"
-            fi
-          done
+            grep '^diff --git ' \
+              "$GITHUB_WORKSPACE/patches/nethunter-qcacld3-injection.patch" \
+              | while read -r LINE
+            do
 
+              FILE_A=$(echo "$LINE" | sed 's/^diff --git a\///' | cut -d' ' -f1)
+
+              FILE_B=$(echo "$LINE" | sed 's/^diff --git a\/[^ ]* b\///')
+
+              if [ -f "/tmp/qcacld3-patch-test/$FILE_A" ]; then
+                echo "MATCH: $FILE_A"
+
+              elif [ -f "/tmp/qcacld3-patch-test/$FILE_B" ]; then
+                echo "MATCH: $FILE_B"
+
+              else
+                echo "MISSING: $FILE_A"
+              fi
+
+            done
+
+          } > "$REPORT"
+
+          echo
           cat "$REPORT"
 
-      - name: Search source for injection infrastructure
+
+      # ============================================================
+      # 13. SEARCH CURRENT SOURCE FOR INJECTION FEATURES
+      # ============================================================
+
+      - name: Search QCACLD3 injection infrastructure
         shell: bash
         run: |
           set -u
@@ -219,8 +354,8 @@ jobs:
           REPORT="$GITHUB_WORKSPACE/injection-source-search.txt"
 
           {
-            echo "QCACLD3 INJECTION / TESTMODE SEARCH"
-            echo "===================================="
+            echo "CURRENT QCACLD3 INJECTION / MONITOR SUPPORT"
+            echo "============================================"
             echo
 
             echo "=== QCACLD3 ==="
@@ -231,10 +366,11 @@ jobs:
               'FRAME_INJECTION|FRAME_INJECT|INJECTION|inject|testmode|NL80211_TESTMODE|radiotap|monitor' \
               vendor/qcom/opensource/wlan/qcacld-3.0 \
               2>/dev/null \
-              | head -3000 || true
+              | head -3000 \
+              || true
 
             echo
-            echo "=== QCA HOST COMMON ==="
+            echo "=== QCA WIFI HOST COMMON ==="
 
             grep -Rni \
               --exclude-dir=.git \
@@ -242,13 +378,20 @@ jobs:
               'FRAME_INJECTION|FRAME_INJECT|INJECTION|inject|testmode|NL80211_TESTMODE|radiotap|monitor' \
               vendor/qcom/opensource/wlan/qca-wifi-host-cmn \
               2>/dev/null \
-              | head -3000 || true
+              | head -3000 \
+              || true
 
           } > "$REPORT"
 
+          echo
           cat "$REPORT"
 
-      - name: Search required symbols
+
+      # ============================================================
+      # 14. SEARCH RELEVANT SYMBOLS
+      # ============================================================
+
+      - name: Search relevant WLAN symbols
         shell: bash
         run: |
           set -u
@@ -256,24 +399,31 @@ jobs:
           REPORT="$GITHUB_WORKSPACE/symbol-search.txt"
 
           {
-            echo "RELEVANT SYMBOL SEARCH"
-            echo "======================"
+            echo "RELEVANT WLAN SYMBOL SEARCH"
+            echo "==========================="
             echo
 
             grep -Rni \
               --exclude-dir=.git \
               -E \
-              'wlan_hdd_cfg80211|wlan_hdd_cfg80211_mgmt_tx|cfg80211_mgmt_tx|ieee80211_radiotap|qdf_nbuf|wmi_unified' \
+              'wlan_hdd_cfg80211|wlan_hdd_cfg80211_mgmt_tx|cfg80211_mgmt_tx|ndo_start_xmit|qdf_nbuf|wmi_unified' \
               vendor/qcom/opensource/wlan/qcacld-3.0 \
               vendor/qcom/opensource/wlan/qca-wifi-host-cmn \
               2>/dev/null \
-              | head -3000 || true
+              | head -3000 \
+              || true
 
           } > "$REPORT"
 
+          echo
           cat "$REPORT"
 
-      - name: Check existing Android build configuration
+
+      # ============================================================
+      # 15. CHECK MOTOROLA BUILD CONFIGURATION
+      # ============================================================
+
+      - name: Check Motorola WLAN build configuration
         shell: bash
         run: |
           set -u
@@ -281,25 +431,27 @@ jobs:
           REPORT="$GITHUB_WORKSPACE/android-build-config.txt"
 
           {
-            echo "MOTO QCACLD3 ANDROID BUILD CONFIGURATION"
-            echo "=========================================="
+            echo "MOTOROLA QCACLD3 BUILD CONFIGURATION"
+            echo "===================================="
             echo
 
             echo "=== Android.mk ==="
 
-            sed -n '1,1000p' \
+            sed -n '1,1200p' \
               vendor/qcom/opensource/wlan/qcacld-3.0/Android.mk \
-              2>/dev/null || true
+              2>/dev/null \
+              || true
 
             echo
             echo "=== Kconfig ==="
 
-            sed -n '1,1000p' \
+            sed -n '1,1200p' \
               vendor/qcom/opensource/wlan/qcacld-3.0/Kconfig \
-              2>/dev/null || true
+              2>/dev/null \
+              || true
 
             echo
-            echo "=== Device WiFi configuration ==="
+            echo "=== Device configuration ==="
 
             grep -Rni \
               --exclude-dir=.git \
@@ -308,11 +460,18 @@ jobs:
               device/motorola/cebu \
               device/motorola/sm6225-common \
               2>/dev/null \
-              | head -1000 || true
+              | head -1000 \
+              || true
 
           } > "$REPORT"
 
+          echo
           cat "$REPORT"
+
+
+      # ============================================================
+      # 16. CREATE FINAL REPORT
+      # ============================================================
 
       - name: Create final compatibility report
         shell: bash
@@ -323,42 +482,61 @@ jobs:
 
           {
             echo "Moto G9 Power (cebu)"
-            echo "QCACLD-3 NetHunter Patch Compatibility"
-            echo "========================================"
+            echo "QCACLD-3 NetHunter Patch Compatibility Report"
+            echo "=============================================="
             echo
 
-            echo "Patch check status:"
+            echo "Patch compatibility exit code:"
             cat "$GITHUB_WORKSPACE/qcacld3-patch-status.txt" \
-              2>/dev/null || true
+              2>/dev/null \
+              || true
 
             echo
             echo "Interpretation:"
             echo
-            echo "0 = patch applies cleanly to the tested tree."
-            echo "non-zero = patch has one or more conflicts/missing paths."
+            echo "0 = patch applies cleanly to the synthetic"
+            echo "    Motorola QCACLD3 + host-common tree."
             echo
+            echo "non-zero = one or more patch changes conflict"
+            echo "          or the source structure differs."
+            echo
+
             echo "IMPORTANT:"
-            echo "This workflow ONLY checks compatibility."
-            echo "It does NOT apply the patch to the real source."
-            echo "It does NOT build a kernel."
-            echo "It does NOT create a flashable ZIP."
-            echo "It does NOT modify the phone."
+            echo "This workflow does NOT apply the patch."
+            echo "This workflow does NOT build a kernel."
+            echo "This workflow does NOT build qca_cld3_wlan.ko."
+            echo "This workflow does NOT create a flashable ZIP."
+            echo "This workflow does NOT modify the phone."
             echo
 
-            echo "=== PATCH CHECK ==="
+            echo "================================================"
+            echo "PATCH CHECK"
+            echo "================================================"
+
             cat "$GITHUB_WORKSPACE/qcacld3-patch-check.txt" \
-              2>/dev/null || true
+              2>/dev/null \
+              || true
 
             echo
-            echo "=== PATH COMPARISON ==="
+            echo "================================================"
+            echo "PATH COMPARISON"
+            echo "================================================"
+
             cat "$GITHUB_WORKSPACE/path-comparison.txt" \
-              2>/dev/null || true
+              2>/dev/null \
+              || true
 
           } > "$REPORT"
 
+          echo
           cat "$REPORT"
 
-      - name: Upload compatibility reports
+
+      # ============================================================
+      # 17. UPLOAD REPORTS
+      # ============================================================
+
+      - name: Upload QCACLD3 compatibility reports
         uses: actions/upload-artifact@v4
         with:
           name: cebu-qcacld3-patch-compatibility
@@ -373,15 +551,25 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+
+      # ============================================================
+      # 18. FINAL MESSAGE
+      # ============================================================
+
       - name: Final status
         shell: bash
         run: |
           echo
-          echo "=============================================="
-          echo "QCACLD3 COMPATIBILITY CHECK COMPLETE"
-          echo "=============================================="
+          echo "================================================"
+          echo "QCACLD3 PATCH COMPATIBILITY CHECK COMPLETE"
+          echo "================================================"
           echo
-          echo "Download the artifact:"
+          echo "Artifact:"
           echo "cebu-qcacld3-patch-compatibility"
           echo
-          echo "No kernel or phone was modified."
+          echo "Download that artifact and upload it here."
+          echo
+          echo "No patch was applied."
+          echo "No kernel was built."
+          echo "No ZIP was created."
+          echo "Nothing was flashed to the phone."
