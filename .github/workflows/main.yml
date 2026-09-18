@@ -7,518 +7,532 @@ jobs:
   build:
     runs-on: ubuntu-22.04
 
+    env:
+      KERNEL_DIR: ${{ github.workspace }}/kernel
+      OUT_DIR: ${{ github.workspace }}/kernel-out
+
     steps:
 
-      # ============================================================
-      # 1. Install dependencies
-      # ============================================================
+      # ------------------------------------------------------------
+      # 1. Install build dependencies
+      # ------------------------------------------------------------
       - name: Install dependencies
         run: |
-          set -e
-
           sudo apt-get update
 
           sudo apt-get install -y \
+            git \
             bc \
             bison \
-            build-essential \
-            clang-14 \
-            cpio \
             flex \
-            gcc-aarch64-linux-gnu \
-            git \
-            libelf-dev \
-            libncurses-dev \
-            libssl-dev \
-            lld-14 \
+            build-essential \
+            clang \
+            lld \
+            llvm \
             llvm-14 \
-            python3 \
+            lld-14 \
+            clang-14 \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu \
+            libssl-dev \
+            libelf-dev \
+            libdw-dev \
+            dwarves \
+            cpio \
             rsync \
+            zip \
             unzip \
+            curl \
             wget \
-            xz-utils \
-            zip
-
-      # ============================================================
-      # 2. Setup LLVM
-      # ============================================================
-      - name: Setup LLVM
-        run: |
-          set -e
+            python3 \
+            python3-pip
 
           echo "/usr/lib/llvm-14/bin" >> "$GITHUB_PATH"
 
-          /usr/lib/llvm-14/bin/clang --version
-          /usr/lib/llvm-14/bin/ld.lld --version
-
-      # ============================================================
-      # 3. Checkout LineageOS SM6225 kernel
-      # ============================================================
-      - name: Checkout LineageOS SM6225 kernel
-        uses: actions/checkout@v4
-        with:
-          repository: LineageOS/android_kernel_motorola_sm6225
-          ref: lineage-23.2
-          path: kernel
-          fetch-depth: 1
-
-      # ============================================================
-      # 4. Checkout cebu device tree
-      # ============================================================
-      - name: Checkout cebu device tree
-        uses: actions/checkout@v4
-        with:
-          repository: LineageOS/android_device_motorola_cebu
-          ref: lineage-23.2
-          path: device/motorola/cebu
-          fetch-depth: 1
-
-      # ============================================================
-      # 5. Checkout SM6225 common device tree
-      # ============================================================
-      - name: Checkout SM6225 common device tree
-        uses: actions/checkout@v4
-        with:
-          repository: LineageOS/android_device_motorola_sm6225-common
-          ref: lineage-23.2
-          path: device/motorola/sm6225-common
-          fetch-depth: 1
-
-      # ============================================================
-      # 6. Verify source
-      # ============================================================
-      - name: Verify source
-        working-directory: kernel
+      # ------------------------------------------------------------
+      # 2. Checkout kernel source
+      # ------------------------------------------------------------
+      - name: Clone LineageOS kernel
         run: |
-          set -e
+          git clone --depth=1 \
+            --branch lineage-23.2 \
+            https://github.com/LineageOS/android_kernel_motorola_sm6225.git \
+            "$KERNEL_DIR"
 
-          echo "Kernel revision:"
+          cd "$KERNEL_DIR"
+
+          echo "Kernel commit:"
           git rev-parse HEAD
 
-          echo
-          echo "Checking required files..."
+          echo "Kernel branch:"
+          git branch --show-current
 
-          test -f arch/arm64/configs/vendor/bengal-perf_defconfig
-          test -f scripts/kconfig/merge_config.sh
-          test -f drivers/sensors/Kconfig
-          test -f drivers/sensors/Makefile
-          test -f drivers/sensors/sensors_class.c
+          echo "Initial source-tree status:"
+          git status --short
 
-          echo "Required kernel files found."
-
-          echo
-          echo "Sensor driver configuration:"
-          grep -n "CONFIG_SENSORS_SSC" drivers/Makefile || true
-          grep -n "SENSORS_CLASS" drivers/sensors/Makefile || true
-
-          echo
-          echo "cebu BoardConfig:"
-          grep -n "cebu-default.config" \
-            "$GITHUB_WORKSPACE/device/motorola/cebu/BoardConfig.mk" \
-            || true
-
-      # ============================================================
-      # 7. Clean kernel source
-      # ============================================================
-      - name: Clean kernel source
-        working-directory: kernel
+      # ------------------------------------------------------------
+      # 3. Prepare clean output directory
+      # ------------------------------------------------------------
+      - name: Prepare build directories
         run: |
-          set -e
+          rm -rf "$OUT_DIR"
+          mkdir -p "$OUT_DIR"
 
-          make ARCH=arm64 mrproper
+          cd "$KERNEL_DIR"
 
-          rm -rf out
-          rm -rf include/config
-          rm -rf include/generated
-          rm -rf arch/arm64/include/generated
-          rm -rf .config
+          make mrproper
 
-          echo "Kernel source cleaned."
+          mkdir -p "$OUT_DIR"
 
-      # ============================================================
-      # 8. Locate cebu configuration
-      # ============================================================
-      - name: Locate cebu kernel configuration
+      # ------------------------------------------------------------
+      # 4. Locate cebu default config
+      # ------------------------------------------------------------
+      - name: Verify cebu kernel configuration
         run: |
-          set -e
+          CEBU_CONFIG="$KERNEL_DIR/vendor/ext_config/cebu-default.config"
 
-          CEBU_CONFIG="$(find "$GITHUB_WORKSPACE" -type f -name "cebu-default.config" -print -quit)"
-
-          if [ -n "$CEBU_CONFIG" ]; then
-            echo "Found cebu config:"
+          if [ ! -f "$CEBU_CONFIG" ]; then
+            echo "ERROR: cebu-default.config was not found:"
             echo "$CEBU_CONFIG"
-            echo "CEBU_CONFIG=$CEBU_CONFIG" >> "$GITHUB_ENV"
-          else
-            echo "::warning::cebu-default.config was not found in the checked-out public trees."
-            echo "Continuing with the SM6225 Bengal base configuration."
+            exit 1
           fi
 
-      # ============================================================
-      # 9. Create NetHunter configuration
-      # ============================================================
-      - name: Create NetHunter config
-        working-directory: kernel
-        run: |
-          set -e
+          echo "Found:"
+          echo "$CEBU_CONFIG"
 
-          cat > nethunter.config <<'EOF'
+          echo
+          echo "First lines:"
+          head -40 "$CEBU_CONFIG"
+
+      # ------------------------------------------------------------
+      # 5. Create NetHunter configuration OUTSIDE source tree
+      # ------------------------------------------------------------
+      - name: Create NetHunter configuration
+        run: |
+          NH_CONFIG="$GITHUB_WORKSPACE/nethunter.config"
+
+          cat > "$NH_CONFIG" <<'EOF'
+
+          # ==========================================================
+          # NetHunter / Bluetooth
+          # ==========================================================
+
           CONFIG_BT=y
           CONFIG_BT_BREDR=y
-          CONFIG_BT_RFCOMM=y
+          CONFIG_BT_RFCOMM=m
           CONFIG_BT_RFCOMM_TTY=y
-          CONFIG_BT_HIDP=y
-          CONFIG_BT_HCIVHCI=y
-          CONFIG_BT_HCIUART=y
+          CONFIG_BT_HIDP=m
+          CONFIG_BT_HCIVHCI=m
+          CONFIG_BT_HCIUART=m
           CONFIG_BT_HCIUART_H4=y
 
-          CONFIG_TTY=y
-          CONFIG_INPUT=y
-          CONFIG_HID=y
-          CONFIG_INPUT_EVDEV=y
-          CONFIG_INPUT_UINPUT=y
-          CONFIG_UHID=y
-          CONFIG_HIDRAW=y
 
-          CONFIG_USB_GADGET=y
+          # ==========================================================
+          # USB gadget / HID / networking
+          # ==========================================================
+
           CONFIG_USB_CONFIGFS=y
           CONFIG_USB_CONFIGFS_F_HID=y
           CONFIG_USB_CONFIGFS_NCM=y
-          CONFIG_USB_CONFIGFS_F_FS=y
 
-          CONFIG_PACKET=y
-          CONFIG_NETFILTER=y
-          CONFIG_NETFILTER_XTABLES=y
-          CONFIG_NF_CONNTRACK=y
+          CONFIG_USB_GADGET=y
+          CONFIG_USB_LIBCOMPOSITE=y
+
+          CONFIG_INPUT_UINPUT=m
+
           CONFIG_TUN=y
-          CONFIG_VETH=y
+          CONFIG_VETH=m
+
+
+          # ==========================================================
+          # Wireless framework
+          # ==========================================================
 
           CONFIG_CFG80211=y
           CONFIG_RFKILL=y
+          CONFIG_NL80211_TESTMODE=y
+
+
+          # ==========================================================
+          # Motorola sensor module dependency
+          #
+          # dts201a_mmi.ko and abov_sar_mmi_overlay.ko reference
+          # sensors_classdev_register/unregister.
+          # ==========================================================
 
           CONFIG_SENSORS_SSC=y
           CONFIG_SENSORS_CLASS=m
+
           EOF
 
-          echo "NetHunter configuration:"
-          cat nethunter.config
+          echo "NetHunter fragment:"
+          cat "$NH_CONFIG"
 
-      # ============================================================
-      # 10. Configure base kernel
-      # ============================================================
-      - name: Configure base kernel
-        working-directory: kernel
+          echo
+          echo "Location:"
+          echo "$NH_CONFIG"
+
+          echo
+          echo "Confirming fragment is NOT inside kernel Git tree:"
+          case "$NH_CONFIG" in
+            "$KERNEL_DIR"/*)
+              echo "ERROR: NetHunter config is inside kernel source tree!"
+              exit 1
+              ;;
+            *)
+              echo "OK"
+              ;;
+          esac
+
+      # ------------------------------------------------------------
+      # 6. Configure kernel
+      # ------------------------------------------------------------
+      - name: Configure kernel
         run: |
-          set -e
+          cd "$KERNEL_DIR"
 
-          make \
-            O=out \
+          CEBU_CONFIG="$KERNEL_DIR/vendor/ext_config/cebu-default.config"
+          NH_CONFIG="$GITHUB_WORKSPACE/nethunter.config"
+
+          echo "Generating base cebu configuration..."
+
+          make O="$OUT_DIR" \
             ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             vendor/bengal-perf_defconfig
 
-      # ============================================================
-      # 11. Apply cebu configuration
-      # ============================================================
-      - name: Apply cebu configuration
-        if: env.CEBU_CONFIG != ''
-        working-directory: kernel
-        run: |
-          set -e
-
+          echo
+          echo "Merging cebu configuration..."
+          
           scripts/kconfig/merge_config.sh \
             -m \
-            -O out \
-            out/.config \
+            -O "$OUT_DIR" \
+            "$OUT_DIR/.config" \
             "$CEBU_CONFIG"
 
-      # ============================================================
-      # 12. Apply NetHunter configuration
-      # ============================================================
-      - name: Apply NetHunter configuration
-        working-directory: kernel
-        run: |
-          set -e
+          echo
+          echo "Merging NetHunter configuration..."
 
           scripts/kconfig/merge_config.sh \
             -m \
-            -O out \
-            out/.config \
-            nethunter.config
+            -O "$OUT_DIR" \
+            "$OUT_DIR/.config" \
+            "$NH_CONFIG"
 
-      # ============================================================
-      # 13. Finalize configuration
-      # ============================================================
-      - name: Finalize configuration
-        working-directory: kernel
-        run: |
-          set -e
+          echo
+          echo "Running olddefconfig..."
 
-          make \
-            O=out \
+          make O="$OUT_DIR" \
             ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             olddefconfig
 
-      # ============================================================
-      # 14. Verify configuration
-      # ============================================================
+      # ------------------------------------------------------------
+      # 7. Verify requested configuration
+      # ------------------------------------------------------------
       - name: Verify NetHunter configuration
-        working-directory: kernel
         run: |
-          set -e
+          CONFIG="$OUT_DIR/.config"
 
-          CONFIG="out/.config"
+          echo "=================================================="
+          echo "NetHunter configuration verification"
+          echo "=================================================="
+
+          REQUIRED_CONFIGS=(
+            "CONFIG_BT=y"
+            "CONFIG_BT_BREDR=y"
+            "CONFIG_BT_RFCOMM=m"
+            "CONFIG_BT_RFCOMM_TTY=y"
+            "CONFIG_BT_HIDP=m"
+            "CONFIG_BT_HCIVHCI=m"
+            "CONFIG_BT_HCIUART=m"
+            "CONFIG_BT_HCIUART_H4=y"
+
+            "CONFIG_USB_CONFIGFS=y"
+            "CONFIG_USB_CONFIGFS_F_HID=y"
+            "CONFIG_USB_CONFIGFS_NCM=y"
+            "CONFIG_USB_GADGET=y"
+            "CONFIG_USB_LIBCOMPOSITE=y"
+
+            "CONFIG_INPUT_UINPUT=m"
+
+            "CONFIG_TUN=y"
+            "CONFIG_VETH=m"
+
+            "CONFIG_CFG80211=y"
+            "CONFIG_RFKILL=y"
+            "CONFIG_NL80211_TESTMODE=y"
+
+            "CONFIG_SENSORS_SSC=y"
+            "CONFIG_SENSORS_CLASS=m"
+          )
+
           FAILED=0
 
-          check_y() {
-            OPTION="$1"
-
-            if grep -q "^${OPTION}=y$" "$CONFIG"; then
-              echo "OK: ${OPTION}=y"
+          for REQUIRED in "${REQUIRED_CONFIGS[@]}"; do
+            if grep -qx "$REQUIRED" "$CONFIG"; then
+              echo "[OK]   $REQUIRED"
             else
-              echo "FAIL: ${OPTION} is NOT built-in"
-              grep -E "^# ${OPTION} is not set$|^${OPTION}=" "$CONFIG" || true
+              echo "[FAIL] $REQUIRED"
               FAILED=1
             fi
-          }
-
-          check_m() {
-            OPTION="$1"
-
-            if grep -q "^${OPTION}=m$" "$CONFIG"; then
-              echo "OK: ${OPTION}=m"
-            else
-              echo "FAIL: ${OPTION} is NOT a module"
-              grep -E "^# ${OPTION} is not set$|^${OPTION}=" "$CONFIG" || true
-              FAILED=1
-            fi
-          }
-
-          echo "========== Bluetooth =========="
-
-          check_y CONFIG_BT
-          check_y CONFIG_BT_BREDR
-          check_y CONFIG_BT_RFCOMM
-          check_y CONFIG_BT_RFCOMM_TTY
-          check_y CONFIG_BT_HIDP
-          check_y CONFIG_BT_HCIVHCI
-          check_y CONFIG_BT_HCIUART
-          check_y CONFIG_BT_HCIUART_H4
-
-          echo
-          echo "========== Input / HID =========="
-
-          check_y CONFIG_TTY
-          check_y CONFIG_INPUT
-          check_y CONFIG_HID
-          check_y CONFIG_INPUT_EVDEV
-          check_y CONFIG_INPUT_UINPUT
-          check_y CONFIG_UHID
-          check_y CONFIG_HIDRAW
-
-          echo
-          echo "========== USB Gadget =========="
-
-          check_y CONFIG_USB_GADGET
-          check_y CONFIG_USB_CONFIGFS
-          check_y CONFIG_USB_CONFIGFS_F_HID
-          check_y CONFIG_USB_CONFIGFS_NCM
-          check_y CONFIG_USB_CONFIGFS_F_FS
-
-          echo
-          echo "========== Networking =========="
-
-          check_y CONFIG_PACKET
-          check_y CONFIG_NETFILTER
-          check_y CONFIG_NETFILTER_XTABLES
-          check_y CONFIG_NF_CONNTRACK
-          check_y CONFIG_TUN
-          check_y CONFIG_VETH
-
-          echo
-          echo "========== Wireless =========="
-
-          check_y CONFIG_CFG80211
-          check_y CONFIG_RFKILL
-
-          echo
-          echo "========== Sensors =========="
-
-          check_y CONFIG_SENSORS_SSC
-          check_m CONFIG_SENSORS_CLASS
+          done
 
           echo
 
           if [ "$FAILED" -ne 0 ]; then
-            echo "CONFIGURATION VERIFICATION FAILED"
+            echo "ERROR: One or more required configuration options were not enabled."
             exit 1
           fi
 
-          echo "ALL REQUIRED CONFIGURATION OPTIONS PASSED."
+          echo "All required NetHunter options are present."
 
-      # ============================================================
-      # 15. Save final config
-      # ============================================================
+      # ------------------------------------------------------------
+      # 8. Verify source tree is CLEAN
+      #
+      # This is the important fix for the previous "-dirty" release.
+      # ------------------------------------------------------------
+      - name: Verify clean kernel source tree
+        run: |
+          cd "$KERNEL_DIR"
+
+          echo "Kernel source tree status:"
+          git status --short
+
+          if [ -n "$(git status --porcelain)" ]; then
+            echo
+            echo "ERROR: Kernel source tree is dirty."
+            echo "A dirty tree can cause '-dirty' to be appended to"
+            echo "the kernel release string."
+            echo
+            git status --short
+            exit 1
+          fi
+
+          echo
+          echo "Kernel source tree is CLEAN."
+
+      # ------------------------------------------------------------
+      # 9. Verify kernel release BEFORE compiling
+      # ------------------------------------------------------------
+      - name: Verify kernel release
+        run: |
+          cd "$KERNEL_DIR"
+
+          EXPECTED_RELEASE="4.19.325-cip135-st19-perf-g39bcecd5c63"
+
+          ACTUAL_RELEASE="$(
+            make -s O="$OUT_DIR" \
+              ARCH=arm64 \
+              LLVM=1 \
+              LLVM_IAS=1 \
+              CROSS_COMPILE=aarch64-linux-gnu- \
+              kernelrelease
+          )"
+
+          echo "Expected:"
+          echo "$EXPECTED_RELEASE"
+
+          echo
+          echo "Actual:"
+          echo "$ACTUAL_RELEASE"
+
+          if [ "$ACTUAL_RELEASE" != "$EXPECTED_RELEASE" ]; then
+            echo
+            echo "ERROR: Kernel release mismatch."
+            echo "The build must not continue."
+            exit 1
+          fi
+
+          echo
+          echo "Kernel release matches the phone."
+
+      # ------------------------------------------------------------
+      # 10. Save final configuration
+      # ------------------------------------------------------------
       - name: Save final kernel config
-        working-directory: kernel
         run: |
-          set -e
+          cp "$OUT_DIR/.config" \
+            "$OUT_DIR/kernel.config"
 
-          cp out/.config out/kernel.config
+          echo "Final config saved."
 
-      # ============================================================
-      # 16. Build kernel Image
-      # ============================================================
+      # ------------------------------------------------------------
+      # 11. Build Image
+      # ------------------------------------------------------------
       - name: Build kernel Image
-        working-directory: kernel
         run: |
-          set -e
+          cd "$KERNEL_DIR"
 
-          make \
-            -j"$(nproc)" \
-            O=out \
+          make -j"$(nproc)" \
+            O="$OUT_DIR" \
             ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             Image
 
-      # ============================================================
-      # 17. Build kernel modules
-      # ============================================================
+      # ------------------------------------------------------------
+      # 12. Build kernel modules
+      # ------------------------------------------------------------
       - name: Build kernel modules
-        working-directory: kernel
         run: |
-          set -e
+          cd "$KERNEL_DIR"
 
-          make \
-            -j"$(nproc)" \
-            O=out \
+          make -j"$(nproc)" \
+            O="$OUT_DIR" \
             ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             modules
 
-      # ============================================================
-      # 18. Verify sensor module
-      # ============================================================
-      - name: Verify sensor module
-        working-directory: kernel
+      # ------------------------------------------------------------
+      # 13. Verify Image
+      # ------------------------------------------------------------
+      - name: Verify kernel Image
         run: |
-          set -e
+          IMAGE="$OUT_DIR/arch/arm64/boot/Image"
 
-          SENSOR_MODULE="$(find out -type f -name "sensors_class.ko" -print -quit)"
-
-          if [ -z "$SENSOR_MODULE" ]; then
-            echo "ERROR: sensors_class.ko was not produced."
-            grep -E "^CONFIG_SENSORS_(SSC|CLASS)=" out/.config || true
+          if [ ! -f "$IMAGE" ]; then
+            echo "ERROR: Image was not produced."
             exit 1
           fi
 
-          echo "Sensor module found:"
-          echo "$SENSOR_MODULE"
+          echo "Image:"
+          ls -lh "$IMAGE"
 
-          ls -lh "$SENSOR_MODULE"
+          echo
+          echo "Kernel release:"
+          "$KERNEL_DIR/scripts/extract-vmlinux" "$IMAGE" >/dev/null 2>&1 || true
 
-      # ============================================================
-      # 19. Collect artifacts
-      # ============================================================
-      - name: Collect artifacts
-        working-directory: kernel
+      # ------------------------------------------------------------
+      # 14. Install modules into staging directory
+      # ------------------------------------------------------------
+      - name: Install kernel modules
         run: |
-          set -e
+          MODULE_DIR="$GITHUB_WORKSPACE/modules"
 
-          rm -rf "$GITHUB_WORKSPACE/artifact"
+          rm -rf "$MODULE_DIR"
+          mkdir -p "$MODULE_DIR"
 
-          mkdir -p "$GITHUB_WORKSPACE/artifact/modules/vendor/lib/modules"
+          cd "$KERNEL_DIR"
 
-          cp \
-            out/arch/arm64/boot/Image \
-            "$GITHUB_WORKSPACE/artifact/Image"
-
-          cp \
-            out/kernel.config \
-            "$GITHUB_WORKSPACE/artifact/kernel.config"
-
-          cp \
-            nethunter.config \
-            "$GITHUB_WORKSPACE/artifact/nethunter.config"
-
-          SENSOR_MODULE="$(find out -type f -name "sensors_class.ko" -print -quit)"
-
-          cp \
-            "$SENSOR_MODULE" \
-            "$GITHUB_WORKSPACE/artifact/modules/vendor/lib/modules/sensors_class.ko"
+          make \
+            O="$OUT_DIR" \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            INSTALL_MOD_PATH="$MODULE_DIR" \
+            modules_install
 
           echo
-          echo "========== Artifact contents =========="
+          echo "Installed modules:"
+          find "$MODULE_DIR" -type f -name '*.ko' | sort
 
-          find \
-            "$GITHUB_WORKSPACE/artifact" \
-            -type f \
-            -printf '%P\n' \
-            | sort
+      # ------------------------------------------------------------
+      # 15. Verify sensors_class.ko
+      # ------------------------------------------------------------
+      - name: Verify sensor module
+        run: |
+          SENSOR="$GITHUB_WORKSPACE/modules/vendor/lib/modules/sensors_class.ko"
+
+          if [ ! -f "$SENSOR" ]; then
+            echo "ERROR: sensors_class.ko was not generated."
+            echo
+            find "$GITHUB_WORKSPACE/modules" -type f -name '*sensor*.ko' -o -name 'sensors_class.ko'
+            exit 1
+          fi
+
+          echo "Found:"
+          ls -lh "$SENSOR"
 
           echo
-          echo "Kernel Image:"
-          ls -lh "$GITHUB_WORKSPACE/artifact/Image"
+          echo "Module information:"
+          modinfo "$SENSOR" 2>/dev/null || true
+
+      # ------------------------------------------------------------
+      # 16. Verify module vermagic matches kernel release
+      # ------------------------------------------------------------
+      - name: Verify module vermagic
+        run: |
+          EXPECTED_RELEASE="4.19.325-cip135-st19-perf-g39bcecd5c63"
+
+          SENSOR="$GITHUB_WORKSPACE/modules/vendor/lib/modules/sensors_class.ko"
+
+          VERMAGIC="$(modinfo -F vermagic "$SENSOR" 2>/dev/null || true)"
+
+          echo "Expected kernel release:"
+          echo "$EXPECTED_RELEASE"
 
           echo
-          echo "Sensor module:"
-          ls -lh "$GITHUB_WORKSPACE/artifact/modules/vendor/lib/modules/sensors_class.ko"
+          echo "Module vermagic:"
+          echo "$VERMAGIC"
 
-      # ============================================================
-      # 20. Upload kernel artifact
-      # ============================================================
-      - name: Upload kernel artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: moto-g9-power-cebu-nethunter-kernel
-          path: artifact
-          if-no-files-found: error
-          retention-days: 30
+          case "$VERMAGIC" in
+            "$EXPECTED_RELEASE "*)
+              echo
+              echo "Module vermagic matches kernel release."
+              ;;
+            *)
+              echo
+              echo "ERROR: Module vermagic does not match kernel release."
+              exit 1
+              ;;
+          esac
 
-      # ============================================================
-      # 21. Prepare AnyKernel3
-      # ============================================================
+      # ------------------------------------------------------------
+      # 17. Prepare AnyKernel3
+      # ------------------------------------------------------------
       - name: Prepare AnyKernel3
         run: |
-          set -e
+          AK3="$GITHUB_WORKSPACE/AnyKernel3"
 
-          rm -rf AnyKernel3
+          rm -rf "$AK3"
 
           git clone --depth=1 \
             https://github.com/osm0sis/AnyKernel3.git \
-            AnyKernel3
+            "$AK3"
 
-          cp \
-            "$GITHUB_WORKSPACE/artifact/Image" \
-            AnyKernel3/Image
+          rm -rf "$AK3/modules"
 
-          rm -rf AnyKernel3/modules
+          mkdir -p "$AK3/modules"
 
-          mkdir -p \
-            AnyKernel3/modules/vendor/lib/modules
+          cp "$OUT_DIR/arch/arm64/boot/Image" \
+            "$AK3/Image"
 
-          cp \
-            "$GITHUB_WORKSPACE/artifact/modules/vendor/lib/modules/sensors_class.ko" \
-            AnyKernel3/modules/vendor/lib/modules/sensors_class.ko
+          cp -a "$GITHUB_WORKSPACE/modules/." \
+            "$AK3/modules/"
 
-          cat > AnyKernel3/anykernel.sh <<'EOF'
+          echo "AnyKernel3 prepared."
+
+      # ------------------------------------------------------------
+      # 18. Configure AnyKernel3
+      # ------------------------------------------------------------
+      - name: Configure AnyKernel3
+        run: |
+          AK3="$GITHUB_WORKSPACE/AnyKernel3"
+
+          cat > "$AK3/anykernel.sh" <<'EOF'
+          # AnyKernel3 Ramdisk Mod Script
+
           properties() { '
           kernel.string=Moto G9 Power cebu NetHunter Kernel
+
           do.devicecheck=1
           do.modules=1
           do.systemless=0
           do.cleanup=1
           do.cleanuponabort=0
+
           device.name1=cebu
           device.name2=
+
           supported.versions=
           supported.patchlevels=
           supported.vendorpatchlevels=
@@ -535,34 +549,50 @@ jobs:
           write_boot
           EOF
 
-          echo
-          echo "========== AnyKernel3 configuration =========="
+          chmod 755 "$AK3/anykernel.sh"
 
-          cat AnyKernel3/anykernel.sh
+          echo "AnyKernel configuration:"
+          cat "$AK3/anykernel.sh"
 
-          echo
-          echo "========== AnyKernel3 modules =========="
-
-          find AnyKernel3/modules -type f -printf '%P\n' | sort
-
-      # ============================================================
-      # 22. Build flashable ZIP
-      # ============================================================
-      - name: Build AnyKernel3 flashable ZIP
-        working-directory: AnyKernel3
+      # ------------------------------------------------------------
+      # 19. Verify AnyKernel contents
+      # ------------------------------------------------------------
+      - name: Verify AnyKernel package
         run: |
-          set -e
+          AK3="$GITHUB_WORKSPACE/AnyKernel3"
+
+          echo "Image:"
+          ls -lh "$AK3/Image"
+
+          echo
+          echo "sensors_class.ko:"
+          ls -lh "$AK3/modules/vendor/lib/modules/sensors_class.ko"
+
+          echo
+          echo "AnyKernel script:"
+          grep -E \
+            'device.name1|do.modules|BLOCK=|IS_SLOT_DEVICE=' \
+            "$AK3/anykernel.sh"
+
+      # ------------------------------------------------------------
+      # 20. Create flashable ZIP
+      # ------------------------------------------------------------
+      - name: Create flashable ZIP
+        run: |
+          AK3="$GITHUB_WORKSPACE/AnyKernel3"
 
           ZIP_FILE="$GITHUB_WORKSPACE/moto-g9-power-cebu-nethunter-flashable.zip"
 
           rm -f "$ZIP_FILE"
 
-          echo "Creating flashable ZIP..."
+          cd "$AK3"
 
-          zip -r9 "$ZIP_FILE" . -x '.git/*' -x '.github/*'
+          zip -r9 "$ZIP_FILE" . \
+            -x '.git/*' \
+            -x '.github/*'
 
           echo
-          echo "Flashable ZIP created:"
+          echo "Created:"
           ls -lh "$ZIP_FILE"
 
           echo
@@ -570,16 +600,92 @@ jobs:
 
           unzip -t "$ZIP_FILE"
 
-          echo
-          echo "ZIP test completed successfully."
+      # ------------------------------------------------------------
+      # 21. Final release verification
+      # ------------------------------------------------------------
+      - name: Final verification
+        run: |
+          EXPECTED_RELEASE="4.19.325-cip135-st19-perf-g39bcecd5c63"
 
-      # ============================================================
-      # 23. Upload flashable ZIP
-      # ============================================================
-      - name: Upload flashable ZIP
+          echo "=============================================="
+          echo "FINAL BUILD VERIFICATION"
+          echo "=============================================="
+
+          echo
+          echo "Expected kernel:"
+          echo "$EXPECTED_RELEASE"
+
+          echo
+          echo "Kernel source:"
+          git -C "$KERNEL_DIR" status --short
+
+          if [ -n "$(git -C "$KERNEL_DIR" status --porcelain)" ]; then
+            echo "ERROR: Source tree became dirty."
+            exit 1
+          fi
+
+          echo
+          echo "Final kernel release:"
+          make -s \
+            -C "$KERNEL_DIR" \
+            O="$OUT_DIR" \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            kernelrelease
+
+          echo
+          echo "Final ZIP:"
+          ls -lh "$GITHUB_WORKSPACE/moto-g9-power-cebu-nethunter-flashable.zip"
+
+          echo
+          echo "Final sensors module:"
+          ls -lh \
+            "$GITHUB_WORKSPACE/modules/vendor/lib/modules/sensors_class.ko"
+
+          echo
+          echo "=============================================="
+          echo "BUILD COMPLETE"
+          echo "=============================================="
+
+      # ------------------------------------------------------------
+      # 22. Upload flashable kernel
+      # ------------------------------------------------------------
+      - name: Upload flashable kernel
         uses: actions/upload-artifact@v4
         with:
           name: moto-g9-power-cebu-nethunter-flashable
           path: moto-g9-power-cebu-nethunter-flashable.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      # ------------------------------------------------------------
+      # 23. Upload raw kernel + config + modules
+      # ------------------------------------------------------------
+      - name: Collect raw kernel artifact
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/raw-kernel"
+
+          cp "$OUT_DIR/arch/arm64/boot/Image" \
+            "$GITHUB_WORKSPACE/raw-kernel/Image"
+
+          cp "$OUT_DIR/kernel.config" \
+            "$GITHUB_WORKSPACE/raw-kernel/kernel.config"
+
+          cp "$GITHUB_WORKSPACE/nethunter.config" \
+            "$GITHUB_WORKSPACE/raw-kernel/nethunter.config"
+
+          cp "$GITHUB_WORKSPACE/modules/vendor/lib/modules/sensors_class.ko" \
+            "$GITHUB_WORKSPACE/raw-kernel/sensors_class.ko"
+
+          echo "Raw kernel artifact:"
+          find "$GITHUB_WORKSPACE/raw-kernel" -type f -exec ls -lh {} \;
+
+      - name: Upload raw kernel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: moto-g9-power-cebu-nethunter-kernel
+          path: raw-kernel/
           if-no-files-found: error
           retention-days: 30
