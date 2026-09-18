@@ -1,4 +1,4 @@
-name: QCACLD3 History Investigation
+name: QCACLD3 Fast History Investigation
 
 on:
   workflow_dispatch:
@@ -6,460 +6,473 @@ on:
 jobs:
   investigate:
     runs-on: ubuntu-22.04
+    timeout-minutes: 20
 
     steps:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            git \
-            ripgrep \
-            jq \
-            unzip \
-            xz-utils
+          sudo apt-get install -y git ripgrep jq
 
-      - name: Clone Motorola QCACLD3 repository
+      - name: Clone Motorola QCACLD3 history
         run: |
           git clone \
             --filter=blob:none \
-            --no-checkout \
+            --no-single-branch \
             https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qcacld-3.0.git \
             motorola-qcacld3
 
           cd motorola-qcacld3
 
-          git config remote.origin.tagOpt --no-tags
+          echo "=== CURRENT COMMIT ==="
+          git rev-parse HEAD
 
           echo "=== REMOTES ==="
           git remote -v
 
-          echo "=== REMOTE BRANCHES ==="
-          git ls-remote --heads origin | tee ../motorola-branches.txt
-
-          echo "=== REMOTE TAGS ==="
-          git ls-remote --tags origin | tee ../motorola-tags.txt
-
-          echo "=== FETCHING HISTORY ==="
+          echo "=== FETCHING COMMIT HISTORY ==="
           git fetch origin --prune --tags
 
-          echo "=== FETCH COMPLETE ==="
+          echo "=== REPOSITORY STATUS ==="
           git rev-parse --is-shallow-repository
-          git rev-parse HEAD || true
+          git rev-list --all --count
 
-      - name: Analyze Motorola branches and tags
+      - name: Find relevant Motorola commits by subject
         run: |
           cd motorola-qcacld3
 
           {
-            echo "========================================"
-            echo "MOTOROLA QCACLD3 BRANCHES"
-            echo "========================================"
-
-            git branch -a
-
-            echo
-            echo "========================================"
-            echo "MOTOROLA TAGS CONTAINING WLAN/CLD3"
-            echo "========================================"
-
-            git tag -l | grep -Ei \
-              'wlan|qcacld|cld3|wifi|qca' \
-              | sort -V || true
-
-            echo
-            echo "========================================"
-            echo "REMOTE REFS CONTAINING 2.0"
-            echo "========================================"
-
-            grep -Ei \
-              '2\.0|r[0-9]+.*rel' \
-              ../motorola-branches.txt \
-              ../motorola-tags.txt \
-              || true
-
-          } | tee ../motorola-ref-analysis.txt
-
-      - name: Search Motorola history for packet capture and injection
-        run: |
-          cd motorola-qcacld3
-
-          {
-            echo "========================================"
-            echo "COMMIT SUBJECT SEARCH"
-            echo "========================================"
+            echo "======================================"
+            echo "MOTOROLA COMMIT SUBJECT SEARCH"
+            echo "======================================"
 
             git log --all \
               --date=short \
-              --format='%h %ad %s' \
+              --format='%H|%ad|%s' \
               --regexp-ignore-case \
+              --grep='injection' \
               --grep='packet capture' \
               --grep='pkt capture' \
-              --grep='frame injection' \
-              --grep='packet injection' \
-              --grep='monitor mode' \
               --grep='radiotap' \
-              --grep='monitor TX' \
-              --grep='injection' \
-              || true
+              --grep='monitor mode' \
+              --grep='monitor tx' \
+              --grep='monitor-mode' \
+              --grep='frame tx' \
+              --grep='frame injection' \
+              | head -300
 
-            echo
-            echo "========================================"
-            echo "2.0 / R60 / R61 HISTORY"
-            echo "========================================"
+          } | tee ../candidate-commits.txt
+
+      - name: Find historical paths without scanning file contents
+        run: |
+          cd motorola-qcacld3
+
+          {
+            echo "======================================"
+            echo "HISTORICAL RELEVANT PATHS"
+            echo "======================================"
+
+            git log --all \
+              --name-only \
+              --format= \
+              -- \
+              '*pkt_capture*' \
+              '*radiotap*' \
+              '*frame_inject*' \
+              '*frame_validate*' \
+              '*injection*' \
+              '*monitor*' \
+              | sed '/^$/d' \
+              | sort -u
+
+          } | tee ../historical-relevant-paths.txt
+
+      - name: Identify commits touching relevant paths
+        run: |
+          cd motorola-qcacld3
+
+          {
+            echo "======================================"
+            echo "COMMITS TOUCHING PKT_CAPTURE"
+            echo "======================================"
 
             git log --all \
               --date=short \
-              --format='%h %ad %s' \
+              --format='%H|%ad|%s' \
+              -- \
+              '*pkt_capture*' \
+              | head -200
+
+            echo
+            echo "======================================"
+            echo "COMMITS TOUCHING RADIOTAP"
+            echo "======================================"
+
+            git log --all \
+              --date=short \
+              --format='%H|%ad|%s' \
+              -- \
+              '*radiotap*' \
+              | head -200
+
+            echo
+            echo "======================================"
+            echo "COMMITS TOUCHING INJECTION"
+            echo "======================================"
+
+            git log --all \
+              --date=short \
+              --format='%H|%ad|%s' \
+              -- \
+              '*inject*' \
+              | head -300
+
+            echo
+            echo "======================================"
+            echo "COMMITS TOUCHING MONITOR"
+            echo "======================================"
+
+            git log --all \
+              --date=short \
+              --format='%H|%ad|%s' \
+              -- \
+              '*monitor*' \
+              | head -300
+
+          } | tee ../relevant-path-commits.txt
+
+      - name: Search for Qualcomm 2.0 and R60/R61 references
+        run: |
+          cd motorola-qcacld3
+
+          {
+            echo "======================================"
+            echo "2.0 / R60 / R61 COMMIT SEARCH"
+            echo "======================================"
+
+            git log --all \
+              --date=short \
+              --format='%H|%ad|%s' \
               --regexp-ignore-case \
               --grep='wlan-cld3.driver.lnx.2.0' \
               --grep='r60' \
               --grep='r61' \
+              --grep='cld3.*2.0' \
+              | head -300
+
+            echo
+            echo "======================================"
+            echo "TAGS"
+            echo "======================================"
+
+            git tag -l \
+              | grep -Ei \
+              'wlan|qcacld|cld3|r60|r61|2\.0' \
+              | sort -V \
               || true
 
-          } | tee ../motorola-commit-search.txt
+          } | tee ../qualcomm-version-search.txt
 
-      - name: Search Motorola history for packet-capture paths
+      - name: Build candidate commit list
+        run: |
+          python3 - <<'PY'
+          import re
+
+          files = [
+              "candidate-commits.txt",
+              "relevant-path-commits.txt",
+              "qualcomm-version-search.txt",
+          ]
+
+          commits = {}
+
+          for filename in files:
+              try:
+                  with open(filename, errors="ignore") as f:
+                      for line in f:
+                          m = re.match(r"^([0-9a-f]{40})\|", line.strip())
+                          if m:
+                              commits[m.group(1)] = line.strip()
+              except FileNotFoundError:
+                  pass
+
+          with open("candidate-list.txt", "w") as out:
+              for commit, line in sorted(commits.items()):
+                  out.write(line + "\n")
+
+          print("Candidate commits:", len(commits))
+          PY
+
+          echo "=== CANDIDATES ==="
+          cat candidate-list.txt || true
+
+      - name: Inspect candidate commits
+        run: |
+          cd motorola-qcacld3
+
+          mkdir -p ../candidate-inspection
+
+          COUNT=0
+
+          while IFS='|' read -r COMMIT DATE SUBJECT; do
+            [ -z "$COMMIT" ] && continue
+
+            COUNT=$((COUNT + 1))
+
+            if [ "$COUNT" -gt 40 ]; then
+              break
+            fi
+
+            SHORT="${COMMIT:0:12}"
+
+            echo "Inspecting $SHORT $SUBJECT"
+
+            {
+              echo "======================================"
+              echo "COMMIT"
+              echo "$COMMIT"
+              echo "DATE"
+              echo "$DATE"
+              echo "SUBJECT"
+              echo "$SUBJECT"
+              echo "======================================"
+              echo
+              echo "STAT:"
+              git show \
+                --stat \
+                --oneline \
+                --no-renames \
+                "$COMMIT"
+
+              echo
+              echo "CHANGED PATHS:"
+              git diff-tree \
+                --no-commit-id \
+                --name-status \
+                -r \
+                "$COMMIT"
+
+              echo
+              echo "RELEVANT FILES:"
+              git diff-tree \
+                --no-commit-id \
+                --name-only \
+                -r \
+                "$COMMIT" \
+                | grep -Ei \
+                  'pkt_capture|radiotap|monitor|inject|validate|wlan_hdd|wma_' \
+                || true
+
+            } > "../candidate-inspection/${SHORT}.txt"
+
+          done < ../candidate-list.txt
+
+      - name: Inspect current Motorola source for injection infrastructure
         run: |
           cd motorola-qcacld3
 
           {
-            echo "========================================"
-            echo "CURRENT TREE: PKT_CAPTURE"
-            echo "========================================"
+            echo "======================================"
+            echo "CURRENT MOTOROLA TREE"
+            echo "======================================"
 
+            echo
+            echo "PKT_CAPTURE:"
             git ls-tree -r --name-only HEAD \
-              | grep -Ei \
-              'pkt.?capture|radiotap|monitor' \
+              | grep -Ei 'pkt_capture' \
               || true
 
             echo
-            echo "========================================"
-            echo "ALL HISTORY: PKT_CAPTURE PATHS"
-            echo "========================================"
+            echo "RADIOTAP:"
+            git ls-tree -r --name-only HEAD \
+              | grep -Ei 'radiotap' \
+              || true
 
-            git log --all \
-              --name-only \
-              --pretty=format: \
-              -- \
-              '*pkt_capture*' \
-              '*radiotap*' \
-              '*monitor*' \
-              | sed '/^$/d' \
-              | sort -u \
-              | tee ../motorola-history-pkt-paths.txt
+            echo
+            echo "FRAME INJECTION:"
+            git ls-tree -r --name-only HEAD \
+              | grep -Ei 'frame_inject|frame_validate|injection' \
+              || true
 
-          } | tee ../motorola-pkt-path-analysis.txt
+            echo
+            echo "MONITOR:"
+            git ls-tree -r --name-only HEAD \
+              | grep -Ei 'monitor' \
+              | head -200 \
+              || true
 
-      - name: Search Motorola history for injection symbols
+            echo
+            echo "KEY SYMBOLS:"
+            git grep -n \
+              -E \
+              'wlan_hdd_frame_inject|wlan_hdd_frame_validate|wma_frame_inject|FRAME_INJECTION_SUPPORT|pkt_capture|radiotap' \
+              HEAD \
+              -- '*.c' '*.h' 'Kconfig' 'Kbuild' \
+              || true
+
+          } | tee ../current-source-report.txt
+
+      - name: Try Qualcomm R60 reference
+        continue-on-error: true
         run: |
+          mkdir -p qualcomm-r60
+
+          echo "Attempting Qualcomm R60 source..."
+
+          git clone \
+            --depth 1 \
+            --filter=blob:none \
+            --branch wlan-cld3.driver.lnx.2.0.r60-rel \
+            https://git.codelinaro.org/clo/la/platform/vendor/qcom-opensource/wlan/qcacld-3.0.git \
+            qualcomm-r60
+
+          cd qualcomm-r60
+
+          echo "R60 COMMIT:"
+          git rev-parse HEAD | tee ../qualcomm-r60-commit.txt
+
+          echo
+          echo "R60 RELEVANT FILES:"
+
+          git ls-tree -r --name-only HEAD \
+            | grep -Ei \
+              'pkt_capture|radiotap|monitor|inject|validate' \
+            | tee ../qualcomm-r60-files.txt
+
+      - name: Compare R60 structure
+        run: |
+          if [ ! -d qualcomm-r60/.git ]; then
+            echo "R60 source was not available."
+            exit 0
+          fi
+
           cd motorola-qcacld3
 
-          {
-            echo "========================================"
-            echo "INJECTION SYMBOL SEARCH"
-            echo "========================================"
+          git ls-tree -r --name-only HEAD \
+            | sort > ../motorola-files.txt
 
-            for pattern in \
-              "wlan_hdd_frame_inject" \
-              "wlan_hdd_frame_validate" \
-              "wlan_hdd_inject_security" \
-              "wma_frame_inject" \
-              "wma_init_injection_queue" \
-              "wma_queue_injection_frame" \
-              "wma_send_injection_frame_to_fw" \
-              "FRAME_INJECTION_SUPPORT" \
-              "ndo_start_xmit" \
-              "radiotap" \
-              "pkt_capture"
-            do
-              echo
-              echo "----- $pattern -----"
+          cd ../qualcomm-r60
 
-              git log --all \
-                -S"$pattern" \
-                --date=short \
-                --format='%h %ad %s' \
-                -- \
-                '*.c' '*.h' '*.mk' 'Kconfig' 'Kbuild' \
-                | head -100 || true
-            done
+          git ls-tree -r --name-only HEAD \
+            | sort > ../r60-files.txt
 
-          } | tee ../motorola-injection-history.txt
+          cd ..
 
-      - name: Locate historical commits that introduced relevant files
-        run: |
-          cd motorola-qcacld3
-
-          {
-            echo "========================================"
-            echo "FILE HISTORY"
-            echo "========================================"
-
-            for path in \
-              core/hdd \
-              core/wma \
-              core/dp \
-              components \
-              Kconfig \
-              Kbuild
-            do
-              echo
-              echo "========== $path =========="
-
-              git log --all \
-                --follow \
-                --date=short \
-                --format='%h %ad %s' \
-                -- "$path" \
-                | head -100 || true
-            done
-
-          } | tee ../motorola-file-history.txt
-
-      - name: Search every historical commit for radiotap
-        run: |
-          cd motorola-qcacld3
-
-          echo "Searching commit history for radiotap..."
-
-          git log --all \
-            --full-history \
-            -S'radiotap' \
-            --date=short \
-            --format='%H|%ad|%s' \
-            -- '*.c' '*.h' \
-            | tee ../radiotap-commits.txt
-
-      - name: Search every historical commit for packet capture
-        run: |
-          cd motorola-qcacld3
-
-          echo "Searching commit history for pkt_capture..."
-
-          git log --all \
-            --full-history \
-            -S'pkt_capture' \
-            --date=short \
-            --format='%H|%ad|%s' \
-            -- '*.c' '*.h' \
-            | tee ../pkt-capture-commits.txt
-
-      - name: Search every historical commit for frame injection
-        run: |
-          cd motorola-qcacld3
-
-          echo "Searching commit history for frame injection..."
-
-          git log --all \
-            --full-history \
-            -S'FRAME_INJECTION_SUPPORT' \
-            --date=short \
-            --format='%H|%ad|%s' \
-            -- '*.c' '*.h' \
-            | tee ../frame-injection-commits.txt
-
-      - name: Inspect promising commits
-        run: |
-          cd motorola-qcacld3
-
-          {
-            echo "========================================"
-            echo "PROMISING COMMITS"
-            echo "========================================"
-
-            for file in \
-              ../radiotap-commits.txt \
-              ../pkt-capture-commits.txt \
-              ../frame-injection-commits.txt
-            do
-              if [ -s "$file" ]; then
-                cat "$file"
-              fi
-            done
-
-          } | sort -u | tee ../promising-commits.txt
-
-      - name: Compare Motorola current source against known Qualcomm 2.0 branch
-        run: |
           mkdir -p comparison
 
-          echo "Fetching Qualcomm CodeLinaro branch..."
+          comm -13 \
+            motorola-files.txt \
+            r60-files.txt \
+            > comparison/r60-files-not-in-motorola.txt
 
-          if git clone \
-              --filter=blob:none \
-              --no-checkout \
-              --branch wlan-cld3.driver.lnx.2.0.r60-rel \
-              https://git.codelinaro.org/clo/la/platform/vendor/qcom-opensource/wlan/qcacld-3.0.git \
-              comparison/qualcomm-r60; then
+          comm -12 \
+            motorola-files.txt \
+            r60-files.txt \
+            > comparison/common-files.txt
 
-            cd comparison/qualcomm-r60
+          echo "=== R60 FILES ABSENT FROM MOTOROLA ==="
+          cat comparison/r60-files-not-in-motorola.txt
 
-            git checkout --force \
-              wlan-cld3.driver.lnx.2.0.r60-rel
-
-            echo "QUALCOMM R60 COMMIT:"
-            git rev-parse HEAD | tee ../../qualcomm-r60-commit.txt
-
-            echo
-            echo "QUALCOMM R60 PKT_CAPTURE FILES:"
-            git ls-tree -r --name-only HEAD \
-              | grep -Ei \
-              'pkt_capture|radiotap|monitor' \
-              | tee ../../qualcomm-r60-pkt-files.txt
-
-          else
-            echo "CodeLinaro R60 clone unavailable."
-            echo "The investigation will continue using Motorola history."
-          fi
-
-      - name: Compare directory structures
-        run: |
-          mkdir -p comparison-results
-
-          if [ -d comparison/qualcomm-r60 ]; then
-
-            cd comparison/qualcomm-r60
-
-            git ls-tree -r --name-only HEAD \
-              | sort \
-              > ../../qualcomm-r60-files.txt
-
-            cd ../../motorola-qcacld3
-
-            git ls-tree -r --name-only HEAD \
-              | sort \
-              > ../motorola-current-files.txt
-
-            cd ..
-
-            comm -12 \
-              motorola-current-files.txt \
-              qualcomm-r60-files.txt \
-              > comparison-results/common-files.txt
-
-            comm -13 \
-              motorola-current-files.txt \
-              qualcomm-r60-files.txt \
-              > comparison-results/r60-files-missing-from-motorola.txt
-
-            comm -23 \
-              motorola-current-files.txt \
-              qualcomm-r60-files.txt \
-              > comparison-results/motorola-only-files.txt
-
-            echo "=== Files present in R60 but absent from current Motorola tree ==="
-            cat comparison-results/r60-files-missing-from-motorola.txt
-
-          fi
-
-      - name: Generate injection candidate report
+      - name: Generate final report
         run: |
           {
-            echo "=============================================="
-            echo "CEBU QCACLD3 HISTORY INVESTIGATION REPORT"
-            echo "=============================================="
+            echo "================================================"
+            echo "CEBU QCACLD3 FAST HISTORY INVESTIGATION"
+            echo "================================================"
             echo
-            echo "Purpose:"
-            echo "Identify whether Motorola's QCACLD3 history contains"
-            echo "an intermediate packet-capture/monitor-TX/injection"
-            echo "implementation that can be ported safely."
+            echo "Repository:"
+            echo "MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qcacld-3.0"
             echo
-            echo "=============================================="
-            echo "MOTOROLA REFS"
-            echo "=============================================="
-            cat motorola-ref-analysis.txt || true
+            echo "================================================"
+            echo "CANDIDATE COMMITS"
+            echo "================================================"
+            cat candidate-list.txt || true
             echo
-            echo "=============================================="
-            echo "PACKET CAPTURE COMMITS"
-            echo "=============================================="
-            cat pkt-capture-commits.txt || true
+            echo "================================================"
+            echo "QUALCOMM VERSION SEARCH"
+            echo "================================================"
+            cat qualcomm-version-search.txt || true
             echo
-            echo "=============================================="
-            echo "RADIOTAP COMMITS"
-            echo "=============================================="
-            cat radiotap-commits.txt || true
+            echo "================================================"
+            echo "CURRENT SOURCE"
+            echo "================================================"
+            cat current-source-report.txt || true
             echo
-            echo "=============================================="
-            echo "FRAME INJECTION COMMITS"
-            echo "=============================================="
-            cat frame-injection-commits.txt || true
+            echo "================================================"
+            echo "R60 COMMIT"
+            echo "================================================"
+            cat qualcomm-r60-commit.txt || true
             echo
-            echo "=============================================="
-            echo "PROMISING COMMITS"
-            echo "=============================================="
-            cat promising-commits.txt || true
+            echo "================================================"
+            echo "R60 RELEVANT FILES"
+            echo "================================================"
+            cat qualcomm-r60-files.txt || true
             echo
-            echo "=============================================="
-            echo "MOTOROLA INJECTION HISTORY"
-            echo "=============================================="
-            cat motorola-injection-history.txt || true
+            echo "================================================"
+            echo "R60 FILES NOT IN MOTOROLA"
+            echo "================================================"
+            cat comparison/r60-files-not-in-motorola.txt || true
             echo
-            echo "=============================================="
-            echo "MOTOROLA PKT PATHS"
-            echo "=============================================="
-            cat motorola-history-pkt-paths.txt || true
-            echo
-            echo "=============================================="
-            echo "QUALCOMM R60 FILES MISSING FROM MOTOROLA"
-            echo "=============================================="
-            cat comparison-results/r60-files-missing-from-motorola.txt || true
+            echo "================================================"
+            echo "HISTORICAL PATHS"
+            echo "================================================"
+            cat historical-relevant-paths.txt || true
 
-          } | tee cebu-qcacld3-history-report.txt
+          } | tee final-report.txt
 
-      - name: Package investigation results
+      - name: Package results
         run: |
-          mkdir -p investigation-output
+          mkdir -p investigation-results
 
           cp \
-            motorola-branches.txt \
-            motorola-tags.txt \
-            motorola-ref-analysis.txt \
-            motorola-commit-search.txt \
-            motorola-pkt-path-analysis.txt \
-            motorola-injection-history.txt \
-            motorola-file-history.txt \
-            radiotap-commits.txt \
-            pkt-capture-commits.txt \
-            frame-injection-commits.txt \
-            promising-commits.txt \
-            cebu-qcacld3-history-report.txt \
-            investigation-output/ 2>/dev/null || true
+            candidate-commits.txt \
+            candidate-list.txt \
+            historical-relevant-paths.txt \
+            relevant-path-commits.txt \
+            qualcomm-version-search.txt \
+            current-source-report.txt \
+            final-report.txt \
+            investigation-results/ 2>/dev/null || true
 
           cp \
             qualcomm-r60-commit.txt \
-            qualcomm-r60-pkt-files.txt \
-            investigation-output/ 2>/dev/null || true
+            qualcomm-r60-files.txt \
+            investigation-results/ 2>/dev/null || true
 
           cp \
-            comparison-results/*.txt \
-            investigation-output/ 2>/dev/null || true
+            comparison/*.txt \
+            investigation-results/ 2>/dev/null || true
 
-          echo "=== OUTPUT FILES ==="
-          find investigation-output -type f -maxdepth 1 -print | sort
+          cp -r \
+            candidate-inspection \
+            investigation-results/ 2>/dev/null || true
 
-      - name: Upload investigation results
+          echo "=== RESULTS ==="
+          find investigation-results -type f | sort
+
+      - name: Upload investigation artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cebu-qcacld3-history-investigation
-          path: investigation-output/
+          name: cebu-qcacld3-fast-history
+          path: investigation-results/
           if-no-files-found: error
           retention-days: 14
 
       - name: Final summary
         run: |
           echo
-          echo "=========================================="
-          echo "QCACLD3 HISTORY INVESTIGATION COMPLETE"
-          echo "=========================================="
+          echo "============================================"
+          echo "INVESTIGATION COMPLETE"
+          echo "============================================"
           echo
-          echo "Download:"
-          echo "cebu-qcacld3-history-investigation"
+          echo "Download artifact:"
+          echo "cebu-qcacld3-fast-history"
           echo
-          echo "Important files:"
-          echo "  cebu-qcacld3-history-report.txt"
-          echo "  promising-commits.txt"
-          echo "  pkt-capture-commits.txt"
-          echo "  radiotap-commits.txt"
-          echo "  frame-injection-commits.txt"
-          echo "  r60-files-missing-from-motorola.txt"
+          echo "Most important files:"
+          echo "  final-report.txt"
+          echo "  candidate-list.txt"
+          echo "  current-source-report.txt"
+          echo "  qualcomm-version-search.txt"
+          echo "  qualcomm-r60-files.txt"
+          echo "  comparison/r60-files-not-in-motorola.txt"
           echo
