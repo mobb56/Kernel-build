@@ -1,0 +1,299 @@
+name: QCACLD3 Injection Prototype - FW API Fix
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git \
+            clang \
+            lld \
+            llvm \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu \
+            bc \
+            bison \
+            flex \
+            libssl-dev \
+            libelf-dev \
+            pahole \
+            cpio \
+            python3 \
+            rsync \
+            ripgrep
+
+      - name: Clone kernel
+        run: |
+          git clone --depth=1 \
+            --branch lineage-23.2 \
+            https://github.com/LineageOS/android_kernel_motorola_sm6225.git \
+            kernel
+
+      - name: Clone Motorola QCACLD3
+        run: |
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qcacld-3.0.git \
+            qcacld3
+
+      - name: Clone Motorola host common
+        run: |
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qca-wifi-host-cmn.git \
+            qca-wifi-host-cmn
+
+      - name: Clone Motorola FW API
+        run: |
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-fw-api.git \
+            fw-api
+
+      - name: Clone reference injection source
+        run: |
+          git clone --depth=1 \
+            --branch nethunter-lineage-23.2 \
+            https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git \
+            reference
+
+      - name: Copy minimal injection prototype
+        run: |
+          set -e
+
+          mkdir -p \
+            qcacld3/core/wma/inc \
+            qcacld3/core/wma/src \
+            qcacld3/core/hdd/inc \
+            qcacld3/core/hdd/src
+
+          cp reference/drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h \
+             qcacld3/core/wma/inc/
+
+          cp reference/drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c \
+             qcacld3/core/wma/src/
+
+          cp reference/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h \
+             qcacld3/core/hdd/inc/
+
+          cp reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.c \
+             qcacld3/core/hdd/src/
+
+          cp reference/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_validate.h \
+             qcacld3/core/hdd/inc/
+
+          cp reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_validate.c \
+             qcacld3/core/hdd/src/
+
+      - name: Prepare kernel
+        run: |
+          set -e
+
+          mkdir -p out
+
+          make -C kernel \
+            O="$PWD/out" \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            vendor/bengal-perf_defconfig
+
+          make -C kernel \
+            O="$PWD/out" \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            modules_prepare
+
+      - name: Verify athdefs
+        run: |
+          set -e
+
+          test -f kernel/drivers/staging/fw-api/fw/athdefs.h
+
+          echo "athdefs.h:"
+          ls -l kernel/drivers/staging/fw-api/fw/athdefs.h
+
+          echo
+          echo "SHA256:"
+          sha256sum kernel/drivers/staging/fw-api/fw/athdefs.h
+
+      - name: Test athdefs include path
+        run: |
+          set -e
+
+          cat > /tmp/athdefs-test.c <<'EOF'
+          #include <athdefs.h>
+
+          int main(void)
+          {
+              A_STATUS status = 0;
+              return status;
+          }
+          EOF
+
+          clang \
+            -fsyntax-only \
+            -I"$PWD/kernel/drivers/staging/fw-api/fw" \
+            /tmp/athdefs-test.c
+
+          echo "athdefs.h include test PASSED"
+
+      - name: Build QCACLD3
+        id: qcacld-build
+        continue-on-error: true
+        run: |
+          set -o pipefail
+
+          mkdir -p report
+
+          KERNEL="$PWD/kernel"
+          OUT="$PWD/out"
+          WLAN="$PWD/qcacld3"
+          COMMON="$PWD/qca-wifi-host-cmn"
+          FWAPI="$PWD/fw-api"
+          FWAPI_INC="$KERNEL/drivers/staging/fw-api/fw"
+
+          echo "KERNEL=$KERNEL"
+          echo "OUT=$OUT"
+          echo "WLAN=$WLAN"
+          echo "COMMON=$COMMON"
+          echo "FWAPI=$FWAPI"
+          echo "FWAPI_INC=$FWAPI_INC"
+
+          make -C "$KERNEL" \
+            O="$OUT" \
+            M="$WLAN" \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            KCFLAGS="-I$FWAPI_INC" \
+            modules \
+            WLAN_ROOT="$WLAN" \
+            WLAN_COMMON_ROOT="$COMMON" \
+            WLAN_COMMON_INC="$COMMON" \
+            WLAN_FW_API="$FWAPI" \
+            WLAN_PROFILE=default \
+            DYNAMIC_SINGLE_CHIP= \
+            MODNAME=wlan \
+            BOARD_PLATFORM=bengal \
+            CONFIG_QCA_CLD_WLAN=m \
+            2>&1 | tee report/qcacld3-build.log
+
+      - name: Capture compiler diagnostics
+        if: always()
+        run: |
+          {
+            echo "=== athdefs errors ==="
+            grep -n -C 5 \
+              "athdefs.h" \
+              report/qcacld3-build.log || true
+
+            echo
+            echo "=== fatal errors ==="
+            grep -n -C 4 \
+              "fatal error" \
+              report/qcacld3-build.log || true
+
+            echo
+            echo "=== errors ==="
+            grep -n -C 3 \
+              "error:" \
+              report/qcacld3-build.log || true
+
+            echo
+            echo "=== warnings ==="
+            grep -n -C 2 \
+              "warning:" \
+              report/qcacld3-build.log | head -n 300 || true
+          } > report/compiler-diagnostics.txt
+
+      - name: Locate generated modules
+        if: always()
+        run: |
+          {
+            echo "=== QCACLD3 modules ==="
+            find qcacld3 -type f -name '*.ko' -print || true
+
+            echo
+            echo "=== Kernel output modules ==="
+            find out -type f -name '*.ko' -print | head -n 200 || true
+          } > report/generated-modules.txt
+
+      - name: Check wlan module
+        if: always()
+        run: |
+          {
+            echo "=== wlan module search ==="
+
+            find . \
+              -type f \
+              -name 'qca_cld3_wlan.ko' \
+              -o \
+              -type f \
+              -name 'wlan.ko' \
+              -print || true
+
+            echo
+            echo "=== all generated KO files ==="
+            find . -type f -name '*.ko' -print || true
+          } > report/module-check.txt
+
+      - name: Final conclusion
+        if: always()
+        run: |
+          {
+            echo "=== QCACLD3 Injection Prototype ==="
+            echo
+
+            if find . -type f -name 'qca_cld3_wlan.ko' | grep -q .; then
+              echo "RESULT: QCACLD3 MODULE GENERATED"
+              echo
+              find . -type f -name 'qca_cld3_wlan.ko' -print
+            else
+              echo "RESULT: NO QCACLD3 MODULE GENERATED"
+              echo
+              echo "The next compiler error must be investigated."
+            fi
+
+            echo
+            echo "athdefs source:"
+            echo "kernel/drivers/staging/fw-api/fw/athdefs.h"
+
+            echo
+            echo "athdefs include path supplied:"
+            echo "$PWD/kernel/drivers/staging/fw-api/fw"
+
+            echo
+            echo "Prototype injection files:"
+            find qcacld3/core \
+              \( -name 'wma_frame_inject.*' \
+              -o -name 'wlan_hdd_frame_inject.*' \
+              -o -name 'wlan_hdd_frame_validate.*' \) \
+              -print
+          } > report/CONCLUSION.txt
+
+      - name: Package report
+        if: always()
+        run: |
+          mkdir -p artifact
+
+          cp -r report artifact/
+
+          cd artifact
+          zip -r ../qcacld3-injection-fwapi-fix.zip .
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcacld3-injection-fwapi-fix
+          path: qcacld3-injection-fwapi-fix.zip
+          if-no-files-found: error
