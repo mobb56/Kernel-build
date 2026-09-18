@@ -1,0 +1,439 @@
+name: QCACLD3 Firmware Boundary Audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git ripgrep python3 diffutils
+
+      - name: Clone Motorola QCACLD3
+        run: |
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qcacld-3.0.git \
+            motorola
+
+      - name: Clone OnePlus reference
+        run: |
+          git clone --depth=1 \
+            --branch nethunter-lineage-23.2 \
+            https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git \
+            oneplus
+
+      - name: Clone Xiaomi reference
+        run: |
+          git clone --depth=1 \
+            --branch lineage-23.2 \
+            https://github.com/yesimxev/android_kernel_xiaomi_sm6125.git \
+            xiaomi
+
+      - name: Prepare report
+        run: |
+          mkdir -p report/motorola
+          mkdir -p report/oneplus
+          mkdir -p report/xiaomi
+          mkdir -p report/comparison
+
+      - name: Locate WMI management TX definitions
+        shell: bash
+        run: |
+          set +e
+
+          for SRC in motorola oneplus xiaomi; do
+            case "$SRC" in
+              motorola)
+                ROOT="$SRC"
+                ;;
+              *)
+                ROOT="$SRC/drivers/staging/qcacld-3.0"
+                ;;
+            esac
+
+            {
+              echo "===== $SRC ====="
+              echo
+
+              echo "--- MGMT TX ---"
+              rg -n -C 15 --text \
+                "MGMT_TX|MGMT.*TX|mgmt_tx" \
+                "$ROOT" || true
+
+              echo
+              echo "--- COMPLETION EVENTS ---"
+              rg -n -C 15 --text \
+                "MGMT_TX.*COMP|MGMT.*COMPLETION|TX.*COMPLETION|COMPLETION.*TX" \
+                "$ROOT" || true
+
+              echo
+              echo "--- WMI MGMT SEND ---"
+              rg -n -C 20 --text \
+                "wmi_mgmt_unified_cmd_send|mgmt_unified_cmd_send" \
+                "$ROOT" || true
+
+            } > "report/$SRC/wmi-mgmt-tx-context.txt"
+          done
+
+      - name: Extract numeric WMI IDs
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          sources = {
+              "motorola": Path("motorola"),
+              "oneplus": Path("oneplus/drivers/staging/qcacld-3.0"),
+              "xiaomi": Path("xiaomi/drivers/staging/qcacld-3.0")
+          }
+
+          patterns = [
+              r"\bWMI_[A-Z0-9_]*(?:MGMT|TX|COMP|COMPLETION)[A-Z0-9_]*\b",
+              r"\bWMI_[A-Z0-9_]*SERVICE[A-Z0-9_]*\b",
+              r"\bWMI_[A-Z0-9_]*CMD[A-Z0-9_]*\b",
+              r"\bWMI_[A-Z0-9_]*EVENT[A-Z0-9_]*\b"
+          ]
+
+          for name, root in sources.items():
+              found = set()
+
+              for path in root.rglob("*"):
+                  if not path.is_file():
+                      continue
+
+                  try:
+                      data = path.read_text(
+                          encoding="utf-8",
+                          errors="ignore"
+                      )
+                  except Exception:
+                      continue
+
+                  for pattern in patterns:
+                      found.update(
+                          re.findall(pattern, data)
+                      )
+
+              output = "\n".join(sorted(found)) + "\n"
+
+              Path(
+                  f"report/{name}/wmi-identifiers.txt"
+              ).write_text(output)
+
+              print(
+                  name,
+                  "identifiers:",
+                  len(found)
+              )
+          PY
+
+      - name: Extract WMI command and event definitions
+        shell: bash
+        run: |
+          set +e
+
+          for SRC in motorola oneplus xiaomi; do
+            case "$SRC" in
+              motorola)
+                ROOT="$SRC"
+                ;;
+              *)
+                ROOT="$SRC/drivers/staging/qcacld-3.0"
+                ;;
+            esac
+
+            {
+              echo "===== $SRC WMI COMMAND/EVENT DEFINITIONS ====="
+              echo
+
+              rg -n -C 10 --text \
+                "WMI_MGMT_TX|MGMT_TX_COMPLETION|MGMT_TX_BUNDLE|MGMT_TX_COMP_TYPE" \
+                "$ROOT" || true
+
+              echo
+              echo "===== STRUCTURES ====="
+              echo
+
+              rg -n -C 15 --text \
+                "struct.*mgmt.*tx|struct.*tx.*mgmt|mgmt.*tx.*param|tx.*mgmt.*param" \
+                "$ROOT" || true
+
+              echo
+              echo "===== ENUMS ====="
+              echo
+
+              rg -n -C 12 --text \
+                "enum.*mgmt.*tx|enum.*tx.*mgmt|MGMT_TX_COMP_TYPE" \
+                "$ROOT" || true
+
+            } > "report/$SRC/wmi-definitions.txt"
+          done
+
+      - name: Extract Motorola management TX implementation
+        shell: bash
+        run: |
+          {
+            echo "===== wlan_hdd_mgmt_tx ====="
+            rg -n -C 100 --text \
+              "wlan_hdd_mgmt_tx|__wlan_hdd_mgmt_tx" \
+              motorola || true
+
+            echo
+            echo "===== wma_mgmt_tx ====="
+            rg -n -C 100 --text \
+              "wma_mgmt_tx" \
+              motorola || true
+
+            echo
+            echo "===== wmi_mgmt_unified_cmd_send ====="
+            rg -n -C 100 --text \
+              "wmi_mgmt_unified_cmd_send" \
+              motorola || true
+
+          } > report/motorola/management-tx-full-context.txt
+
+      - name: Extract reference injection TX path
+        shell: bash
+        run: |
+          for SRC in oneplus xiaomi; do
+            ROOT="$SRC/drivers/staging/qcacld-3.0"
+
+            {
+              echo "===== $SRC INJECTION TX PATH ====="
+              echo
+
+              rg -n -C 20 --text \
+                "wma_queue_injection_frame|wma_send_injection_frame_to_fw|wma_process_injection_queue|wma_frame_inject" \
+                "$ROOT" || true
+
+              echo
+              echo "===== WMI CALLS ====="
+              rg -n -C 20 --text \
+                "wmi_.*tx|WMI_.*TX|mgmt.*tx|MGMT.*TX" \
+                "$ROOT/core/wma" \
+                "$ROOT/core/hdd" || true
+
+            } > "report/$SRC/injection-tx-path.txt"
+          done
+
+      - name: Compare WMI identifier sets
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def read_set(path):
+              return set(
+                  x.strip()
+                  for x in Path(path).read_text(
+                      errors="ignore"
+                  ).splitlines()
+                  if x.strip()
+              )
+
+          motorola = read_set(
+              "report/motorola/wmi-identifiers.txt"
+          )
+
+          oneplus = read_set(
+              "report/oneplus/wmi-identifiers.txt"
+          )
+
+          xiaomi = read_set(
+              "report/xiaomi/wmi-identifiers.txt"
+          )
+
+          common = sorted(oneplus & xiaomi)
+          reference_only = sorted(
+              (oneplus | xiaomi) - motorola
+          )
+          motorola_matches = sorted(
+              motorola & set(common)
+          )
+
+          lines = []
+
+          lines.append(
+              "REFERENCE WMI IDENTIFIERS COMMON TO ONEPLUS/XIAOMI"
+          )
+          lines.append(
+              "=================================================="
+          )
+          lines.extend(common)
+
+          lines.append("")
+          lines.append(
+              "COMMON REFERENCE IDENTIFIERS MISSING FROM MOTOROLA"
+          )
+          lines.append(
+              "=================================================="
+          )
+          lines.extend(
+              x for x in common
+              if x not in motorola
+          )
+
+          lines.append("")
+          lines.append(
+              "COMMON REFERENCE IDENTIFIERS PRESENT IN MOTOROLA"
+          )
+          lines.append(
+              "================================================"
+          )
+          lines.extend(motorola_matches)
+
+          lines.append("")
+          lines.append(
+              "REFERENCE-ONLY IDENTIFIERS ABSENT FROM MOTOROLA"
+          )
+          lines.append(
+              "=============================================="
+          )
+          lines.extend(reference_only)
+
+          Path(
+              "report/comparison/wmi-set-comparison.txt"
+          ).write_text(
+              "\n".join(lines) + "\n"
+          )
+          PY
+
+      - name: Compare relevant source definitions
+        shell: bash
+        run: |
+          {
+            echo "===== ONEPLUS VS XIAOMI WMI DEFINITIONS ====="
+
+            diff -u \
+              report/oneplus/wmi-definitions.txt \
+              report/xiaomi/wmi-definitions.txt \
+              || true
+
+            echo
+            echo "===== MOTOROLA VS ONEPLUS WMI DEFINITIONS ====="
+
+            diff -u \
+              report/motorola/wmi-definitions.txt \
+              report/oneplus/wmi-definitions.txt \
+              || true
+
+          } > report/comparison/wmi-definition-diffs.txt
+
+      - name: Analyze firmware boundary
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          motorola = Path(
+              "report/motorola/wmi-definitions.txt"
+          ).read_text(errors="ignore")
+
+          oneplus = Path(
+              "report/oneplus/wmi-definitions.txt"
+          ).read_text(errors="ignore")
+
+          xiaomi = Path(
+              "report/xiaomi/wmi-definitions.txt"
+          ).read_text(errors="ignore")
+
+          interesting = [
+              "WMI_MGMT_TX",
+              "MGMT_TX_COMPLETION",
+              "MGMT_TX_BUNDLE",
+              "MGMT_TX_COMP_TYPE",
+              "wmi_mgmt_unified_cmd_send",
+              "WMI_SERVICE_MGMT_TX_WMI",
+              "WMI_VDEV_TYPE_MONITOR"
+          ]
+
+          lines = [
+              "QCACLD3 FIRMWARE BOUNDARY ANALYSIS",
+              "=================================",
+              "",
+              "This report is source analysis only.",
+              ""
+          ]
+
+          for item in interesting:
+              lines.append("SYMBOL: " + item)
+              lines.append("")
+
+              lines.append(
+                  "Motorola: "
+                  + (
+                      "PRESENT"
+                      if item in motorola
+                      else "NOT FOUND"
+                  )
+              )
+
+              lines.append(
+                  "OnePlus: "
+                  + (
+                      "PRESENT"
+                      if item in oneplus
+                      else "NOT FOUND"
+                  )
+              )
+
+              lines.append(
+                  "Xiaomi: "
+                  + (
+                      "PRESENT"
+                      if item in xiaomi
+                      else "NOT FOUND"
+                  )
+              )
+
+              lines.append("")
+
+          lines.extend([
+              "IMPORTANT",
+              "---------",
+              "",
+              "Matching names do not establish firmware compatibility.",
+              "Numeric command IDs, structure layouts, payload sizes,",
+              "completion events, and firmware behavior must also agree.",
+              "",
+              "No kernel or firmware was modified by this workflow.",
+              "No device was flashed."
+          ])
+
+          Path(
+              "report/FIRMWARE_BOUNDARY.txt"
+          ).write_text(
+              "\n".join(lines) + "\n"
+          )
+          PY
+
+      - name: Show summary
+        if: always()
+        run: |
+          echo "===== FIRMWARE BOUNDARY ====="
+          cat report/FIRMWARE_BOUNDARY.txt || true
+
+          echo
+          echo "===== WMI SET COMPARISON ====="
+          cat report/comparison/wmi-set-comparison.txt || true
+
+      - name: Package audit
+        if: always()
+        run: |
+          zip -r qcacld3-firmware-boundary-audit.zip report
+
+      - name: Upload audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcacld3-firmware-boundary-audit
+          path: qcacld3-firmware-boundary-audit.zip
+          if-no-files-found: error
