@@ -3,6 +3,10 @@ name: QCACLD3 Exact Injection API Audit
 on:
   workflow_dispatch:
 
+  push:
+    branches:
+      - main
+
 jobs:
   audit:
     runs-on: ubuntu-24.04
