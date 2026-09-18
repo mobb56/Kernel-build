@@ -1,0 +1,371 @@
+name: Search Moto G9 Power QCACLD3 Source
+
+on:
+  workflow_dispatch:
+
+jobs:
+  search-wlan-source:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout cebu device tree
+        uses: actions/checkout@v4
+        with:
+          repository: LineageOS/android_device_motorola_cebu
+          ref: lineage-23.2
+          path: device/motorola/cebu
+          fetch-depth: 1
+
+      - name: Checkout SM6225 common device tree
+        uses: actions/checkout@v4
+        with:
+          repository: LineageOS/android_device_motorola_sm6225-common
+          ref: lineage-23.2
+          path: device/motorola/sm6225-common
+          fetch-depth: 1
+
+      - name: Checkout SM6225 kernel
+        uses: actions/checkout@v4
+        with:
+          repository: LineageOS/android_kernel_motorola_sm6225
+          ref: lineage-23.2
+          path: kernel/motorola/sm6225
+          fetch-depth: 1
+
+      - name: Clone Motorola QCACLD3 source
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          mkdir -p vendor/qcom/opensource/wlan
+
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qcacld-3.0.git \
+            vendor/qcom/opensource/wlan/qcacld-3.0
+
+      - name: Clone Motorola WiFi common source
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-qca-wifi-host-cmn.git \
+            vendor/qcom/opensource/wlan/qca-wifi-host-cmn
+
+      - name: Try to clone Motorola FW API
+        shell: bash
+        run: |
+          set -u
+
+          mkdir -p vendor/qcom/opensource/wlan
+
+          if git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/vendor-qcom-opensource-wlan-fw-api.git \
+            vendor/qcom/opensource/wlan/fw-api
+          then
+            echo "FW API repository cloned successfully."
+          else
+            echo "FW API repository could not be cloned."
+            echo "This is diagnostic only; continuing."
+          fi
+
+      - name: Show repository revisions
+        shell: bash
+        run: |
+          set -e
+
+          echo
+          echo "=================================================="
+          echo "REPOSITORY REVISIONS"
+          echo "=================================================="
+
+          for repo in \
+            device/motorola/cebu \
+            device/motorola/sm6225-common \
+            kernel/motorola/sm6225 \
+            vendor/qcom/opensource/wlan/qcacld-3.0 \
+            vendor/qcom/opensource/wlan/qca-wifi-host-cmn \
+            vendor/qcom/opensource/wlan/fw-api
+          do
+            if [ -d "$repo/.git" ]; then
+              echo
+              echo "----- $repo -----"
+              git -C "$repo" remote -v || true
+              git -C "$repo" rev-parse HEAD || true
+              git -C "$repo" branch -a || true
+              git -C "$repo" tag --list | tail -20 || true
+            else
+              echo
+              echo "----- $repo -----"
+              echo "NOT PRESENT"
+            fi
+          done
+
+      - name: Search device configuration
+        shell: bash
+        run: |
+          set -u
+
+          echo
+          echo "=================================================="
+          echo "DEVICE / WIFI CONFIGURATION"
+          echo "=================================================="
+
+          grep -Rni \
+            --exclude-dir=.git \
+            -E \
+            'qca_cld3|QCA_CLD_WLAN|qcacld|WIFI_DRIVER|BOARD_WLAN|wlan\.ko' \
+            device/motorola/cebu \
+            device/motorola/sm6225-common \
+            2>/dev/null \
+            | head -500 || true
+
+      - name: Search kernel configuration
+        shell: bash
+        run: |
+          set -u
+
+          echo
+          echo "=================================================="
+          echo "KERNEL WLAN CONFIGURATION"
+          echo "=================================================="
+
+          grep -Rni \
+            --exclude-dir=.git \
+            -E \
+            'QCA_CLD_WLAN|QCACLD|CLD3|WLAN|CFG80211|NL80211_TESTMODE|MONITOR' \
+            kernel/motorola/sm6225 \
+            2>/dev/null \
+            | head -1000 || true
+
+      - name: Inspect QCACLD3 files
+        shell: bash
+        run: |
+          set -u
+
+          ROOT="vendor/qcom/opensource/wlan/qcacld-3.0"
+
+          echo
+          echo "=================================================="
+          echo "QCACLD3 DIRECTORY"
+          echo "=================================================="
+
+          if [ -d "$ROOT" ]; then
+            find "$ROOT" \
+              -maxdepth 3 \
+              -type f \
+              | sort \
+              | head -1000
+          else
+            echo "QCACLD3 SOURCE NOT FOUND"
+          fi
+
+      - name: Inspect QCACLD3 build files
+        shell: bash
+        run: |
+          set -u
+
+          echo
+          echo "=================================================="
+          echo "QCACLD3 BUILD FILES"
+          echo "=================================================="
+
+          for f in \
+            vendor/qcom/opensource/wlan/qcacld-3.0/Android.mk \
+            vendor/qcom/opensource/wlan/qcacld-3.0/Kbuild \
+            vendor/qcom/opensource/wlan/qcacld-3.0/Kconfig \
+            vendor/qcom/opensource/wlan/qcacld-3.0/Makefile
+          do
+            echo
+            echo "=================================================="
+            echo "$f"
+            echo "=================================================="
+
+            if [ -f "$f" ]; then
+              sed -n '1,1200p' "$f"
+            else
+              echo "FILE NOT FOUND"
+            fi
+          done
+
+      - name: Search QCACLD3 for injection and monitor support
+        shell: bash
+        run: |
+          set -u
+
+          echo
+          echo "=================================================="
+          echo "QCACLD3 FEATURE SEARCH"
+          echo "=================================================="
+
+          grep -Rni \
+            --exclude-dir=.git \
+            -E \
+            'injection|inject|monitor|mon mode|monitor mode|NL80211_TESTMODE|testmode|TX injection|raw tx|radiotap|packet injection|mgmt.*frame|cfg80211.*testmode' \
+            vendor/qcom/opensource/wlan/qcacld-3.0 \
+            vendor/qcom/opensource/wlan/qca-wifi-host-cmn \
+            2>/dev/null \
+            | head -2000 || true
+
+      - name: Search all WLAN source for relevant symbols
+        shell: bash
+        run: |
+          set -u
+
+          echo
+          echo "=================================================="
+          echo "ALL WLAN SYMBOL SEARCH"
+          echo "=================================================="
+
+          grep -Rni \
+            --exclude-dir=.git \
+            -E \
+            'QCA_CLD_WLAN|qca_cld3_wlan|QCACLD|NL80211_TESTMODE|testmode|monitor|injection|inject' \
+            vendor/qcom/opensource/wlan \
+            2>/dev/null \
+            | head -3000 || true
+
+      - name: Search Motorola README build instructions
+        shell: bash
+        run: |
+          set -u
+
+          echo
+          echo "=================================================="
+          echo "SEARCHING MOTOROLA BUILD REFERENCES"
+          echo "=================================================="
+
+          mkdir -p /tmp/motorola-readme
+
+          git clone --depth=1 \
+            https://github.com/MotorolaMobilityLLC/readme.git \
+            /tmp/motorola-readme \
+            2>/dev/null || true
+
+          if [ -d /tmp/motorola-readme ]; then
+            grep -Rni \
+              -E \
+              'qcacld-3\.0|qca-wifi-host-cmn|WLAN_DRIVER|QCA_CLD_WLAN' \
+              /tmp/motorola-readme \
+              2>/dev/null \
+              | head -2000 || true
+          fi
+
+      - name: Show source statistics
+        shell: bash
+        run: |
+          set -u
+
+          echo
+          echo "=================================================="
+          echo "SOURCE STATISTICS"
+          echo "=================================================="
+
+          for dir in \
+            kernel/motorola/sm6225 \
+            vendor/qcom/opensource/wlan/qcacld-3.0 \
+            vendor/qcom/opensource/wlan/qca-wifi-host-cmn \
+            vendor/qcom/opensource/wlan/fw-api
+          do
+            if [ -d "$dir" ]; then
+              echo
+              echo "----- $dir -----"
+              find "$dir" -type f 2>/dev/null | wc -l
+              du -sh "$dir" 2>/dev/null || true
+            fi
+          done
+
+      - name: Create diagnostic report
+        shell: bash
+        run: |
+          set -u
+
+          REPORT="wlan-source-report.txt"
+
+          {
+            echo "Moto G9 Power (cebu) QCACLD3 Source Report"
+            echo "Generated: $(date -u)"
+            echo
+
+            echo "=== Device ==="
+            git -C device/motorola/cebu rev-parse HEAD 2>/dev/null || true
+            echo
+
+            echo "=== Common ==="
+            git -C device/motorola/sm6225-common rev-parse HEAD 2>/dev/null || true
+            echo
+
+            echo "=== Kernel ==="
+            git -C kernel/motorola/sm6225 rev-parse HEAD 2>/dev/null || true
+            echo
+
+            echo "=== QCACLD3 ==="
+            git -C vendor/qcom/opensource/wlan/qcacld-3.0 rev-parse HEAD 2>/dev/null || true
+            echo
+
+            echo "=== WIFI COMMON ==="
+            git -C vendor/qcom/opensource/wlan/qca-wifi-host-cmn rev-parse HEAD 2>/dev/null || true
+            echo
+
+            echo "=== FW API ==="
+            git -C vendor/qcom/opensource/wlan/fw-api rev-parse HEAD 2>/dev/null || true
+            echo
+
+            echo "=== Device config matches ==="
+            grep -Rni \
+              --exclude-dir=.git \
+              -E \
+              'qca_cld3|QCA_CLD_WLAN|qcacld|WIFI_DRIVER|BOARD_WLAN|wlan\.ko' \
+              device/motorola/cebu \
+              device/motorola/sm6225-common \
+              2>/dev/null || true
+
+            echo
+            echo "=== Injection / monitor matches ==="
+            grep -Rni \
+              --exclude-dir=.git \
+              -E \
+              'injection|inject|monitor|NL80211_TESTMODE|testmode|radiotap|raw tx' \
+              vendor/qcom/opensource/wlan/qcacld-3.0 \
+              vendor/qcom/opensource/wlan/qca-wifi-host-cmn \
+              2>/dev/null || true
+
+          } > "$REPORT"
+
+          echo
+          echo "REPORT CREATED:"
+          cat "$REPORT"
+
+      - name: Upload complete diagnostic report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cebu-qcacld3-source-report
+          path: wlan-source-report.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload source build files
+        uses: actions/upload-artifact@v4
+        with:
+          name: cebu-qcacld3-build-files
+          path: |
+            vendor/qcom/opensource/wlan/qcacld-3.0/Android.mk
+            vendor/qcom/opensource/wlan/qcacld-3.0/Kbuild
+            vendor/qcom/opensource/wlan/qcacld-3.0/Kconfig
+            vendor/qcom/opensource/wlan/qcacld-3.0/Makefile
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Final result
+        shell: bash
+        run: |
+          echo
+          echo "=================================================="
+          echo "SOURCE DISCOVERY COMPLETE"
+          echo "=================================================="
+          echo
+          echo "The artifact 'cebu-qcacld3-source-report' contains the"
+          echo "important source/repository information."
+          echo
+          echo "DO NOT flash anything from this workflow."
+          echo "This workflow only discovers and analyzes source."
