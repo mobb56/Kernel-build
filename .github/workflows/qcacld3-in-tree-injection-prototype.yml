@@ -1,4 +1,4 @@
-name: QCACLD3 In-Tree Injection Prototype v3
+name: QCACLD3 In-Tree Injection Prototype v4
 
 on:
   workflow_dispatch:
@@ -45,31 +45,12 @@ jobs:
             https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git \
             reference
 
-      - name: Verify integrated WLAN source
+      - name: Prepare directories
         run: |
-          set -e
-
-          test -d kernel/drivers/staging/qcacld-3.0
-          test -d kernel/drivers/staging/qca-wifi-host-cmn
-          test -d kernel/drivers/staging/fw-api
-
-          test -f \
-            kernel/drivers/staging/qca-wifi-host-cmn/qdf/inc/qdf_nbuf.h
-
-          test -f \
-            kernel/drivers/staging/fw-api/fw/athdefs.h
-
-          echo "QCACLD3 source: OK"
-          echo "QDF source: OK"
-          echo "FW API: OK"
-
-      - name: Prepare output
-        run: |
-          set -e
           rm -rf out report
           mkdir -p out report
 
-      - name: Generate kernel configuration
+      - name: Generate base kernel config
         run: |
           set -e
 
@@ -79,6 +60,28 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
             vendor/bengal-perf_defconfig
+
+      - name: Enable QCACLD3 module
+        run: |
+          set -e
+
+          test -f out/.config
+
+          echo "Before:"
+          grep '^CONFIG_QCA_CLD_WLAN=' \
+            out/.config || true
+
+          ./kernel/scripts/config \
+            --file out/.config \
+            --module CONFIG_QCA_CLD_WLAN
+
+          echo
+          echo "After scripts/config:"
+          grep '^CONFIG_QCA_CLD_WLAN=' \
+            out/.config
+
+          test "$(grep '^CONFIG_QCA_CLD_WLAN=' out/.config)" = \
+            "CONFIG_QCA_CLD_WLAN=m"
 
       - name: Synchronize configuration
         run: |
@@ -90,6 +93,12 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
             olddefconfig
+
+          grep '^CONFIG_QCA_CLD_WLAN=' \
+            out/.config
+
+          test "$(grep '^CONFIG_QCA_CLD_WLAN=' out/.config)" = \
+            "CONFIG_QCA_CLD_WLAN=m"
 
       - name: Prepare kernel
         run: |
@@ -109,17 +118,43 @@ jobs:
             LLVM_IAS=1 \
             modules_prepare
 
-      - name: Verify kernel configuration
+      - name: Verify configuration
         run: |
           set -e
 
           test -f out/include/config/auto.conf
           test -f out/include/config/auto.conf.cmd
 
-          echo "auto.conf: OK"
-          echo "auto.conf.cmd: OK"
+          echo "=== WLAN configuration ==="
+          grep -E \
+            '^CONFIG_QCA_CLD_WLAN=|^CONFIG_CFG80211=|^CONFIG_MAC80211=' \
+            out/.config || true
 
-      - name: Copy prototype source
+          echo
+          echo "=== auto.conf ==="
+          grep \
+            'CONFIG_QCA_CLD_WLAN' \
+            out/include/config/auto.conf
+
+      - name: Verify integrated Qualcomm source
+        run: |
+          set -e
+
+          test -d kernel/drivers/staging/qcacld-3.0
+          test -d kernel/drivers/staging/qca-wifi-host-cmn
+          test -d kernel/drivers/staging/fw-api
+
+          test -f \
+            kernel/drivers/staging/qca-wifi-host-cmn/qdf/inc/qdf_nbuf.h
+
+          test -f \
+            kernel/drivers/staging/fw-api/fw/athdefs.h
+
+          echo "QCACLD3: OK"
+          echo "QDF: OK"
+          echo "FW API: OK"
+
+      - name: Copy injection prototype
         run: |
           set -e
 
@@ -150,25 +185,7 @@ jobs:
             "$R/core/hdd/src/wlan_hdd_frame_validate.c" \
             "$K/core/hdd/src/"
 
-      - name: Verify prototype source
-        run: |
-          set -e
-
-          K="kernel/drivers/staging/qcacld-3.0"
-
-          for f in \
-            core/wma/inc/wma_frame_inject.h \
-            core/wma/src/wma_frame_inject.c \
-            core/hdd/inc/wlan_hdd_frame_inject.h \
-            core/hdd/src/wlan_hdd_frame_inject.c \
-            core/hdd/inc/wlan_hdd_frame_validate.h \
-            core/hdd/src/wlan_hdd_frame_validate.c
-          do
-            test -f "$K/$f"
-            echo "FOUND: $f"
-          done
-
-      - name: Safely add prototype objects to Kbuild
+      - name: Add injection objects safely
         run: |
           python3 <<'PY'
           from pathlib import Path
@@ -179,27 +196,25 @@ jobs:
 
           text = p.read_text()
 
-          # Never insert into an existing recipe or backslash continuation.
-          # Add independent Kbuild assignments immediately before INCS.
-          marker = "INCS := -I $(srctree)/$(WLAN_ROOT)/inc"
+          marker = (
+              "INCS := -I $(srctree)/$(WLAN_ROOT)/inc"
+          )
 
           if marker not in text:
               raise SystemExit(
-                  "Could not find safe Kbuild insertion point"
+                  "Safe Kbuild insertion marker not found"
               )
 
           additions = """
           # NetHunter injection prototype
           HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o
           HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_validate.o
-
           WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o
-
           cppflags-y += -DCONFIG_FEATURE_FRAME_INJECTION_SUPPORT
 
           """
 
-          if "wlan_hdd_frame_inject.o" not in text:
+          if "HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o" not in text:
               text = text.replace(
                   marker,
                   additions + marker,
@@ -209,35 +224,19 @@ jobs:
           p.write_text(text)
           PY
 
-      - name: Validate Kbuild syntax
+      - name: Verify Kbuild changes
         run: |
           set -e
 
           K="kernel/drivers/staging/qcacld-3.0/Kbuild"
 
-          echo "=== Prototype assignments ==="
-
           grep -n \
             -E \
-            'wlan_hdd_frame_inject\.o|wlan_hdd_frame_validate\.o|wma_frame_inject\.o|CONFIG_FEATURE_FRAME_INJECTION_SUPPORT' \
+            'wlan_hdd_frame_inject\.o|wlan_hdd_frame_validate\.o|wma_frame_inject\.o' \
             "$K"
 
-          echo
-          echo "=== Kbuild surrounding insertion ==="
-
-          LINE=$(grep -n \
-            "wlan_hdd_frame_inject.o" \
-            "$K" \
-            | head -n1 \
-            | cut -d: -f1)
-
-          START=$((LINE - 8))
-          END=$((LINE + 12))
-
-          sed -n "${START},${END}p" "$K"
-
-      - name: Compile QCACLD3 in-tree
-        id: qcacld_build
+      - name: Build QCACLD3
+        id: build
         continue-on-error: true
         run: |
           set -o pipefail
@@ -252,47 +251,46 @@ jobs:
             modules \
             2>&1 | tee report/qcacld3-build.log
 
-      - name: Capture compiler diagnostics
+      - name: Capture diagnostics
         if: always()
         run: |
           {
-            echo "=== Fatal errors ==="
-
-            grep -n -C 6 \
-              "fatal error" \
-              report/qcacld3-build.log || true
+            echo "=== CONFIG_QCA_CLD_WLAN ==="
+            grep '^CONFIG_QCA_CLD_WLAN=' \
+              out/.config || true
 
             echo
             echo "=== Compiler errors ==="
+            grep -n -C 6 \
+              'error:' \
+              report/qcacld3-build.log || true
 
-            grep -n -C 5 \
-              "error:" \
+            echo
+            echo "=== Fatal errors ==="
+            grep -n -C 6 \
+              'fatal error' \
               report/qcacld3-build.log || true
 
             echo
             echo "=== Missing headers ==="
-
             grep -n \
-              "file not found" \
-              report/qcacld3-build.log || true
-
-            echo
-            echo "=== Undefined symbols ==="
-
-            grep -n -E \
-              "undefined|UNDEFINED" \
+              'file not found' \
               report/qcacld3-build.log || true
 
             echo
             echo "=== Kbuild errors ==="
-
             grep -n \
-              "Kbuild:" \
+              'Kbuild:' \
               report/qcacld3-build.log || true
 
+            echo
+            echo "=== Undefined ==="
+            grep -n -E \
+              'undefined|UNDEFINED' \
+              report/qcacld3-build.log || true
           } > report/compiler-diagnostics.txt
 
-      - name: Find generated objects
+      - name: Find compilation objects
         if: always()
         run: |
           {
@@ -307,76 +305,85 @@ jobs:
               \) \
               -print || true
 
-          } > report/injection-objects.txt
+            echo
+            echo "=== WLAN objects ==="
 
-      - name: Find generated WLAN modules
+            find kernel out \
+              -type f \
+              \( \
+                -name 'wlan.o' \
+                -o -name 'qca_cld3_wlan.o' \
+              \) \
+              -print || true
+          } > report/objects.txt
+
+      - name: Find modules
         if: always()
         run: |
           {
-            echo "=== qca_cld3_wlan.ko ==="
+            echo "=== WLAN modules ==="
 
             find kernel out \
               -type f \
-              -name 'qca_cld3_wlan.ko' \
+              \( \
+                -name 'wlan.ko' \
+                -o -name 'qca_cld3_wlan.ko' \
+              \) \
               -print || true
 
             echo
-            echo "=== wlan.ko ==="
-
-            find kernel out \
-              -type f \
-              -name 'wlan.ko' \
-              -print || true
-
-            echo
-            echo "=== all .ko files ==="
+            echo "=== All modules ==="
 
             find kernel out \
               -type f \
               -name '*.ko' \
               -print || true
+          } > report/modules.txt
 
-          } > report/generated-modules.txt
-
-      - name: Inspect injection symbols
+      - name: Inspect build log
         if: always()
         run: |
           {
-            echo "=== Injection symbols ==="
+            echo "=== CC lines ==="
+            grep -E \
+              '(^|[[:space:]])CC[[:space:]]' \
+              report/qcacld3-build.log \
+              | head -n 500 || true
 
-            for obj in $(find kernel out \
-              -type f \
-              \( \
-                -name 'wma_frame_inject.o' \
-                -o -name 'wlan_hdd_frame_inject.o' \
-                -o -name 'wlan_hdd_frame_validate.o' \
-              \)); do
+            echo
+            echo "=== LD lines ==="
+            grep -E \
+              '(^|[[:space:]])LD[[:space:]]' \
+              report/qcacld3-build.log \
+              | head -n 200 || true
 
-              echo
-              echo "===== $obj ====="
+            echo
+            echo "=== MODPOST ==="
+            grep -n \
+              'MODPOST' \
+              report/qcacld3-build.log || true
+          } > report/build-stages.txt
 
-              llvm-nm -n "$obj" 2>/dev/null || true
-            done
-
-          } > report/injection-symbols.txt
-
-      - name: Final conclusion
+      - name: Conclusion
         if: always()
         run: |
           {
-            echo "=== QCACLD3 In-Tree Injection Prototype v3 ==="
+            echo "=== QCACLD3 Injection Prototype v4 ==="
+            echo
+
+            CONFIG=$(grep '^CONFIG_QCA_CLD_WLAN=' \
+              out/.config 2>/dev/null || true)
+
+            echo "CONFIG_QCA_CLD_WLAN: $CONFIG"
+
             echo
 
             if find kernel out \
               -type f \
-              -name 'qca_cld3_wlan.ko' \
-              | grep -q .; then
-
-              echo "RESULT: QCACLD3 MODULE GENERATED"
-
-            elif find kernel out \
-              -type f \
-              -name 'wlan.ko' \
+              \( \
+                -name 'wlan.ko' \
+                -o -name 'qca_cld3_wlan.ko' \
+              \) \
               | grep -q .; then
 
               echo "RESULT: WLAN MODULE GENERATED"
@@ -394,28 +401,9 @@ jobs:
 
             else
 
-              echo "RESULT: INJECTION OBJECTS NOT COMPILED"
+              echo "RESULT: NO INJECTION OBJECTS OR WLAN MODULE"
 
             fi
-
-            echo
-            echo "=== Configuration ==="
-
-            test -f out/include/config/auto.conf \
-              && echo "auto.conf: PRESENT" \
-              || echo "auto.conf: MISSING"
-
-            echo
-            echo "=== Injection objects ==="
-
-            find kernel out \
-              -type f \
-              \( \
-                -name 'wma_frame_inject.o' \
-                -o -name 'wlan_hdd_frame_inject.o' \
-                -o -name 'wlan_hdd_frame_validate.o' \
-              \) \
-              -print || true
 
           } > report/CONCLUSION.txt
 
@@ -423,16 +411,15 @@ jobs:
         if: always()
         run: |
           mkdir -p artifact
-
           cp -r report artifact/
 
           cd artifact
-          zip -r ../qcacld3-in-tree-injection-v3.zip .
+          zip -r ../qcacld3-in-tree-injection-v4.zip .
 
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: qcacld3-in-tree-injection-v3
-          path: qcacld3-in-tree-injection-v3.zip
+          name: qcacld3-in-tree-injection-v4
+          path: qcacld3-in-tree-injection-v4.zip
           if-no-files-found: error
