@@ -1,21 +1,38 @@
-name: QCACLD3 Candidate Deep Dive
+name: QCACLD3 Candidate Deep Dive Fixed
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   analyze:
     runs-on: ubuntu-22.04
+
+    # Never allow another runaway history investigation.
     timeout-minutes: 20
 
     steps:
+
+      # ============================================================
+      # 1. DEPENDENCIES
+      # ============================================================
+
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y git ripgrep
 
+      # ============================================================
+      # 2. CLONE MOTOROLA QCACLD3
+      # ============================================================
+
       - name: Clone Motorola QCACLD3
+        shell: bash
         run: |
+          set -e
+
           git clone \
             --filter=blob:none \
             --no-single-branch \
@@ -23,118 +40,274 @@ jobs:
             motorola-qcacld3
 
           cd motorola-qcacld3
+
           git fetch origin --prune --tags
 
-          echo "Motorola HEAD:"
+          echo "======================================"
+          echo "MOTOROLA REPOSITORY"
+          echo "======================================"
+
+          echo "HEAD:"
           git rev-parse HEAD
 
-      - name: Inspect promising Motorola commit
+          echo
+          echo "COMMITS:"
+          git rev-list --all --count
+
+          echo
+          echo "SHALLOW:"
+          git rev-parse --is-shallow-repository
+
+      # ============================================================
+      # 3. CREATE RESULT DIRECTORY
+      # ============================================================
+
+      - name: Prepare results
         run: |
+          mkdir -p results
+          mkdir -p results/motorola
+          mkdir -p results/r60
+          mkdir -p results/comparison
+          mkdir -p results/diffs
+
+      # ============================================================
+      # 4. INSPECT THE KNOWN MOTOROLA CANDIDATE
+      # ============================================================
+
+      - name: Inspect Motorola packet capture candidate
+        shell: bash
+        run: |
+          set +e
+
           cd motorola-qcacld3
 
-          COMMIT=00617e827b2cf05495ef97ac3a214366c3041898
+          COMMIT="00617e827b2cf05495ef97ac3a214366c3041898"
 
-          mkdir -p ../motorola-candidate
-
-          echo "=== COMMIT ==="
-          git show --no-patch --format=fuller "$COMMIT"
-
-          echo
-          echo "=== COMPLETE PKT_CAPTURE TREE AT CANDIDATE ==="
-
-          git ls-tree -r --name-only "$COMMIT" \
-            -- components/pkt_capture \
-            | tee ../motorola-candidate/pkt-capture-files.txt
-
-          echo
-          echo "=== CANDIDATE DIFF ==="
+          echo "Candidate commit:"
+          echo "$COMMIT"
 
           git show \
+            --no-patch \
             --format=fuller \
+            "$COMMIT" \
+            > ../results/motorola/candidate-commit.txt
+
+          git show \
             --stat \
             "$COMMIT" \
-            | tee ../motorola-candidate/candidate-stat.txt
+            > ../results/motorola/candidate-stat.txt
 
           git show \
             --format= \
             "$COMMIT" \
             -- components/pkt_capture \
-            > ../motorola-candidate/00617-pkt-capture.patch
+            > ../results/motorola/candidate-pkt-capture.patch
 
-      - name: Find packet capture introduction history
+          git ls-tree \
+            -r \
+            --name-only \
+            "$COMMIT" \
+            -- components/pkt_capture \
+            > ../results/motorola/candidate-pkt-files.txt
+
+          echo "Candidate inspection complete."
+
+      # ============================================================
+      # 5. EXTRACT CANDIDATE SOURCE
+      # ============================================================
+
+      - name: Extract Motorola candidate source
+        shell: bash
         run: |
+          set +e
+
+          cd motorola-qcacld3
+
+          COMMIT="00617e827b2cf05495ef97ac3a214366c3041898"
+
+          mkdir -p ../candidate-source
+
+          git archive \
+            "$COMMIT" \
+            components/pkt_capture \
+            > ../candidate-pkt-capture.tar
+
+          if [ -s ../candidate-pkt-capture.tar ]; then
+            tar -xf ../candidate-pkt-capture.tar \
+              -C ../candidate-source
+          fi
+
+          echo "Candidate source extraction finished."
+
+      # ============================================================
+      # 6. ANALYZE MOTOROLA CANDIDATE
+      # ============================================================
+
+      - name: Analyze Motorola candidate TX path
+        shell: bash
+        run: |
+          set +e
+
+          {
+            echo "======================================"
+            echo "MOTOROLA CANDIDATE TX ANALYSIS"
+            echo "======================================"
+
+            echo
+            echo "=== ALL PKT_CAPTURE FILES ==="
+
+            find candidate-source \
+              -type f \
+              2>/dev/null \
+              | sort
+
+            echo
+            echo "=== RADIOTAP ==="
+
+            rg -n \
+              --hidden \
+              -E \
+              'radiotap|ieee80211_radiotap' \
+              candidate-source \
+              || true
+
+            echo
+            echo "=== PACKET CAPTURE ==="
+
+            rg -n \
+              --hidden \
+              -E \
+              'pkt_capture|packet.*capture|capture.*packet' \
+              candidate-source \
+              || true
+
+            echo
+            echo "=== TX PATH ==="
+
+            rg -n \
+              --hidden \
+              -E \
+              'ndo_start_xmit|start_xmit|tx_data|tx.*packet|tx.*frame|send.*packet|send.*frame' \
+              candidate-source \
+              || true
+
+            echo
+            echo "=== FRAME / 802.11 HEADER HANDLING ==="
+
+            rg -n \
+              --hidden \
+              -E \
+              '80211_hdr|ieee80211_hdr|frame.*data|packet.*data|skb_put|skb_push' \
+              candidate-source \
+              || true
+
+            echo
+            echo "=== MONITOR MODE ==="
+
+            rg -n \
+              --hidden \
+              -E \
+              'monitor.*mode|monitor.*channel|monitor.*config' \
+              candidate-source \
+              || true
+
+          } > results/motorola/candidate-tx-analysis.txt
+
+          echo "Motorola TX analysis complete."
+
+      # ============================================================
+      # 7. FIND MOTOROLA PACKET-CAPTURE HISTORY
+      # ============================================================
+
+      - name: Analyze Motorola packet capture history
+        shell: bash
+        run: |
+          set +e
+
           cd motorola-qcacld3
 
           {
-            echo "=== FILE CREATION HISTORY ==="
-            git log --all \
-              --diff-filter=A \
-              --date=short \
-              --format='%H|%ad|%s' \
-              -- components/pkt_capture
+            echo "======================================"
+            echo "PACKET CAPTURE HISTORY"
+            echo "======================================"
 
-            echo
-            echo "=== PKT_CAPTURE HISTORY ==="
-            git log --all \
+            git log \
+              --all \
               --date=short \
               --format='%H|%ad|%s' \
               -- components/pkt_capture \
-              | head -150
-
-          } | tee ../motorola-candidate/pkt-capture-history.txt
-
-      - name: Extract candidate source snapshot
-        run: |
-          cd motorola-qcacld3
-
-          COMMIT=00617e827b2cf05495ef97ac3a214366c3041898
-
-          mkdir -p ../motorola-candidate/source
-
-          git archive "$COMMIT" \
-            components/pkt_capture \
-            core/hdd \
-            core/wma \
-            core/dp \
-            > ../motorola-candidate/candidate-source.tar
-
-          tar -xf \
-            ../motorola-candidate/candidate-source.tar \
-            -C ../motorola-candidate/source
-
-          echo "Candidate source extracted."
-
-      - name: Analyze Motorola candidate symbols
-        run: |
-          cd motorola-candidate/source
-
-          {
-            echo "=== PACKET CAPTURE SYMBOLS ==="
-
-            rg -n \
-              "pkt_capture|radiotap|monitor|TX|tx_data|ndo_start_xmit|netdev_ops" \
-              components/pkt_capture \
-              core/hdd \
-              core/wma \
-              core/dp \
-              || true
+              | head -300
 
             echo
-            echo "=== POSSIBLE TX ENTRY POINTS ==="
+            echo "======================================"
+            echo "PACKET CAPTURE FILE CREATION"
+            echo "======================================"
 
-            rg -n \
-              "ndo_start_xmit|start_xmit|tx_data|send.*frame|send.*packet|xmit" \
-              components/pkt_capture \
-              core/hdd \
-              core/wma \
-              core/dp \
+            git log \
+              --all \
+              --diff-filter=A \
+              --date=short \
+              --format='%H|%ad|%s' \
+              -- components/pkt_capture \
+              | head -200
+
+          } > ../results/motorola/pkt-capture-history.txt
+
+      # ============================================================
+      # 8. FIND 2.0 / R60 / R61 REFERENCES
+      # ============================================================
+
+      - name: Find Motorola Qualcomm version references
+        shell: bash
+        run: |
+          set +e
+
+          cd motorola-qcacld3
+
+          {
+            echo "======================================"
+            echo "COMMIT SUBJECTS"
+            echo "======================================"
+
+            git log \
+              --all \
+              --date=short \
+              --format='%H|%ad|%s' \
+              --regexp-ignore-case \
+              --grep='wlan-cld3.driver.lnx.2.0' \
+              --grep='r60' \
+              --grep='r61' \
+              --grep='r155' \
+              --grep='r172' \
+              --grep='qcacld-3.0' \
+              | head -400
+
+            echo
+            echo "======================================"
+            echo "TAGS"
+            echo "======================================"
+
+            git tag -l \
+              | grep -Ei \
+              'wlan|qcacld|cld3|r60|r61|r155|r172|2\.0' \
+              | sort -V \
               || true
 
-          } | tee ../../motorola-candidate/symbol-analysis.txt
+          } > ../results/motorola/version-history.txt
 
-      - name: Clone Qualcomm R60 QCACLD3
+      # ============================================================
+      # 9. TRY QUALCOMM R60
+      # ============================================================
+
+      - name: Clone Qualcomm R60 reference
+        id: r60clone
         continue-on-error: true
+        shell: bash
         run: |
+          set +e
+
+          echo "Attempting R60 reference clone..."
+
           git clone \
             --depth=1 \
             --filter=blob:none \
@@ -142,96 +315,208 @@ jobs:
             https://git.codelinaro.org/clo/la/platform/vendor/qcom-opensource/wlan/qcacld-3.0.git \
             qualcomm-r60
 
+          STATUS=$?
+
+          if [ "$STATUS" -ne 0 ]; then
+            echo "R60 clone was unavailable."
+            echo "R60 clone status: $STATUS" \
+              > results/r60/r60-status.txt
+            exit 0
+          fi
+
           cd qualcomm-r60
 
-          echo "Qualcomm R60:"
-          git rev-parse HEAD | tee ../qualcomm-r60-commit.txt
+          echo "R60 clone succeeded."
+
+          echo "COMMIT:"
+          git rev-parse HEAD \
+            | tee ../results/r60/r60-commit.txt
+
+          echo "R60 clone status: SUCCESS" \
+            > ../results/r60/r60-status.txt
+
+      # ============================================================
+      # 10. ANALYZE R60
+      # ============================================================
 
       - name: Analyze Qualcomm R60
+        shell: bash
         run: |
+          set +e
+
           if [ ! -d qualcomm-r60/.git ]; then
             echo "R60 source unavailable."
             exit 0
           fi
 
-          mkdir -p qualcomm-analysis
-
           cd qualcomm-r60
 
           {
-            echo "=== R60 PACKET CAPTURE FILES ==="
+            echo "======================================"
+            echo "R60 RELEVANT FILES"
+            echo "======================================"
 
-            git ls-tree -r --name-only HEAD \
+            git ls-tree \
+              -r \
+              --name-only \
+              HEAD \
               | grep -Ei \
-                'pkt_capture|radiotap|monitor|inject|frame' \
+                'pkt_capture|radiotap|monitor|inject|frame|tx' \
               || true
 
             echo
-            echo "=== R60 RELEVANT SYMBOLS ==="
+            echo "======================================"
+            echo "R60 RADIOTAP"
+            echo "======================================"
 
             git grep -n \
               -E \
-              'radiotap|pkt_capture|monitor|inject|ndo_start_xmit|start_xmit' \
+              'radiotap|ieee80211_radiotap' \
               HEAD \
               -- '*.c' '*.h' \
               || true
 
-          } | tee ../qualcomm-analysis/r60-symbol-analysis.txt
+            echo
+            echo "======================================"
+            echo "R60 PACKET CAPTURE"
+            echo "======================================"
 
-      - name: Compare Motorola candidate with Qualcomm R60
+            git grep -n \
+              -E \
+              'pkt_capture|packet.*capture|capture.*packet' \
+              HEAD \
+              -- '*.c' '*.h' \
+              || true
+
+            echo
+            echo "======================================"
+            echo "R60 TX PATH"
+            echo "======================================"
+
+            git grep -n \
+              -E \
+              'ndo_start_xmit|start_xmit|tx_data|tx.*packet|tx.*frame|send.*packet|send.*frame' \
+              HEAD \
+              -- '*.c' '*.h' \
+              || true
+
+            echo
+            echo "======================================"
+            echo "R60 MONITOR"
+            echo "======================================"
+
+            git grep -n \
+              -E \
+              'monitor.*mode|monitor.*channel|monitor.*config' \
+              HEAD \
+              -- '*.c' '*.h' \
+              || true
+
+            echo
+            echo "======================================"
+            echo "R60 FRAME CONSTRUCTION"
+            echo "======================================"
+
+            git grep -n \
+              -E \
+              '80211_hdr|ieee80211_hdr|skb_put|skb_push|frame.*data|packet.*data' \
+              HEAD \
+              -- '*.c' '*.h' \
+              || true
+
+          } > ../results/r60/r60-analysis.txt
+
+          echo "R60 analysis finished."
+
+      # ============================================================
+      # 11. GET R60 PACKET FILE LIST
+      # ============================================================
+
+      - name: Get R60 packet capture file list
+        shell: bash
         run: |
+          set +e
+
           if [ ! -d qualcomm-r60/.git ]; then
-            echo "No R60 tree available."
             exit 0
           fi
 
-          mkdir -p comparison
+          cd qualcomm-r60
+
+          git ls-tree \
+            -r \
+            --name-only \
+            HEAD \
+            -- components/pkt_capture \
+            | sort \
+            > ../results/r60/r60-pkt-files.txt
+
+      # ============================================================
+      # 12. COMPARE FILE STRUCTURES
+      # ============================================================
+
+      - name: Compare Motorola candidate with R60
+        shell: bash
+        run: |
+          set +e
+
+          if [ ! -d qualcomm-r60/.git ]; then
+            echo "R60 unavailable." \
+              > results/comparison/comparison-status.txt
+            exit 0
+          fi
 
           cd motorola-qcacld3
 
-          git ls-tree -r --name-only \
+          git ls-tree \
+            -r \
+            --name-only \
             00617e827b2cf05495ef97ac3a214366c3041898 \
             -- components/pkt_capture \
-            | sort > ../comparison/motorola-pkt-files.txt
+            | sort \
+            > ../results/comparison/motorola-pkt-files.txt
 
           cd ../qualcomm-r60
 
-          git ls-tree -r --name-only HEAD \
+          git ls-tree \
+            -r \
+            --name-only \
+            HEAD \
             -- components/pkt_capture \
-            | sort > ../comparison/r60-pkt-files.txt
+            | sort \
+            > ../results/comparison/r60-pkt-files.txt
 
           cd ..
 
-          echo "=== COMMON FILES ==="
-
           comm -12 \
-            comparison/motorola-pkt-files.txt \
-            comparison/r60-pkt-files.txt \
-            | tee comparison/common-pkt-files.txt
-
-          echo
-          echo "=== R60 FILES NOT IN MOTOROLA CANDIDATE ==="
+            results/comparison/motorola-pkt-files.txt \
+            results/comparison/r60-pkt-files.txt \
+            > results/comparison/common-pkt-files.txt
 
           comm -13 \
-            comparison/motorola-pkt-files.txt \
-            comparison/r60-pkt-files.txt \
-            | tee comparison/r60-only-pkt-files.txt
-
-          echo
-          echo "=== MOTOROLA FILES NOT IN R60 ==="
+            results/comparison/motorola-pkt-files.txt \
+            results/comparison/r60-pkt-files.txt \
+            > results/comparison/r60-only-pkt-files.txt
 
           comm -23 \
-            comparison/motorola-pkt-files.txt \
-            comparison/r60-pkt-files.txt \
-            | tee comparison/motorola-only-pkt-files.txt
+            results/comparison/motorola-pkt-files.txt \
+            results/comparison/r60-pkt-files.txt \
+            > results/comparison/motorola-only-pkt-files.txt
 
-      - name: Compare key source files
+          echo "Comparison complete."
+
+      # ============================================================
+      # 13. GENERATE SOURCE DIFFS
+      # ============================================================
+
+      - name: Generate targeted source diffs
+        shell: bash
         run: |
+          set +e
+
           if [ ! -d qualcomm-r60/.git ]; then
             exit 0
           fi
-
-          mkdir -p comparison/source-diffs
 
           while IFS= read -r FILE; do
 
@@ -239,85 +524,91 @@ jobs:
 
             SAFE=$(echo "$FILE" | tr '/' '_')
 
-            if git -C qualcomm-r60 cat-file -e "HEAD:$FILE" 2>/dev/null; then
+            git -C motorola-qcacld3 \
+              show \
+              00617e827b2cf05495ef97ac3a214366c3041898:"$FILE" \
+              > /tmp/motorola-source 2>/dev/null
 
-              git -C motorola-qcacld3 \
-                show \
-                00617e827b2cf05495ef97ac3a214366c3041898:"$FILE" \
-                > /tmp/motorola-file 2>/dev/null || true
-
-              git -C qualcomm-r60 \
-                show \
-                "HEAD:$FILE" \
-                > /tmp/r60-file 2>/dev/null || true
-
-              diff -u \
-                /tmp/motorola-file \
-                /tmp/r60-file \
-                > "comparison/source-diffs/${SAFE}.diff" \
-                || true
+            if [ "$?" -ne 0 ]; then
+              continue
             fi
 
-          done < comparison/common-pkt-files.txt
+            git -C qualcomm-r60 \
+              show \
+              HEAD:"$FILE" \
+              > /tmp/r60-source 2>/dev/null
 
-      - name: Look for injection-relevant R60 infrastructure
+            if [ "$?" -ne 0 ]; then
+              continue
+            fi
+
+            diff -u \
+              /tmp/motorola-source \
+              /tmp/r60-source \
+              > "results/diffs/${SAFE}.diff" \
+              || true
+
+          done < results/comparison/common-pkt-files.txt
+
+          echo "Targeted diffs generated."
+
+      # ============================================================
+      # 14. SEARCH FOR INJECTION-SPECIFIC INDICATORS
+      # ============================================================
+
+      - name: Search injection indicators
+        shell: bash
         run: |
-          if [ ! -d qualcomm-r60/.git ]; then
-            exit 0
-          fi
-
-          cd qualcomm-r60
+          set +e
 
           {
-            echo "=== RADIOTAP ==="
+            echo "======================================"
+            echo "MOTOROLA CANDIDATE INJECTION INDICATORS"
+            echo "======================================"
 
-            git grep -n \
+            rg -n \
               -E \
-              'radiotap.*iter|radiotap.*iterator|ieee80211_radiotap' \
-              HEAD \
-              -- '*.c' '*.h' \
+              'frame.?inject|packet.?inject|injection|radiotap.*iter|ndo_start_xmit|monitor.*tx|tx.*monitor' \
+              candidate-source \
               || true
 
             echo
-            echo "=== PACKET CONSTRUCTION ==="
+            echo "======================================"
+            echo "R60 INJECTION INDICATORS"
+            echo "======================================"
 
-            git grep -n \
-              -E \
-              'skb_put|skb_push|80211_hdr|frame.*data|packet.*data' \
-              HEAD \
-              -- components/pkt_capture '*.c' '*.h' \
-              || true
+            if [ -d qualcomm-r60 ]; then
 
-            echo
-            echo "=== TX PATH ==="
+              cd qualcomm-r60
 
-            git grep -n \
-              -E \
-              'ndo_start_xmit|start_xmit|tx.*packet|tx.*frame|send.*packet' \
-              HEAD \
-              -- components/pkt_capture core/hdd core/wma \
-              || true
+              git grep -n \
+                -E \
+                'frame.?inject|packet.?inject|injection|radiotap.*iter|ndo_start_xmit|monitor.*tx|tx.*monitor' \
+                HEAD \
+                -- '*.c' '*.h' \
+                || true
 
-            echo
-            echo "=== MONITOR CONFIGURATION ==="
+            else
+              echo "R60 source unavailable."
+            fi
 
-            git grep -n \
-              -E \
-              'monitor.*mode|monitor.*channel|monitor.*config|pkt.*capture' \
-              HEAD \
-              -- components/pkt_capture core/hdd core/wma \
-              || true
+          } > results/comparison/injection-indicators.txt
 
-          } | tee ../../qualcomm-analysis/injection-relevant-r60.txt
+      # ============================================================
+      # 15. FINAL REPORT
+      # ============================================================
 
-      - name: Generate conclusion report
+      - name: Generate final report
+        shell: bash
         run: |
+          set +e
+
           {
-            echo "=================================================="
-            echo "CEBU QCACLD3 CANDIDATE DEEP DIVE"
-            echo "=================================================="
+            echo "===================================================="
+            echo "CEBU QCACLD3 CANDIDATE DEEP-DIVE"
+            echo "===================================================="
             echo
-            echo "Target device:"
+            echo "Device:"
             echo "Moto G9 Power / cebu"
             echo
             echo "Kernel:"
@@ -326,71 +617,74 @@ jobs:
             echo "Motorola candidate:"
             echo "00617e827b2cf05495ef97ac3a214366c3041898"
             echo
-            echo "Description:"
+            echo "Candidate:"
             echo "qcacld-3.0: Process Tx data packet for pkt capture mode"
             echo
-            echo "=================================================="
-            echo "MOTOROLA PKT_CAPTURE FILES"
-            echo "=================================================="
-            cat motorola-candidate/pkt-capture-files.txt || true
+            echo "===================================================="
+            echo "MOTOROLA CANDIDATE TX ANALYSIS"
+            echo "===================================================="
+            cat results/motorola/candidate-tx-analysis.txt \
+              2>/dev/null \
+              || true
+
             echo
-            echo "=================================================="
-            echo "MOTOROLA SYMBOL ANALYSIS"
-            echo "=================================================="
-            cat motorola-candidate/symbol-analysis.txt || true
+            echo "===================================================="
+            echo "MOTOROLA VERSION HISTORY"
+            echo "===================================================="
+            cat results/motorola/version-history.txt \
+              2>/dev/null \
+              || true
+
             echo
-            echo "=================================================="
-            echo "R60 INJECTION-RELEVANT ANALYSIS"
-            echo "=================================================="
-            cat qualcomm-analysis/injection-relevant-r60.txt || true
+            echo "===================================================="
+            echo "R60 STATUS"
+            echo "===================================================="
+            cat results/r60/r60-status.txt \
+              2>/dev/null \
+              || true
+
             echo
-            echo "=================================================="
-            echo "R60-ONLY PACKET CAPTURE FILES"
-            echo "=================================================="
-            cat comparison/r60-only-pkt-files.txt || true
+            echo "===================================================="
+            echo "R60 ANALYSIS"
+            echo "===================================================="
+            cat results/r60/r60-analysis.txt \
+              2>/dev/null \
+              || true
+
             echo
-            echo "=================================================="
-            echo "COMMON PACKET CAPTURE FILES"
-            echo "=================================================="
-            cat comparison/common-pkt-files.txt || true
+            echo "===================================================="
+            echo "COMMON PKT_CAPTURE FILES"
+            echo "===================================================="
+            cat results/comparison/common-pkt-files.txt \
+              2>/dev/null \
+              || true
 
-          } | tee deep-dive-report.txt
+            echo
+            echo "===================================================="
+            echo "R60-ONLY PKT_CAPTURE FILES"
+            echo "===================================================="
+            cat results/comparison/r60-only-pkt-files.txt \
+              2>/dev/null \
+              || true
 
-      - name: Package results
-        run: |
-          mkdir -p deep-dive-results
+            echo
+            echo "===================================================="
+            echo "MOTOROLA-ONLY PKT_CAPTURE FILES"
+            echo "===================================================="
+            cat results/comparison/motorola-only-pkt-files.txt \
+              2>/dev/null \
+              || true
 
-          cp \
-            deep-dive-report.txt \
-            motorola-candidate/pkt-capture-history.txt \
-            motorola-candidate/symbol-analysis.txt \
-            motorola-candidate/00617-pkt-capture.patch \
-            qualcomm-r60-commit.txt \
-            qualcomm-analysis/r60-symbol-analysis.txt \
-            qualcomm-analysis/injection-relevant-r60.txt \
-            comparison/common-pkt-files.txt \
-            comparison/r60-only-pkt-files.txt \
-            comparison/motorola-only-pkt-files.txt \
-            deep-dive-results/ \
-            2>/dev/null || true
+            echo
+            echo "===================================================="
+            echo "INJECTION INDICATORS"
+            echo "===================================================="
+            cat results/comparison/injection-indicators.txt \
+              2>/dev/null \
+              || true
 
-          cp -r \
-            comparison/source-diffs \
-            deep-dive-results/ \
-            2>/dev/null || true
+          } > results/deep-dive-report.txt
 
-          echo "=== RESULTS ==="
-          find deep-dive-results -type f | sort
+          echo "Report generated."
 
-      - name: Upload results
-        uses: actions/upload-artifact@v4
-        with:
-          name: cebu-qcacld3-candidate-deep-dive
-          path: deep-dive-results/
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Finish
-        run: |
-          echo "QCACLD3 candidate deep dive complete."
-          echo "Download: cebu-qcacld3-candidate-deep-dive"
+      # ========================
