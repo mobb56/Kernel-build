@@ -369,7 +369,6 @@ jobs:
       # We do NOT run olddefconfig again after modifying
       # LOCALVERSION_AUTO.
       # ============================================================
-
       - name: Merge NetHunter configuration
         shell: bash
         run: |
@@ -379,13 +378,20 @@ jobs:
 
           export PATH="${LLVM_DIR}/bin:${PATH}"
 
+          # ----------------------------------------------------------
+          # Merge NetHunter fragment.
+          # ----------------------------------------------------------
+
           scripts/kconfig/merge_config.sh \
             -m \
             -O "${OUT_DIR}" \
             "${OUT_DIR}/.config" \
             nethunter-config/cebu-nethunter.config
 
-          # Resolve all normal Kconfig dependencies first.
+          # ----------------------------------------------------------
+          # Resolve all Kconfig dependencies FIRST.
+          # ----------------------------------------------------------
+
           make \
             O="${OUT_DIR}" \
             ARCH="${ARCH}" \
@@ -394,21 +400,111 @@ jobs:
             CROSS_COMPILE="${CROSS_COMPILE}" \
             olddefconfig
 
+          # ----------------------------------------------------------
+          # Determine kernel base version.
+          # ----------------------------------------------------------
+
+          BASE_VERSION="$(
+            make -s \
+              O="${OUT_DIR}" \
+              ARCH="${ARCH}" \
+              LLVM=1 \
+              LLVM_IAS=1 \
+              CROSS_COMPILE="${CROSS_COMPILE}" \
+              kernelversion
+          )"
+
+          echo "Base version:  ${BASE_VERSION}"
+          echo "Clean release: ${CLEAN_RELEASE}"
+
+          case "${CLEAN_RELEASE}" in
+            "${BASE_VERSION}"*)
+              ;;
+            *)
+              echo "ERROR: clean release does not start with base version."
+              exit 1
+              ;;
+          esac
+
+          RELEASE_SUFFIX="${CLEAN_RELEASE#${BASE_VERSION}}"
+
+          echo "Release suffix: ${RELEASE_SUFFIX}"
+
+          # ----------------------------------------------------------
           # IMPORTANT:
-          # Do NOT set CONFIG_LOCALVERSION.
           #
-          # The Motorola kernel already contains its correct
-          # -cip135-st19-perf-g39bcecd5c63d suffix.
+          # Do NOT run olddefconfig after this point.
           #
-          # We only prevent Git's automatic dirty suffix.
+          # olddefconfig can restore LOCALVERSION_AUTO according to
+          # the Kconfig defaults.
+          # ----------------------------------------------------------
 
           scripts/config \
             --file "${OUT_DIR}/.config" \
             --disable LOCALVERSION_AUTO
 
-          grep -Fxq \
+          scripts/config \
+            --file "${OUT_DIR}/.config" \
+            --set-str LOCALVERSION "${RELEASE_SUFFIX}"
+
+          # ----------------------------------------------------------
+          # Verify LOCALVERSION_AUTO in either valid Kconfig form.
+          #
+          # Kconfig may represent "n" as:
+          #
+          # CONFIG_LOCALVERSION_AUTO=n
+          #
+          # OR:
+          #
+          # # CONFIG_LOCALVERSION_AUTO is not set
+          # ----------------------------------------------------------
+
+          if grep -Fxq \
             "CONFIG_LOCALVERSION_AUTO=n" \
-            "${OUT_DIR}/.config"
+            "${OUT_DIR}/.config"; then
+
+            echo "LOCALVERSION_AUTO=n"
+
+          elif grep -Fxq \
+            "# CONFIG_LOCALVERSION_AUTO is not set" \
+            "${OUT_DIR}/.config"; then
+
+            echo "LOCALVERSION_AUTO is disabled."
+
+          else
+
+            echo "ERROR: LOCALVERSION_AUTO was not disabled."
+            grep -E \
+              '(^CONFIG_LOCALVERSION_AUTO=|^# CONFIG_LOCALVERSION_AUTO)' \
+              "${OUT_DIR}/.config" || true
+            exit 1
+
+          fi
+
+          # ----------------------------------------------------------
+          # Verify LOCALVERSION.
+          # ----------------------------------------------------------
+
+          LOCALVERSION_LINE="$(
+            grep -E '^CONFIG_LOCALVERSION=' \
+              "${OUT_DIR}/.config" || true
+          )"
+
+          echo "LOCALVERSION line:"
+          echo "${LOCALVERSION_LINE}"
+
+          EXPECTED_LOCALVERSION="CONFIG_LOCALVERSION=\"${RELEASE_SUFFIX}\""
+
+          if [ "${LOCALVERSION_LINE}" != "${EXPECTED_LOCALVERSION}" ]; then
+            echo "ERROR: LOCALVERSION is incorrect."
+            echo "Expected: ${EXPECTED_LOCALVERSION}"
+            echo "Actual:   ${LOCALVERSION_LINE}"
+            exit 1
+          fi
+
+          # ----------------------------------------------------------
+          # Verify the resulting release WITHOUT running olddefconfig.
+          # ----------------------------------------------------------
 
           CONFIG_RELEASE="$(
             make -s \
@@ -420,22 +516,21 @@ jobs:
               kernelrelease
           )"
 
-          echo "Expected release:"
-          echo "${CLEAN_RELEASE}"
+          echo "Configured release: ${CONFIG_RELEASE}"
 
-          echo "Configured release:"
-          echo "${CONFIG_RELEASE}"
-
-          test "${CONFIG_RELEASE}" = "${CLEAN_RELEASE}"
+          test "${CONFIG_RELEASE}" = "${CLEAN_RELEASE}" || {
+            echo "ERROR: configured release does not match clean release."
+            exit 1
+          }
 
           case "${CONFIG_RELEASE}" in
-            *-dirty|*+)
-              echo "ERROR: automatic SCM suffix detected."
+            *-dirty)
+              echo "ERROR: dirty kernel release detected."
               exit 1
               ;;
           esac
 
-          echo "Kernel release configuration verified."
+          echo "Configuration release verification passed."
       # ============================================================
       # 11. VERIFY CONFIGURATION
       #
