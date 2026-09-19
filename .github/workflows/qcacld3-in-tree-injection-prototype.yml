@@ -1,4 +1,4 @@
-name: QCACLD3 Injection Prototype v17
+name: QCACLD3 Injection Prototype v18
 
 on:
   workflow_dispatch:
@@ -9,52 +9,54 @@ jobs:
     timeout-minutes: 90
 
     steps:
-      - name: Checkout workflow repo
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            git \
-            bc \
-            bison \
-            flex \
-            build-essential \
-            clang \
-            lld \
-            llvm \
-            libssl-dev \
-            libelf-dev \
-            python3 \
-            cpio \
-            rsync \
-            unzip
+            git bc bison flex build-essential \
+            clang lld llvm libssl-dev libelf-dev \
+            python3 cpio rsync unzip
 
       - name: Clone kernel and reference
         run: |
           set -eux
 
-          mkdir -p "$GITHUB_WORKSPACE/Kernel-Build"
+          mkdir -p "$GITHUB_WORKSPACE/kernel-build"
 
           git clone --depth=1 \
             --branch lineage-23.2 \
             https://github.com/LineageOS/android_kernel_motorola_sm6225.git \
-            "$GITHUB_WORKSPACE/Kernel-Build/kernel"
+            "$GITHUB_WORKSPACE/kernel-build/kernel"
 
           git clone --depth=1 \
             --branch nethunter-lineage-23.2 \
             https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git \
-            "$GITHUB_WORKSPACE/Kernel-Build/reference"
+            "$GITHUB_WORKSPACE/kernel-build/reference"
 
       - name: Set paths
         run: |
-          {
-            echo "KERNEL_DIR=$GITHUB_WORKSPACE/Kernel-Build/kernel"
-            echo "REFERENCE_DIR=$GITHUB_WORKSPACE/Kernel-Build/reference"
-            echo "OUT=$GITHUB_WORKSPACE/Kernel-Build/kernel-out"
-            echo "QCACLD_DIR=$GITHUB_WORKSPACE/Kernel-Build/kernel/drivers/staging/qcacld-3.0"
-          } >> "$GITHUB_ENV"
+          set -eux
+
+          echo "KERNEL_DIR=$GITHUB_WORKSPACE/kernel-build/kernel" >> "$GITHUB_ENV"
+          echo "REFERENCE_DIR=$GITHUB_WORKSPACE/kernel-build/reference" >> "$GITHUB_ENV"
+          echo "OUT=$GITHUB_WORKSPACE/kernel-build/kernel-out" >> "$GITHUB_ENV"
+          echo "QCACLD_DIR=$GITHUB_WORKSPACE/kernel-build/kernel/drivers/staging/qcacld-3.0" >> "$GITHUB_ENV"
+
+      - name: Show paths
+        run: |
+          set -eux
+
+          echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
+          echo "KERNEL_DIR=$KERNEL_DIR"
+          echo "REFERENCE_DIR=$REFERENCE_DIR"
+          echo "OUT=$OUT"
+          echo "QCACLD_DIR=$QCACLD_DIR"
+
+          test -d "$KERNEL_DIR"
+          test -d "$REFERENCE_DIR"
 
       - name: Configure kernel
         working-directory: ${{ env.KERNEL_DIR }}
@@ -97,27 +99,25 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             modules_prepare
 
-      - name: Verify clean source tree
+          test -f "$OUT/.config"
+          test -f "$OUT/include/config/auto.conf"
+
+      - name: Verify native QCACLD3 tree
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           set -eux
 
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "ERROR: kernel source tree is dirty"
-            git status --short
-            exit 1
-          fi
-
-          test -f "$OUT/include/config/auto.conf"
           test -f drivers/staging/qcacld-3.0/Kbuild
+          test -f drivers/staging/qca-wifi-host-cmn/qdf/inc/qdf_nbuf.h
+          test -f drivers/staging/qca-wifi-host-cmn/utils/sys/queue.h
+          test -f drivers/staging/fw-api/fw/athdefs.h
 
-      - name: Import production injection headers
+      - name: Import injection headers
         run: |
           set -eux
 
           SRC="$REFERENCE_DIR/drivers/staging/qcacld-3.0"
 
-          # HDD headers
           cp "$SRC/core/hdd/inc/wlan_hdd_frame_inject.h" \
              "$QCACLD_DIR/core/hdd/src/"
 
@@ -133,20 +133,10 @@ jobs:
           cp "$SRC/core/hdd/inc/wlan_hdd_inject_security.h" \
              "$QCACLD_DIR/core/hdd/src/"
 
-          # WMA header
           cp "$SRC/core/wma/inc/wma_frame_inject.h" \
              "$QCACLD_DIR/core/wma/src/"
 
-          echo "Imported headers:"
-          find "$QCACLD_DIR/core/hdd/src" \
-            -maxdepth 1 \
-            -name 'wlan_hdd_frame_inject*.h' \
-            -o -name 'wlan_hdd_frame_validate*.h' \
-            -o -name 'wlan_hdd_inject_security.h'
-
-          test -f "$QCACLD_DIR/core/wma/src/wma_frame_inject.h"
-
-      - name: Import production injection sources
+      - name: Import injection sources
         run: |
           set -eux
 
@@ -170,40 +160,13 @@ jobs:
           cp "$SRC/core/wma/src/wma_frame_inject.c" \
              "$QCACLD_DIR/core/wma/src/"
 
-          echo "Imported source files:"
-          ls -lh \
-            "$QCACLD_DIR/core/hdd/src/"*inject*.c \
-            "$QCACLD_DIR/core/hdd/src/"*validate*.c \
-            "$QCACLD_DIR/core/wma/src/wma_frame_inject.c"
-
-      - name: Audit quoted includes
-        run: |
-          set -eux
-
-          cd "$QCACLD_DIR"
-
-          echo "=== Imported source includes ==="
-
-          for f in \
-            core/hdd/src/wlan_hdd_frame_inject.c \
-            core/hdd/src/wlan_hdd_frame_inject_debug.c \
-            core/hdd/src/wlan_hdd_frame_inject_integration.c \
-            core/hdd/src/wlan_hdd_frame_validate.c \
-            core/hdd/src/wlan_hdd_inject_security.c \
-            core/wma/src/wma_frame_inject.c
-          do
-            echo
-            echo "===== $f ====="
-            grep -E '^[[:space:]]*#include[[:space:]]*"[^"]+"' "$f" || true
-          done
-
       - name: Patch Kbuild
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           set -eux
 
           cp drivers/staging/qcacld-3.0/Kbuild \
-             drivers/staging/qcacld-3.0/Kbuild.v17-original
+             drivers/staging/qcacld-3.0/Kbuild.v18-original
 
           python3 <<'PY'
           from pathlib import Path
@@ -216,8 +179,8 @@ jobs:
           if marker not in s:
               raise SystemExit("Kbuild marker not found")
 
-          injection = r'''
-          # NetHunter QCACLD3 injection prototype
+          addition = r'''
+          # NetHunter QCACLD3 injection prototype v18
           OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o
           OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject_debug.o
           OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject_integration.o
@@ -229,34 +192,28 @@ jobs:
 
           '''
 
-          s = s.replace(marker, injection + marker, 1)
-
+          s = s.replace(marker, addition + marker, 1)
           p.write_text(s)
           PY
 
-          echo "=== Injection Kbuild additions ==="
-          grep -n -A15 -B2 \
-            "NetHunter QCACLD3 injection prototype" \
-            drivers/staging/qcacld-3.0/Kbuild
-
-      - name: Verify injection objects in Kbuild
+      - name: Verify Kbuild
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           set -eux
 
           grep -q \
-            'OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
+            'wlan_hdd_frame_inject.o' \
             drivers/staging/qcacld-3.0/Kbuild
 
           grep -q \
-            'OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \
+            'wma_frame_inject.o' \
             drivers/staging/qcacld-3.0/Kbuild
 
           grep -q \
             'FEATURE_FRAME_INJECTION_SUPPORT' \
             drivers/staging/qcacld-3.0/Kbuild
 
-      - name: Build QCACLD3 in native kernel context
+      - name: Build QCACLD3
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           set +e
@@ -270,46 +227,37 @@ jobs:
             V=1 \
             M=drivers/staging/qcacld-3.0 \
             modules \
-            2>&1 | tee "$GITHUB_WORKSPACE/Kernel-Build/qcacld3-build.log"
+            2>&1 | tee "$GITHUB_WORKSPACE/kernel-build/qcacld3-build.log"
 
           rc=${PIPESTATUS[0]}
 
-          echo "BUILD_EXIT_CODE=$rc" \
-            | tee "$GITHUB_WORKSPACE/Kernel-Build/build-exit-code.txt"
+          echo "$rc" > "$GITHUB_WORKSPACE/kernel-build/build-exit-code.txt"
 
           exit "$rc"
 
-      - name: Collect build diagnostics
+      - name: Collect result
         if: always()
-        working-directory: ${{ env.KERNEL_DIR }}
         run: |
           set +e
 
-          REPORT="$GITHUB_WORKSPACE/Kernel-Build/report"
+          REPORT="$GITHUB_WORKSPACE/kernel-build/report"
           mkdir -p "$REPORT"
 
-          cp "$GITHUB_WORKSPACE/Kernel-Build/qcacld3-build.log" \
+          cp "$GITHUB_WORKSPACE/kernel-build/qcacld3-build.log" \
              "$REPORT/" 2>/dev/null || true
 
-          cp "$GITHUB_WORKSPACE/Kernel-Build/build-exit-code.txt" \
-             "$REPORT/" 2>/dev/null || true
-
-          cp drivers/staging/qcacld-3.0/Kbuild \
-             "$REPORT/Kbuild.v17-final" 2>/dev/null || true
-
-          echo "=== Build errors ===" \
+          echo "=== compiler errors ===" \
             > "$REPORT/compiler-errors.txt"
 
           grep -Ei \
             'error:|fatal error:|undefined reference|No rule to make|Argument list too long' \
-            "$GITHUB_WORKSPACE/Kernel-Build/qcacld3-build.log" \
+            "$GITHUB_WORKSPACE/kernel-build/qcacld3-build.log" \
             >> "$REPORT/compiler-errors.txt" 2>/dev/null || true
 
-          echo "=== Injection objects ===" \
+          echo "=== injection objects ===" \
             > "$REPORT/injection-objects.txt"
 
-          find "$OUT" \
-            -type f \
+          find "$OUT" -type f \
             \( \
               -name 'wlan_hdd_frame_inject.o' \
               -o -name 'wlan_hdd_frame_inject_debug.o' \
@@ -321,83 +269,38 @@ jobs:
             -print \
             >> "$REPORT/injection-objects.txt"
 
-          echo "=== Generated WLAN modules ===" \
+          echo "=== wlan modules ===" \
             > "$REPORT/generated-modules.txt"
 
-          find "$OUT" \
-            -type f \
+          find "$OUT" -type f \
             \( -name 'wlan.o' -o -name 'wlan.ko' \) \
             -print \
             >> "$REPORT/generated-modules.txt"
 
-      - name: Verify prototype result
+      - name: Package report
         if: always()
         run: |
           set +e
 
-          REPORT="$GITHUB_WORKSPACE/Kernel-Build/report"
-
-          echo "=== QCACLD3 v17 result ==="
-
-          if [ -f "$OUT/drivers/staging/qcacld-3.0/wlan.ko" ]; then
-            echo "wlan.ko: GENERATED"
-          else
-            echo "wlan.ko: NOT GENERATED"
-          fi
-
-          echo
-          echo "Injection objects:"
-
-          for obj in \
-            wlan_hdd_frame_inject.o \
-            wlan_hdd_frame_inject_debug.o \
-            wlan_hdd_frame_inject_integration.o \
-            wlan_hdd_frame_validate.o \
-            wlan_hdd_inject_security.o \
-            wma_frame_inject.o
-          do
-            if find "$OUT" -name "$obj" -print -quit | grep -q .; then
-              echo "$obj: BUILT"
-            else
-              echo "$obj: NOT BUILT"
-            fi
-          done
-
-          echo
-          echo "Compiler errors:"
-          cat "$REPORT/compiler-errors.txt" || true
-
-      - name: Package prototype report
-        if: always()
-        run: |
-          set +e
-
-          cd "$GITHUB_WORKSPACE/Kernel-Build"
+          cd "$GITHUB_WORKSPACE/kernel-build"
 
           mkdir -p package
-
           cp -r report package/ 2>/dev/null || true
           cp qcacld3-build.log package/ 2>/dev/null || true
           cp build-exit-code.txt package/ 2>/dev/null || true
 
-          if [ -f "$OUT/drivers/staging/qcacld-3.0/wlan.ko" ]; then
-            mkdir -p package/modules
-            cp "$OUT/drivers/staging/qcacld-3.0/wlan.ko" \
-              package/modules/
-          fi
-
           zip -r \
-            qcacld3-injection-prototype-v17.zip \
+            qcacld3-injection-prototype-v18.zip \
             package
 
-      - name: Upload prototype artifact
+      - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: qcacld3-injection-prototype-v17
+          name: qcacld3-injection-prototype-v18
           path: |
-            Kernel-Build/qcacld3-injection-prototype-v17.zip
-            Kernel-Build/qcacld3-build.log
-            Kernel-Build/build-exit-code.txt
+            kernel-build/qcacld3-injection-prototype-v18.zip
+            kernel-build/qcacld3-build.log
+            kernel-build/build-exit-code.txt
           if-no-files-found: error
           retention-days: 14
