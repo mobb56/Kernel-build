@@ -1,4 +1,4 @@
-name: QCACLD3 Injection Prototype v15
+name: QCACLD3 Injection Prototype v16
 
 on:
   workflow_dispatch:
@@ -20,7 +20,7 @@ jobs:
       # DEPENDENCIES
       # ============================================================
 
-      - name: Install build dependencies
+      - name: Install dependencies
         shell: bash
         run: |
           set -euxo pipefail
@@ -42,10 +42,10 @@ jobs:
             rsync
 
       # ============================================================
-      # CLONE SOURCES
+      # CLONE KERNEL + NETHUNTER REFERENCE
       # ============================================================
 
-      - name: Clone kernel and NetHunter reference
+      - name: Clone source trees
         shell: bash
         run: |
           set -euxo pipefail
@@ -68,12 +68,9 @@ jobs:
 
       # ============================================================
       # PATHS
-      #
-      # IMPORTANT:
-      # OUT IS OUTSIDE THE KERNEL GIT TREE.
       # ============================================================
 
-      - name: Set build paths
+      - name: Set paths
         shell: bash
         run: |
           set -euxo pipefail
@@ -81,7 +78,8 @@ jobs:
           KERNEL="$GITHUB_WORKSPACE/Kernel-Build/kernel"
           REF="$GITHUB_WORKSPACE/Kernel-Build/reference"
 
-          # NEVER put generated kernel output inside the Git tree.
+          # IMPORTANT:
+          # Generated kernel output stays OUTSIDE the Git tree.
           OUT="$GITHUB_WORKSPACE/Kernel-Build/kernel-out"
 
           WLAN="$KERNEL/drivers/staging/qcacld-3.0"
@@ -90,11 +88,6 @@ jobs:
           echo "REF=$REF" >> "$GITHUB_ENV"
           echo "OUT=$OUT" >> "$GITHUB_ENV"
           echo "WLAN=$WLAN" >> "$GITHUB_ENV"
-
-          echo "KERNEL=$KERNEL"
-          echo "REF=$REF"
-          echo "OUT=$OUT"
-          echo "WLAN=$WLAN"
 
       # ============================================================
       # VERIFY SOURCE
@@ -107,7 +100,6 @@ jobs:
 
           cd "$KERNEL"
 
-          test -d "$WLAN"
           test -f "$WLAN/Kbuild"
 
           test -d \
@@ -123,7 +115,7 @@ jobs:
             "$REF/drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c"
 
           if [ -n "$(git status --porcelain)" ]; then
-            echo "ERROR: Fresh kernel tree is dirty."
+            echo "ERROR: fresh kernel tree is dirty."
             git status --short
             exit 1
           fi
@@ -131,12 +123,10 @@ jobs:
           echo "Source trees verified."
 
       # ============================================================
-      # CONFIGURE KERNEL
-      #
-      # Generated files are written to kernel-out/.
+      # CONFIGURE
       # ============================================================
 
-      - name: Configure and prepare kernel
+      - name: Configure kernel
         shell: bash
         run: |
           set -euxo pipefail
@@ -148,9 +138,7 @@ jobs:
           rm -rf "$OUT"
           mkdir -p "$OUT"
 
-          echo "========================================"
-          echo "DEFCONFIG"
-          echo "========================================"
+          echo "=== DEFCONFIG ==="
 
           make \
             O="$OUT" \
@@ -160,19 +148,13 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             vendor/bengal-perf_defconfig
 
-          test -f "$OUT/.config"
-
-          echo "========================================"
-          echo "ENABLE QCACLD3"
-          echo "========================================"
+          echo "=== ENABLE QCACLD3 MODULE ==="
 
           ./scripts/config \
             --file "$OUT/.config" \
             --module CONFIG_QCA_CLD_WLAN
 
-          echo "========================================"
-          echo "OLDDEFCONFIG"
-          echo "========================================"
+          echo "=== OLDDEFCONFIG ==="
 
           make \
             O="$OUT" \
@@ -182,9 +164,7 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             olddefconfig
 
-          echo "========================================"
-          echo "PREPARE"
-          echo "========================================"
+          echo "=== PREPARE ==="
 
           make \
             O="$OUT" \
@@ -194,9 +174,7 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             prepare
 
-          echo "========================================"
-          echo "MODULES PREPARE"
-          echo "========================================"
+          echo "=== MODULES PREPARE ==="
 
           make \
             O="$OUT" \
@@ -206,47 +184,33 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             modules_prepare
 
-          echo "========================================"
-          echo "VERIFY CONFIG"
-          echo "========================================"
-
           test -f "$OUT/.config"
           test -f "$OUT/include/config/auto.conf"
 
           grep '^CONFIG_QCA_CLD_WLAN=' \
             "$OUT/.config"
 
-          echo
           echo "Kernel preparation successful."
 
       # ============================================================
-      # VERIFY SOURCE TREE
-      #
-      # OUT is now outside the repository, so this should remain clean.
+      # VERIFY SOURCE IS STILL CLEAN
       # ============================================================
 
-      - name: Verify kernel source remains clean
+      - name: Verify clean kernel tree
         shell: bash
         run: |
           set -euxo pipefail
 
           cd "$KERNEL"
 
-          if [ -f ".config" ]; then
-            echo "ERROR: .config exists inside source tree."
-            exit 1
-          fi
+          test ! -f ".config"
+          test ! -d "out"
 
-          if [ -d "out" ]; then
-            echo "ERROR: out/ exists inside source tree."
-            exit 1
-          fi
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "ERROR: kernel source is dirty."
 
-          STATUS="$(git status --porcelain)"
+            git status --short
 
-          if [ -n "$STATUS" ]; then
-            echo "ERROR: Kernel source became dirty:"
-            echo "$STATUS"
             exit 1
           fi
 
@@ -256,7 +220,7 @@ jobs:
       # BACKUP KBUILD
       # ============================================================
 
-      - name: Backup QCACLD3 Kbuild
+      - name: Backup Kbuild
         shell: bash
         run: |
           set -euxo pipefail
@@ -266,7 +230,7 @@ jobs:
             "$WLAN/Kbuild.original"
 
       # ============================================================
-      # IMPORT HEADERS
+      # IMPORT PRODUCTION INJECTION HEADERS
       # ============================================================
 
       - name: Import injection headers
@@ -290,7 +254,7 @@ jobs:
           )
 
           for f in "${HEADERS[@]}"; do
-            echo "IMPORT HEADER: $f"
+            echo "IMPORT: $f"
 
             cp \
               "$REF/drivers/staging/qcacld-3.0/$f" \
@@ -298,7 +262,7 @@ jobs:
           done
 
       # ============================================================
-      # IMPORT SOURCES
+      # IMPORT PRODUCTION INJECTION SOURCES
       # ============================================================
 
       - name: Import injection sources
@@ -316,7 +280,7 @@ jobs:
           )
 
           for f in "${SOURCES[@]}"; do
-            echo "IMPORT SOURCE: $f"
+            echo "IMPORT: $f"
 
             cp \
               "$REF/drivers/staging/qcacld-3.0/$f" \
@@ -327,7 +291,7 @@ jobs:
       # VERIFY IMPORT
       # ============================================================
 
-      - name: Verify imported injection files
+      - name: Verify injection files
         shell: bash
         run: |
           set -euxo pipefail
@@ -364,42 +328,18 @@ jobs:
           fi
 
       # ============================================================
-      # AUDIT IMPORTED INCLUDES
-      # ============================================================
-
-      - name: Audit injection includes
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          mkdir -p reports
-
-          {
-            echo "=== INJECTION INCLUDE AUDIT ==="
-            echo
-
-            for f in \
-              "$WLAN/core/hdd/src/wlan_hdd_frame_inject.c" \
-              "$WLAN/core/hdd/src/wlan_hdd_frame_inject_debug.c" \
-              "$WLAN/core/hdd/src/wlan_hdd_frame_inject_integration.c" \
-              "$WLAN/core/hdd/src/wlan_hdd_frame_validate.c" \
-              "$WLAN/core/hdd/src/wlan_hdd_inject_security.c" \
-              "$WLAN/core/wma/src/wma_frame_inject.c"
-            do
-              echo "========================================"
-              echo "$f"
-              echo "========================================"
-
-              grep -E \
-                '^[[:space:]]*#include[[:space:]]*["<]' \
-                "$f" || true
-
-              echo
-            done
-          } | tee reports/injection-includes.txt
-
-      # ============================================================
       # PATCH KBUILD
+      #
+      # Motorola's Kbuild already knows how to locate:
+      #
+      #   qca-wifi-host-cmn
+      #   fw-api
+      #   qcacld3
+      #
+      # when it runs in KERNEL_BUILD=y mode.
+      #
+      # We therefore add only the injection-specific objects and
+      # headers.
       # ============================================================
 
       - name: Patch QCACLD3 Kbuild
@@ -423,14 +363,14 @@ jobs:
                   "ERROR: $(MODNAME)-y := $(OBJS) not found"
               )
 
-          if "NetHunter QCACLD3 injection prototype" in text:
+          if "NetHunter QCACLD3 injection prototype v16" in text:
               raise SystemExit(
                   "ERROR: Kbuild already patched"
               )
 
           block = r'''
           # ==========================================================
-          # NetHunter QCACLD3 injection prototype
+          # NetHunter QCACLD3 injection prototype v16
           # ==========================================================
 
           OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o
@@ -442,9 +382,16 @@ jobs:
 
           ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT
 
-          ccflags-y += -I$(src)/core/hdd/inc
-          ccflags-y += -I$(src)/core/hdd/src
-          ccflags-y += -I$(src)/core/wma/inc
+          ccflags-y += -I$(srctree)/drivers/staging/qcacld-3.0/core/hdd/inc
+          ccflags-y += -I$(srctree)/drivers/staging/qcacld-3.0/core/hdd/src
+          ccflags-y += -I$(srctree)/drivers/staging/qcacld-3.0/core/wma/inc
+
+          # QDF include roots.
+          ccflags-y += -I$(srctree)/drivers/staging/qca-wifi-host-cmn/qdf/inc
+          ccflags-y += -I$(srctree)/drivers/staging/qca-wifi-host-cmn/qdf/linux/src
+
+          # Qualcomm common utility headers.
+          ccflags-y += -I$(srctree)/drivers/staging/qca-wifi-host-cmn/utils/sys
 
           '''
 
@@ -460,16 +407,16 @@ jobs:
           echo "=== PATCHED KBUILD ==="
 
           grep -n \
-            -A25 \
+            -A30 \
             -B3 \
-            "NetHunter QCACLD3 injection prototype" \
+            "NetHunter QCACLD3 injection prototype v16" \
             "$WLAN/Kbuild"
 
       # ============================================================
       # VERIFY KBUILD
       # ============================================================
 
-      - name: Verify patched Kbuild
+      - name: Verify Kbuild
         shell: bash
         run: |
           set -euxo pipefail
@@ -482,8 +429,9 @@ jobs:
             "wlan_hdd_inject_security.o"
             "wma_frame_inject.o"
             "FEATURE_FRAME_INJECTION_SUPPORT"
-            "core/hdd/inc"
-            "core/wma/inc"
+            "qca-wifi-host-cmn/qdf/inc"
+            "qca-wifi-host-cmn/qdf/linux/src"
+            "qca-wifi-host-cmn/utils/sys"
           )
 
           for item in "${REQUIRED[@]}"; do
@@ -493,7 +441,46 @@ jobs:
           echo "Kbuild verified."
 
       # ============================================================
+      # VERIFY QDF DEPENDENCIES
+      # ============================================================
+
+      - name: Verify QDF dependency tree
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          QDF="$KERNEL/drivers/staging/qca-wifi-host-cmn"
+
+          test -f "$QDF/qdf/inc/qdf_nbuf.h"
+          test -f "$QDF/qdf/linux/src/i_qdf_mem.h"
+          test -f "$QDF/utils/sys/queue.h"
+
+          echo "QDF headers verified."
+
+          echo
+          echo "qdf_nbuf.h:"
+          readlink -f "$QDF/qdf/inc/qdf_nbuf.h"
+
+          echo
+          echo "i_qdf_mem.h:"
+          readlink -f "$QDF/qdf/linux/src/i_qdf_mem.h"
+
+          echo
+          echo "queue.h:"
+          readlink -f "$QDF/utils/sys/queue.h"
+
+      # ============================================================
       # BUILD QCACLD3
+      #
+      # IMPORTANT:
+      #
+      # NO MODNAME
+      # NO WLAN_ROOT
+      # NO WLAN_COMMON_ROOT
+      # NO WLAN_FW_API
+      #
+      # This allows Motorola's Kbuild to enter KERNEL_BUILD=y mode
+      # and establish its own internal paths.
       # ============================================================
 
       - name: Build QCACLD3
@@ -507,6 +494,8 @@ jobs:
 
           mkdir -p "$GITHUB_WORKSPACE/reports"
 
+          echo "=== BUILDING QCACLD3 IN KERNEL CONTEXT ==="
+
           make \
             O="$OUT" \
             ARCH=arm64 \
@@ -515,15 +504,6 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             V=1 \
             M=drivers/staging/qcacld-3.0 \
-            WLAN_ROOT=drivers/staging/qcacld-3.0 \
-            WLAN_COMMON_ROOT=drivers/staging/qca-wifi-host-cmn \
-            WLAN_COMMON_INC=drivers/staging/qca-wifi-host-cmn \
-            WLAN_FW_API=drivers/staging/fw-api \
-            WLAN_PROFILE=default \
-            DYNAMIC_SINGLE_CHIP= \
-            MODNAME=wlan \
-            BOARD_PLATFORM=bengal \
-            CONFIG_QCA_CLD_WLAN=m \
             modules \
             2>&1 | tee \
             "$GITHUB_WORKSPACE/reports/build.log"
@@ -533,12 +513,13 @@ jobs:
           echo "$RC" > \
             "$GITHUB_WORKSPACE/reports/build-exit-code.txt"
 
+          echo
           echo "QCACLD3 build exit code: $RC"
 
           exit 0
 
       # ============================================================
-      # COMPILATION DIAGNOSTICS
+      # EXTRACT ACTUAL COMPILATION
       # ============================================================
 
       - name: Extract injection compilation
@@ -550,27 +531,30 @@ jobs:
           mkdir -p reports
 
           {
-            echo "=== INJECTION COMPILATION ==="
+            echo "=== INJECTION COMPILATION COMMANDS ==="
             echo
 
             if [ -f reports/build.log ]; then
+
               grep -E \
                 'wlan_hdd_frame_inject\.o|wlan_hdd_frame_inject_debug\.o|wlan_hdd_frame_inject_integration\.o|wlan_hdd_frame_validate\.o|wlan_hdd_inject_security\.o|wma_frame_inject\.o' \
                 reports/build.log || true
 
               echo
-              echo "=== ERRORS ==="
+              echo "=== COMPILER ERRORS ==="
 
               grep -E \
                 'fatal error:|error:|undefined reference|No rule to make|recipe for target' \
                 reports/build.log || true
+
             else
-              echo "build.log does not exist."
+              echo "build.log not found."
             fi
+
           } | tee reports/injection-compile-results.txt
 
       # ============================================================
-      # OBJECT VERIFICATION
+      # VERIFY OBJECTS
       # ============================================================
 
       - name: Verify injection objects
@@ -580,7 +564,7 @@ jobs:
           set +e
 
           {
-            echo "=== OBJECT VERIFICATION ==="
+            echo "=== INJECTION OBJECTS ==="
             echo
 
             OBJECTS=(
@@ -618,7 +602,7 @@ jobs:
           exit 0
 
       # ============================================================
-      # MODULE INSPECTION
+      # MODULE SYMBOLS
       # ============================================================
 
       - name: Inspect WLAN module
@@ -632,7 +616,7 @@ jobs:
           MOD="$OUT/drivers/staging/qcacld-3.0/wlan.ko"
 
           {
-            echo "=== WLAN MODULE INSPECTION ==="
+            echo "=== MODULE INSPECTION ==="
             echo
 
             if [ -f "$MOD" ]; then
@@ -653,7 +637,7 @@ jobs:
                 || true
 
             else
-              echo "wlan.ko was not generated."
+              echo "wlan.ko not generated."
             fi
 
           } | tee reports/module-symbols.txt
@@ -662,7 +646,7 @@ jobs:
       # CONCLUSION
       # ============================================================
 
-      - name: Generate prototype conclusion
+      - name: Generate conclusion
         if: always()
         shell: bash
         run: |
@@ -670,17 +654,17 @@ jobs:
 
           mkdir -p reports
 
-          BUILD_RC="unknown"
+          RC="unknown"
 
           if [ -f reports/build-exit-code.txt ]; then
-            BUILD_RC="$(cat reports/build-exit-code.txt)"
+            RC="$(cat reports/build-exit-code.txt)"
           fi
 
           {
-            echo "QCACLD3 Injection Prototype v15"
+            echo "QCACLD3 Injection Prototype v16"
             echo "================================"
             echo
-            echo "Build exit code: ${BUILD_RC}"
+            echo "Build exit code: $RC"
             echo
             echo "Target:"
             echo "LineageOS android_kernel_motorola_sm6225"
@@ -690,7 +674,13 @@ jobs:
             echo "V0lk3n/nethunter_kernel_oneplus_sm8150"
             echo "branch: nethunter-lineage-23.2"
             echo
-            echo "Imported production components:"
+            echo "Build mode:"
+            echo "Motorola QCACLD3 kernel-build context"
+            echo
+            echo "External MODNAME/WLAN_ROOT overrides:"
+            echo "DISABLED"
+            echo
+            echo "Injected production components:"
             echo "  wlan_hdd_frame_inject"
             echo "  wlan_hdd_frame_inject_debug"
             echo "  wlan_hdd_frame_inject_integration"
@@ -698,8 +688,13 @@ jobs:
             echo "  wlan_hdd_inject_security"
             echo "  wma_frame_inject"
             echo
-            echo "This is a source compatibility prototype."
-            echo "It does not establish firmware-level injection support."
+            echo "QDF include roots:"
+            echo "  qdf/inc"
+            echo "  qdf/linux/src"
+            echo "  utils/sys"
+            echo
+            echo "This is a source compatibility test."
+            echo "It does not establish firmware-level packet injection."
           } | tee reports/conclusion.txt
 
       # ============================================================
@@ -765,20 +760,20 @@ jobs:
           cd prototype-report
 
           zip -r \
-            ../qcacld3-injection-prototype-v15.zip \
+            ../qcacld3-injection-prototype-v16.zip \
             . >/dev/null
 
           ls -lh \
-            ../qcacld3-injection-prototype-v15.zip
+            ../qcacld3-injection-prototype-v16.zip
 
       # ============================================================
       # UPLOAD
       # ============================================================
 
-      - name: Upload prototype report
+      - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: qcacld3-injection-prototype-v15
-          path: qcacld3-injection-prototype-v15.zip
+          name: qcacld3-injection-prototype-v16
+          path: qcacld3-injection-prototype-v16.zip
           if-no-files-found: error
