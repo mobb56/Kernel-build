@@ -1045,7 +1045,7 @@ jobs:
       - name: Build kernel and modules
         shell: bash
         run: |
-          set -o pipefail
+          set +e
 
           cd kernel
 
@@ -1053,11 +1053,28 @@ jobs:
 
           BUILD_LOG="${GITHUB_WORKSPACE}/kernel-build.log"
 
-          echo "============================================================"
-          echo "STARTING KERNEL BUILD"
-          echo "============================================================"
+          rm -f "${BUILD_LOG}"
 
-          make -j2 \
+          echo "=================================================="
+          echo "STARTING KERNEL BUILD"
+          echo "=================================================="
+
+          echo
+          echo "Using:"
+          echo "LLVM_DIR=${LLVM_DIR}"
+          echo "ARCH=${ARCH}"
+          echo "CROSS_COMPILE=${CROSS_COMPILE}"
+          echo "OUT_DIR=${OUT_DIR}"
+          echo
+
+          # ----------------------------------------------------------
+          # Build Image first, serially.
+          #
+          # -j1 is intentional here. It makes the FIRST real compiler
+          # error visible instead of burying it among parallel jobs.
+          # ----------------------------------------------------------
+
+          make -j1 \
             O="${OUT_DIR}" \
             ARCH="${ARCH}" \
             LLVM=1 \
@@ -1065,86 +1082,115 @@ jobs:
             CROSS_COMPILE="${CROSS_COMPILE}" \
             V=1 \
             Image \
-            modules \
             2>&1 | tee "${BUILD_LOG}"
 
-          BUILD_STATUS="${PIPESTATUS[0]}"
+          IMAGE_STATUS="${PIPESTATUS[0]}"
 
-          if [ "${BUILD_STATUS}" -ne 0 ]; then
+          echo
+          echo "Image build status: ${IMAGE_STATUS}"
+
+          if [ "${IMAGE_STATUS}" -ne 0 ]; then
+
             echo
-            echo "============================================================"
-            echo "KERNEL BUILD FAILED"
-            echo "============================================================"
+            echo "=================================================="
+            echo "KERNEL IMAGE BUILD FAILED"
+            echo "=================================================="
+
             echo
-            echo "Searching for the FIRST useful compiler/linker error..."
-            echo
+            echo "FIRST COMPILER/LINKER ERRORS:"
+            echo "--------------------------------------------------"
 
             grep -nEi \
-              '(^|[[:space:]])(error:|fatal error:|undefined reference|undefined!|No such file|not found|failed|Error [0-9]+)' \
+              '(^|[[:space:]])(error:|fatal error:|undefined reference|No such file|not found|implicit declaration|undeclared|incompatible|unknown type|invalid|failed|Error [0-9]+)' \
               "${BUILD_LOG}" \
-              | head -80 || true
+              | head -100 || true
 
             echo
-            echo "============================================================"
-            echo "LAST 150 BUILD LINES"
-            echo "============================================================"
+            echo "=================================================="
+            echo "QCACLD3 BUILD ERRORS"
+            echo "=================================================="
 
-            tail -150 "${BUILD_LOG}"
+            grep -nEi \
+              'qcacld-3\.0|wlan_hdd_frame_inject|wlan_hdd_frame_validate|wlan_hdd_inject_security|wlan_hdd_frame_inject_debug|wma_frame_inject' \
+              "${BUILD_LOG}" \
+              | tail -200 || true
 
             echo
-            echo "============================================================"
-            echo "BUILD STATUS: ${BUILD_STATUS}"
-            echo "============================================================"
+            echo "=================================================="
+            echo "LAST 300 BUILD LINES"
+            echo "=================================================="
 
-            exit "${BUILD_STATUS}"
+            tail -300 "${BUILD_LOG}" || true
+
+            exit "${IMAGE_STATUS}"
           fi
 
           echo
-          echo "============================================================"
-          echo "KERNEL BUILD SUCCESSFUL"
-          echo "============================================================"
+          echo "=================================================="
+          echo "IMAGE BUILD SUCCESSFUL"
+          echo "=================================================="
 
-                - name: Diagnose build result
-           if: failure()
-          shell: bash
-          run: |
-          set +e
+          # ----------------------------------------------------------
+          # Modules are built separately so a module failure cannot
+          # obscure an Image failure.
+          # ----------------------------------------------------------
 
-          echo "============================================================"
-          echo "BUILD DIAGNOSTIC"
-          echo "============================================================"
+          make -j1 \
+            O="${OUT_DIR}" \
+            ARCH="${ARCH}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            V=1 \
+            modules \
+            2>&1 | tee -a "${BUILD_LOG}"
 
-          if [ ! -f kernel-build.log ]; then
-            echo "kernel-build.log does not exist."
-            exit 0
+          MODULE_STATUS="${PIPESTATUS[0]}"
+
+          echo
+          echo "Module build status: ${MODULE_STATUS}"
+
+          if [ "${MODULE_STATUS}" -ne 0 ]; then
+
+            echo
+            echo "=================================================="
+            echo "MODULE BUILD FAILED"
+            echo "=================================================="
+
+            echo
+            echo "FIRST COMPILER/LINKER ERRORS:"
+            echo "--------------------------------------------------"
+
+            grep -nEi \
+              '(^|[[:space:]])(error:|fatal error:|undefined reference|No such file|not found|implicit declaration|undeclared|incompatible|unknown type|invalid|failed|Error [0-9]+)' \
+              "${BUILD_LOG}" \
+              | tail -100 || true
+
+            echo
+            echo "=================================================="
+            echo "QCACLD3 BUILD ERRORS"
+            echo "=================================================="
+
+            grep -nEi \
+              'qcacld-3\.0|wlan_hdd_frame_inject|wlan_hdd_frame_validate|wlan_hdd_inject_security|wlan_hdd_frame_inject_debug|wma_frame_inject' \
+              "${BUILD_LOG}" \
+              | tail -250 || true
+
+            echo
+            echo "=================================================="
+            echo "LAST 400 BUILD LINES"
+            echo "=================================================="
+
+            tail -400 "${BUILD_LOG}" || true
+
+            exit "${MODULE_STATUS}"
           fi
 
           echo
-          echo "Potential errors:"
-          echo
-
-          grep -nEi \
-            'error:|fatal error:|undefined reference|undefined!|No such file|not found|failed|Error [0-9]+' \
-            kernel-build.log \
-            | head -100 || true
-
-          echo
-          echo "============================================================"
-          echo "QCACLD3 BUILD LINES"
-          echo "============================================================"
-
-          grep -n \
-            'qcacld-3.0\|wlan_hdd_frame_inject\|wlan_hdd_frame_validate\|wlan_hdd_inject_security\|wlan_hdd_frame_inject_debug\|wma_frame_inject' \
-            kernel-build.log \
-            | tail -150 || true
-
-          echo
-          echo "============================================================"
-          echo "FINAL BUILD LINES"
-          echo "============================================================"
-
-          tail -200 kernel-build.log
-      
+          echo "=================================================="
+          echo "KERNEL IMAGE + MODULE BUILD SUCCESSFUL"
+          echo "=================================================="
+        
 
       # ============================================================
       # 20. VERIFY RELEASE
