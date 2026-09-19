@@ -193,18 +193,21 @@ jobs:
             "$SRC/core/hdd/inc/wlan_hdd_frame_inject.h" \
             "$QCACLD/core/hdd/src/"
 
+          
+          cp "$SRC/core/hdd/inc/wlan_hdd_frame_validate.h" \
+            "$QCACLD/core/hdd/src/"
+
           cp \
             "$SRC/core/hdd/src/wlan_hdd_frame_inject.c" \
             "$QCACLD/core/hdd/src/"
 
-          cp "$SRC/core/hdd/inc/wlan_hdd_frame_validate.h" \
-            "$QCACLD/core/hdd/src/"
          
 
           echo "Imported:"
           ls -lh \
-            "$QCACLD/core/hdd/src/wlan_hdd_frame_inject.h" \
-            "$QCACLD/core/hdd/src/wlan_hdd_frame_inject.c"
+          "$QCACLD/core/hdd/src/wlan_hdd_frame_inject.h" \
+          "$QCACLD/core/hdd/src/wlan_hdd_frame_validate.h" \
+          "$QCACLD/core/hdd/src/wlan_hdd_frame_inject.c"
 
       # ------------------------------------------------------------
       # STEP 5: Temporarily add ONE object
