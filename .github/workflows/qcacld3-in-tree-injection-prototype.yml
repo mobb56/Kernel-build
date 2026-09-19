@@ -205,6 +205,10 @@ jobs:
             "$SRC/core/hdd/inc/wlan_hdd_frame_inject_debug.h" \
             "$QCACLD/core/hdd/src/"
 
+                      cp \
+            "$SRC/core/wma/inc/wma_frame_inject.h" \
+            "$QCACLD/core/hdd/src/"
+
           cp \
             "$SRC/core/hdd/src/wlan_hdd_frame_inject.c" \
             "$QCACLD/core/hdd/src/"
@@ -217,6 +221,7 @@ jobs:
           "$QCACLD/core/hdd/src/wlan_hdd_frame_validate.h" \
           "$QCACLD/core/hdd/src/wlan_hdd_inject_security.h" \
           "$QCACLD/core/hdd/src/wlan_hdd_frame_inject_debug.h" \
+          "$QCACLD/core/hdd/src/wma_frame_inject.h" \
           "$QCACLD/core/hdd/src/wlan_hdd_frame_inject.c"
 
       # ------------------------------------------------------------
