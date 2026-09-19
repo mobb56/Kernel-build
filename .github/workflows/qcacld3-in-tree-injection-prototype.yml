@@ -161,14 +161,18 @@ jobs:
           set -eux
 
           mkdir -p \
-            drivers/staging/qcacld-3.0/core/hdd/inc \
-            drivers/staging/qcacld-3.0/core/hdd/src \
-            drivers/staging/qcacld-3.0/core/wma/inc \
-            drivers/staging/qcacld-3.0/core/wma/src
+          drivers/staging/qcacld-3.0/core/hdd/inc \
+          drivers/staging/qcacld-3.0/core/hdd/src \
+          drivers/staging/qcacld-3.0/core/wma/inc \
+          drivers/staging/qcacld-3.0/core/wma/src
+
+           cp \
+          "$REFERENCE/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h" \
+           drivers/staging/qcacld-3.0/core/hdd/inc/
 
           cp \
-            "$REFERENCE/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h" \
-            drivers/staging/qcacld-3.0/core/hdd/inc/
+           "$REFERENCE/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h" \
+            drivers/staging/qcacld-3.0/core/hdd/src/
 
           cp \
             "$REFERENCE/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_validate.h" \
