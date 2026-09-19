@@ -224,6 +224,29 @@ jobs:
           "$QCACLD/core/hdd/src/wma_frame_inject.h" \
           "$QCACLD/core/hdd/src/wlan_hdd_frame_inject.c"
 
+          
+          - name: Import remaining injection sources
+          working-directory: ${{ env.KERNEL }}
+          run: |
+            set -eux
+
+            cp "$GITHUB_WORKSPACE/reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_validate.c" \
+              drivers/staging/qcacld-3.0/core/hdd/src/
+
+            cp "$GITHUB_WORKSPACE/reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c" \
+              drivers/staging/qcacld-3.0/core/hdd/src/
+
+            cp "$GITHUB_WORKSPACE/reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c" \
+              drivers/staging/qcacld-3.0/core/hdd/src/
+
+            cp "$GITHUB_WORKSPACE/reference/drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c" \
+              drivers/staging/qcacld-3.0/core/wma/src/
+
+                        echo "Imported injection implementation sources:"
+            ls -l \
+              drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_*.c \
+              drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c \
+              drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c
 
       - name: Add injection context to hdd_adapter
         working-directory: ${{ env.KERNEL }}
