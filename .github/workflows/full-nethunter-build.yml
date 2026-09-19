@@ -1,11 +1,11 @@
-name: Moto G9 Power cebu NetHunter Kernel
+name: Build cebu NetHunter Kernel
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build cebu NetHunter kernel
+    name: Moto G9 Power cebu NetHunter
     runs-on: ubuntu-22.04
     timeout-minutes: 180
 
@@ -23,7 +23,7 @@ jobs:
     steps:
 
       # ============================================================
-      # HOST TOOLS
+      # 1. DEPENDENCIES
       # ============================================================
 
       - name: Install build dependencies
@@ -59,10 +59,10 @@ jobs:
           aarch64-linux-gnu-gcc --version
 
       # ============================================================
-      # SOURCE
+      # 2. MOTOROLA / LINEAGEOS KERNEL
       # ============================================================
 
-      - name: Clone Motorola LineageOS kernel
+      - name: Clone Motorola kernel
         run: |
           set -eux
 
@@ -71,6 +71,10 @@ jobs:
             --branch lineage-23.2 \
             https://github.com/LineageOS/android_kernel_motorola_sm6225.git \
             "$KERNEL"
+
+      # ============================================================
+      # 3. NETHUNTER REFERENCE
+      # ============================================================
 
       - name: Clone NetHunter QCACLD3 reference
         run: |
@@ -82,6 +86,10 @@ jobs:
             https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git \
             "$REF"
 
+      # ============================================================
+      # 4. ANYKERNEL3
+      # ============================================================
+
       - name: Clone AnyKernel3
         run: |
           set -eux
@@ -92,7 +100,7 @@ jobs:
             "$AK3"
 
       # ============================================================
-      # SOURCE VERIFICATION
+      # 5. VERIFY SOURCES
       # ============================================================
 
       - name: Verify source trees
@@ -102,7 +110,6 @@ jobs:
           echo "===== MOTOROLA SOURCE ====="
 
           test -f "$KERNEL/Makefile"
-          test -f "$KERNEL/arch/arm64/Makefile"
 
           test -f \
             "$KERNEL/arch/arm64/configs/vendor/bengal-perf_defconfig"
@@ -141,13 +148,8 @@ jobs:
 
           echo "NetHunter reference OK."
 
-          echo
-          echo "========================================"
-          echo "SOURCE VERIFICATION PASSED"
-          echo "========================================"
-
       # ============================================================
-      # LLVM
+      # 6. LLVM
       # ============================================================
 
       - name: Configure LLVM 14
@@ -157,10 +159,10 @@ jobs:
           echo "/usr/lib/llvm-14/bin" >> "$GITHUB_PATH"
 
       # ============================================================
-      # CLEAN OUT-OF-TREE BUILD
+      # 7. CLEAN BUILD OUTPUT
       # ============================================================
 
-      - name: Prepare clean output
+      - name: Prepare output
         run: |
           set -eux
 
@@ -169,10 +171,10 @@ jobs:
           mkdir -p "$OUT"
 
       # ============================================================
-      # BASE DEFCONFIG
+      # 8. BASE CONFIGURATION
       # ============================================================
 
-      - name: Generate Motorola base configuration
+      - name: Generate base configuration
         run: |
           set -eux
 
@@ -187,33 +189,33 @@ jobs:
             vendor/bengal-perf_defconfig
 
       # ============================================================
-      # NETHUNTER CONFIG
+      # 9. NETHUNTER CONFIG
       # ============================================================
 
-      - name: Create NetHunter config
+      - name: Create NetHunter configuration
         run: |
           set -eux
 
           cat > "$GITHUB_WORKSPACE/nethunter.config" <<'EOF'
 
-          # --------------------------------------------------------
-          # MODULE SUPPORT
-          # --------------------------------------------------------
+          # ========================================================
+          # MODULES
+          # ========================================================
 
           CONFIG_MODULES=y
           CONFIG_MODULE_UNLOAD=y
           CONFIG_MODVERSIONS=y
 
-          # --------------------------------------------------------
+          # ========================================================
           # HID
-          # --------------------------------------------------------
+          # ========================================================
 
           CONFIG_HIDRAW=y
           CONFIG_UHID=y
 
-          # --------------------------------------------------------
+          # ========================================================
           # BLUETOOTH
-          # --------------------------------------------------------
+          # ========================================================
 
           CONFIG_BT=y
           CONFIG_BT_BREDR=y
@@ -237,9 +239,9 @@ jobs:
           CONFIG_BT_HCIBTUSB_BCM=y
           CONFIG_BT_HCIBTUSB_RTL=y
 
-          # --------------------------------------------------------
+          # ========================================================
           # USB GADGET
-          # --------------------------------------------------------
+          # ========================================================
 
           CONFIG_USB_GADGET=y
           CONFIG_USB_CONFIGFS=y
@@ -254,17 +256,17 @@ jobs:
           CONFIG_USB_CONFIGFS_F_HID=y
           CONFIG_USB_CONFIGFS_MASS_STORAGE=y
 
-          # --------------------------------------------------------
+          # ========================================================
           # USB SERIAL
-          # --------------------------------------------------------
+          # ========================================================
 
           CONFIG_USB_ACM=m
           CONFIG_USB_SERIAL=m
           CONFIG_USB_SERIAL_GENERIC=m
 
-          # --------------------------------------------------------
+          # ========================================================
           # USB NETWORKING
-          # --------------------------------------------------------
+          # ========================================================
 
           CONFIG_USB_NET_DRIVERS=m
           CONFIG_USB_NET_CDCETHER=m
@@ -274,28 +276,25 @@ jobs:
           CONFIG_USB_RTL8150=y
           CONFIG_USB_RTL8152=y
 
-          # --------------------------------------------------------
-          # PACKET / NETWORK
-          # --------------------------------------------------------
+          # ========================================================
+          # NETWORK
+          # ========================================================
 
           CONFIG_PACKET=y
           CONFIG_UNIX=y
 
-          # --------------------------------------------------------
-          # MONITOR MODE
-          # --------------------------------------------------------
-
-          CONFIG_FEATURE_MONITOR_MODE_SUPPORT=y
-
-          # --------------------------------------------------------
-          # QCACLD3
-          # --------------------------------------------------------
+          # ========================================================
+          # WLAN
+          # ========================================================
 
           CONFIG_QCA_CLD_WLAN=m
 
-          # --------------------------------------------------------
+          # Existing Motorola monitor-mode support
+          CONFIG_FEATURE_MONITOR_MODE_SUPPORT=y
+
+          # ========================================================
           # SENSOR COMPATIBILITY
-          # --------------------------------------------------------
+          # ========================================================
 
           CONFIG_SENSORS_SSC=y
           CONFIG_SENSORS_CLASS=m
@@ -303,7 +302,7 @@ jobs:
           EOF
 
       # ============================================================
-      # MERGE CONFIG
+      # 10. MERGE CONFIG
       # ============================================================
 
       - name: Merge NetHunter configuration
@@ -327,14 +326,14 @@ jobs:
             olddefconfig
 
       # ============================================================
-      # CONFIG CHECK
+      # 11. VERIFY CONFIG
       # ============================================================
 
-      - name: Verify final kernel configuration
+      - name: Verify important configuration
         run: |
           set -eux
 
-          echo "===== FINAL CONFIGURATION ====="
+          echo "===== CONFIGURATION ====="
 
           for CONFIG in \
             CONFIG_MODULES \
@@ -353,10 +352,13 @@ jobs:
             CONFIG_USB_GADGET \
             CONFIG_USB_CONFIGFS \
             CONFIG_USB_CONFIGFS_NCM \
+            CONFIG_USB_CONFIGFS_RNDIS \
+            CONFIG_USB_CONFIGFS_ECM \
             CONFIG_USB_CONFIGFS_F_HID \
             CONFIG_USB_CONFIGFS_F_FS \
             CONFIG_USB_RTL8150 \
             CONFIG_USB_RTL8152 \
+            CONFIG_USB_SERIAL \
             CONFIG_QCA_CLD_WLAN \
             CONFIG_FEATURE_MONITOR_MODE_SUPPORT \
             CONFIG_SENSORS_SSC \
@@ -366,7 +368,7 @@ jobs:
           done
 
       # ============================================================
-      # IMPORT NETHUNTER INJECTION SOURCES
+      # 12. IMPORT INJECTION SOURCES
       # ============================================================
 
       - name: Import QCACLD3 injection framework
@@ -431,13 +433,13 @@ jobs:
             "$REF_WMA_INC/wma_frame_inject.h" \
             "$WMA_INC/"
 
-          echo "Injection framework imported."
+          echo "Injection sources imported."
 
       # ============================================================
-      # ADD INJECTION CONTEXT TO MOTOROLA HDD ADAPTER
+      # 13. ADD injection_ctx
       # ============================================================
 
-      - name: Adapt Motorola HDD adapter
+      - name: Add injection context to Motorola HDD
         run: |
           set -eux
 
@@ -477,10 +479,10 @@ jobs:
           PY
 
       # ============================================================
-      # FIX get_task_cred
+      # 14. ROBUST get_task_cred FIX
       # ============================================================
 
-      - name: Fix QCACLD3 credential compatibility
+      - name: Fix get_task_cred compatibility
         run: |
           set -eux
 
@@ -488,63 +490,70 @@ jobs:
 
           python3 - "$SECURITY" <<'PY'
           import sys
+          import re
           from pathlib import Path
 
           p = Path(sys.argv[1])
           s = p.read_text()
 
-          old = """\tconst struct cred *cred;
-          \tbool has_capability = false;
-
-          \thdd_security_debug("Checking injection capabilities");
-          \t/* Use current task if none specified */
-          \tif (!task)
-          \t\ttask = current;
-
-          \t/* Get task credentials */
-          \tcred = get_task_cred(task);
-          \tif (!cred) {
-          \t\thdd_security_err("Failed to get task credentials");
-          \t\treturn QDF_STATUS_E_FAILURE;
-          \t}
-
-          \t/* Check for CAP_NET_RAW capability */
-          \thas_capability = capable(CAP_NET_RAW);
-
-          \tput_cred(cred);"""
-
-          new = """\tbool has_capability = false;
-
-          \thdd_security_debug("Checking injection capabilities");
-
-          \t/* Use current task if none specified */
-          \tif (!task)
-          \t\ttask = current;
-
-          /*
-           * Motorola's 4.19 kernel does not export get_task_cred()
-           * for loadable modules.
-           *
-           * The reference implementation performs the actual
-           * authorization check with capable(CAP_NET_RAW).
-           * The current caller passes NULL, so current is used.
-           */
-          \thas_capability = capable(CAP_NET_RAW);"""
-
           if "get_task_cred(" not in s:
-              print("get_task_cred already absent.")
+              print("get_task_cred is already absent.")
               raise SystemExit(0)
 
-          if old not in s:
+          # Remove the credential declaration.
+          s, n1 = re.subn(
+              r'^[ \t]*const[ \t]+struct[ \t]+cred[ \t]+\*[ \t]*cred[ \t]*;[ \t]*\n',
+              '',
+              s,
+              count=1,
+              flags=re.MULTILINE
+          )
+
+          # Remove the get_task_cred() acquisition block.
+          s, n2 = re.subn(
+              r'[ \t]*/\*[ \t]*Get task credentials[ \t]*\*/[ \t]*\n'
+              r'[ \t]*cred[ \t]*=[ \t]*get_task_cred\(task\);[ \t]*\n'
+              r'[ \t]*if[ \t]*\(!cred\)[ \t]*\{[ \t]*\n'
+              r'[ \t]*hdd_security_err\("Failed to get task credentials"\);[ \t]*\n'
+              r'[ \t]*return[ \t]+QDF_STATUS_E_FAILURE;[ \t]*\n'
+              r'[ \t]*\}[ \t]*\n',
+              '',
+              s,
+              count=1
+          )
+
+          # Remove the matching put_cred().
+          s, n3 = re.subn(
+              r'^[ \t]*put_cred\(cred\);[ \t]*\n',
+              '',
+              s,
+              count=1,
+              flags=re.MULTILINE
+          )
+
+          if n1 != 1:
               raise SystemExit(
-                  "Expected get_task_cred block was not found."
+                  "Could not remove cred declaration."
               )
 
-          s = s.replace(old, new, 1)
+          if n2 != 1:
+              raise SystemExit(
+                  "Could not remove get_task_cred block."
+              )
+
+          if n3 != 1:
+              raise SystemExit(
+                  "Could not remove put_cred."
+              )
 
           if "get_task_cred(" in s:
               raise SystemExit(
-                  "get_task_cred remains after patch."
+                  "get_task_cred still remains."
+              )
+
+          if "capable(CAP_NET_RAW)" not in s:
+              raise SystemExit(
+                  "CAP_NET_RAW check disappeared unexpectedly."
               )
 
           p.write_text(s)
@@ -552,11 +561,30 @@ jobs:
           print("get_task_cred compatibility fix applied.")
           PY
 
+          echo
+          echo "===== SECURITY CHECK ====="
+
+          grep -n \
+            -A30 \
+            -B5 \
+            "hdd_check_injection_capability" \
+            "$SECURITY"
+
+          if grep -n \
+            "get_task_cred(" \
+            "$SECURITY"
+          then
+            echo "ERROR: get_task_cred remains"
+            exit 1
+          fi
+
+          echo "PASS: get_task_cred removed."
+
       # ============================================================
-      # PATCH HDD MAIN.C
+      # 15. INTEGRATE INJECTION INTO wlan_hdd_main.c
       # ============================================================
 
-      - name: Integrate injection lifecycle into HDD
+      - name: Integrate injection lifecycle
         run: |
           set -eux
 
@@ -570,55 +598,36 @@ jobs:
           s = p.read_text()
 
           # --------------------------------------------------------
-          # Include wma_frame_inject.h
+          # Include injection header after existing RX monitor header.
           # --------------------------------------------------------
 
-          if '#include "wma_frame_inject.h"' not in s:
-              marker = '#include "wma.h"'
+          include_marker = '#include "wlan_hdd_rx_monitor.h"'
+          include_line = '#include "wlan_hdd_frame_inject.h"'
 
-              if marker not in s:
+          if include_line not in s:
+              if include_marker not in s:
                   raise SystemExit(
-                      "Could not find wma.h include"
+                      "wlan_hdd_rx_monitor.h include not found"
                   )
 
               s = s.replace(
-                  marker,
-                  marker + '\n#include "wma_frame_inject.h"',
+                  include_marker,
+                  include_marker +
+                  '\n#ifdef FEATURE_FRAME_INJECTION_SUPPORT\n' +
+                  include_line +
+                  '\n#endif',
                   1
               )
 
           # --------------------------------------------------------
-          # Include frame injection API
+          # Initialize injection.
           # --------------------------------------------------------
 
-          if '#include "wlan_hdd_frame_inject.h"' not in s:
-              marker = '#include "wlan_hdd_rx_monitor.h"'
+          init_marker = "\thdd_periodic_sta_stats_init(adapter);\n\n\treturn adapter;"
 
-              if marker not in s:
-                  raise SystemExit(
-                      "Could not find wlan_hdd_rx_monitor.h"
-                  )
-
-              block = '''#include "wlan_hdd_rx_monitor.h"
-          #ifdef FEATURE_FRAME_INJECTION_SUPPORT
-          #include "wlan_hdd_frame_inject.h"
-          #include "wlan_hdd_frame_inject_debug.h"
-          #endif'''
-
-              s = s.replace(marker, block, 1)
-
-          # --------------------------------------------------------
-          # Initialize injection when adapter is created
-          # --------------------------------------------------------
-
-          init_marker = """\thdd_periodic_sta_stats_init(adapter);
-
-          \treturn adapter;"""
-
-          init_replacement = """\thdd_periodic_sta_stats_init(adapter);
+          init_block = """\thdd_periodic_sta_stats_init(adapter);
 
           #ifdef FEATURE_FRAME_INJECTION_SUPPORT
-          \t/* Initialize frame injection for this adapter. */
           \tif (QDF_STATUS_SUCCESS != hdd_init_frame_injection(adapter))
           \t\thdd_err("Failed to initialize frame injection");
           #endif
@@ -628,26 +637,25 @@ jobs:
           if "hdd_init_frame_injection(adapter)" not in s:
               if init_marker not in s:
                   raise SystemExit(
-                      "Could not find HDD adapter initialization marker"
+                      "HDD adapter initialization marker not found"
                   )
 
               s = s.replace(
                   init_marker,
-                  init_replacement,
+                  init_block,
                   1
               )
 
           # --------------------------------------------------------
-          # Deinitialize injection before adapter cleanup
+          # Deinitialize injection.
           # --------------------------------------------------------
 
           close_marker = """\thdd_adapter_feature_update_work_deinit(adapter);
           \thdd_cleanup_adapter(hdd_ctx, adapter, rtnl_held);"""
 
-          close_replacement = """\thdd_adapter_feature_update_work_deinit(adapter);
+          close_block = """\thdd_adapter_feature_update_work_deinit(adapter);
 
           #ifdef FEATURE_FRAME_INJECTION_SUPPORT
-          \t/* Cleanup frame injection before destroying adapter. */
           \thdd_deinit_frame_injection(adapter);
           #endif
 
@@ -656,33 +664,33 @@ jobs:
           if "hdd_deinit_frame_injection(adapter)" not in s:
               if close_marker not in s:
                   raise SystemExit(
-                      "Could not find HDD adapter cleanup marker"
+                      "HDD adapter cleanup marker not found"
                   )
 
               s = s.replace(
                   close_marker,
-                  close_replacement,
+                  close_block,
                   1
               )
 
           p.write_text(s)
 
-          print("HDD injection lifecycle integrated.")
+          print("Injection lifecycle integrated.")
           PY
 
           echo
-          echo "===== VERIFY HDD MAIN ====="
+          echo "===== LIFECYCLE CHECK ====="
 
           grep -n \
             -E \
-            "wma_frame_inject|wlan_hdd_frame_inject|hdd_init_frame_injection|hdd_deinit_frame_injection" \
+            "wlan_hdd_frame_inject|hdd_init_frame_injection|hdd_deinit_frame_injection" \
             "$MAIN"
 
       # ============================================================
-      # PATCH QCACLD3 KBUILD
+      # 16. PATCH QCACLD3 KBUILD
       # ============================================================
 
-      - name: Enable QCACLD3 injection objects
+      - name: Add injection objects to QCACLD3 Kbuild
         run: |
           set -eux
 
@@ -695,104 +703,97 @@ jobs:
           p = Path(sys.argv[1])
           s = p.read_text()
 
-          # --------------------------------------------------------
-          # HDD injection objects
-          # --------------------------------------------------------
+          # ========================================================
+          # HDD OBJECTS
+          # ========================================================
 
-          hdd_marker = """ifeq ($(CONFIG_LITHIUM), y)
-          HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_rx_monitor.o
-          endif"""
+          if "wlan_hdd_frame_inject.o" not in s:
 
-          hdd_block = """ifeq ($(CONFIG_LITHIUM), y)
-          HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_rx_monitor.o
-          endif
-
-          # NetHunter frame injection
-          HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o
-          HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_validate.o
-          HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_inject_security.o
-          HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject_debug.o"""
-
-          if "HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o" not in s:
-              if hdd_marker not in s:
-                  raise SystemExit(
-                      "Motorola HDD Kbuild marker not found"
-                  )
-
-              s = s.replace(
-                  hdd_marker,
-                  hdd_block,
-                  1
-              )
-
-          # --------------------------------------------------------
-          # WMA injection object
-          # --------------------------------------------------------
-
-          wma_marker = """WMA_OBJS :=\t$(WMA_SRC_DIR)/wma_main.o \
-          \t\t$(WMA_SRC_DIR)/wma_scan_roam.o \
-          \t\t$(WMA_SRC_DIR)/wma_dev_if.o \
-          \t\t$(WMA_SRC_DIR)/wma_mgmt.o \
-          \t\t$(WMA_SRC_DIR)/wma_power.o \
-          \t\t$(WMA_SRC_DIR)/wma_data.o \
-          \t\t$(WMA_SRC_DIR)/wma_utils.o \
-          \t\t$(WMA_SRC_DIR)/wma_features.o \
-          \t\t$(WMA_SRC_DIR)/wlan_qct_wma_legacy.o\\
-          \t\t$(WMA_NDP_OBJS)"""
-
-          if "WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o" not in s:
-              if wma_marker not in s:
-                  raise SystemExit(
-                      "Motorola WMA Kbuild marker not found"
-                  )
-
-              s = s.replace(
-                  wma_marker,
-                  wma_marker + """
-
-          # NetHunter frame injection
-          WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o""",
-                  1
-              )
-
-          # --------------------------------------------------------
-          # Injection include directories
-          # --------------------------------------------------------
-
-          if "INCS += $(HDD_INC)" not in s:
-              marker = "INCS +=\t\t$(UMAC_DBR_INC)"
+              marker = "$(HDD_SRC_DIR)/wlan_hdd_wowl.o"
 
               if marker not in s:
                   raise SystemExit(
-                      "Motorola INCS insertion marker not found"
+                      "HDD object list marker not found"
                   )
 
               s = s.replace(
                   marker,
-                  marker + """
+                  marker + """ \\
+          \t\t$(HDD_SRC_DIR)/wlan_hdd_frame_inject.o \\
+          \t\t$(HDD_SRC_DIR)/wlan_hdd_frame_validate.o \\
+          \t\t$(HDD_SRC_DIR)/wlan_hdd_inject_security.o \\
+          \t\t$(HDD_SRC_DIR)/wlan_hdd_frame_inject_debug.o""",
+                  1
+              )
 
-          # NetHunter injection include paths
+          # ========================================================
+          # WMA OBJECT
+          # ========================================================
+
+          if "wma_frame_inject.o" not in s:
+
+              marker = "\t\t$(WMA_NDP_OBJS)"
+
+              if marker not in s:
+                  raise SystemExit(
+                      "WMA object list marker not found"
+                  )
+
+              s = s.replace(
+                  marker,
+                  marker + """ \\
+          \t\t$(WMA_SRC_DIR)/wma_frame_inject.o""",
+                  1
+              )
+
+          # ========================================================
+          # INCLUDE PATHS
+          # ========================================================
+
+          if "INCS += $(HDD_INC)" not in s:
+
+              marker = "INCS := -I $(srctree)/$(WLAN_ROOT)/inc \\"
+
+              if marker not in s:
+                  raise SystemExit(
+                      "INCS marker not found"
+                  )
+
+              # Add after the initial INCS block using the
+              # existing CMN_SYS_INC entry as a stable anchor.
+              cmn_marker = "\t\t$(CMN_SYS_INC)"
+
+              if cmn_marker not in s:
+                  raise SystemExit(
+                      "CMN_SYS_INC marker not found"
+                  )
+
+              s = s.replace(
+                  cmn_marker,
+                  cmn_marker + """
+
+          # NetHunter injection headers
           INCS += $(HDD_INC)
           INCS += $(WMA_INC)""",
                   1
               )
 
-          # --------------------------------------------------------
-          # Injection preprocessor define
-          # --------------------------------------------------------
+          # ========================================================
+          # FEATURE DEFINE
+          # ========================================================
 
-          if "-DFEATURE_FRAME_INJECTION_SUPPORT" not in s:
+          if "cppflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT" not in s:
+
               marker = "ccflags-y += $(INCS)"
 
               if marker not in s:
                   raise SystemExit(
-                      "ccflags-y INCS marker not found"
+                      "ccflags-y marker not found"
                   )
 
               s = s.replace(
                   marker,
-                  """# NetHunter frame injection feature
-          cppflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT
+                  """cppflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT
 
           """ + marker,
                   1
@@ -800,56 +801,77 @@ jobs:
 
           p.write_text(s)
 
-          print("QCACLD3 Kbuild injection support enabled.")
+          print("QCACLD3 Kbuild patched.")
           PY
 
           echo
-          echo "===== KBUILD INJECTION CHECK ====="
+          echo "===== KBUILD CHECK ====="
 
           grep -n \
             -E \
-            "wlan_hdd_frame_inject|wlan_hdd_frame_validate|wlan_hdd_inject_security|wlan_hdd_frame_inject_debug|wma_frame_inject|HDD_INC|WMA_INC|FEATURE_FRAME_INJECTION_SUPPORT" \
+            "wlan_hdd_frame_inject|wlan_hdd_frame_validate|wlan_hdd_inject_security|wlan_hdd_frame_inject_debug|wma_frame_inject|INCS.*HDD_INC|INCS.*WMA_INC|FEATURE_FRAME_INJECTION_SUPPORT" \
             "$KBUILD"
 
       # ============================================================
-      # ADAPTATION VERIFICATION
+      # 17. VERIFY ADAPTATION
       # ============================================================
 
-      - name: Verify all source adaptations
+      - name: Verify source adaptation
         run: |
           set -eux
 
           BASE="$KERNEL/drivers/staging/qcacld-3.0"
 
-          test -f \
-            "$BASE/core/hdd/src/wlan_hdd_frame_inject.c"
-
-          test -f \
-            "$BASE/core/hdd/src/wlan_hdd_frame_validate.c"
-
-          test -f \
-            "$BASE/core/hdd/src/wlan_hdd_inject_security.c"
-
-          test -f \
-            "$BASE/core/hdd/src/wlan_hdd_frame_inject_debug.c"
-
-          test -f \
-            "$BASE/core/wma/src/wma_frame_inject.c"
-
-          test -f \
-            "$BASE/core/hdd/inc/wlan_hdd_frame_inject.h"
-
-          test -f \
-            "$BASE/core/hdd/inc/wlan_hdd_frame_validate.h"
-
-          test -f \
-            "$BASE/core/hdd/inc/wlan_hdd_inject_security.h"
-
-          test -f \
-            "$BASE/core/hdd/inc/wlan_hdd_frame_inject_debug.h"
-
-          test -f \
+          for FILE in \
+            "$BASE/core/hdd/src/wlan_hdd_frame_inject.c" \
+            "$BASE/core/hdd/src/wlan_hdd_frame_validate.c" \
+            "$BASE/core/hdd/src/wlan_hdd_inject_security.c" \
+            "$BASE/core/hdd/src/wlan_hdd_frame_inject_debug.c" \
+            "$BASE/core/wma/src/wma_frame_inject.c" \
+            "$BASE/core/hdd/inc/wlan_hdd_frame_inject.h" \
+            "$BASE/core/hdd/inc/wlan_hdd_frame_validate.h" \
+            "$BASE/core/hdd/inc/wlan_hdd_inject_security.h" \
+            "$BASE/core/hdd/inc/wlan_hdd_frame_inject_debug.h" \
             "$BASE/core/wma/inc/wma_frame_inject.h"
+          do
+            test -f "$FILE"
+          done
+
+          grep -q \
+            "struct hdd_injection_ctx \*injection_ctx;" \
+            "$BASE/core/hdd/inc/wlan_hdd_main.h"
+
+          grep -q \
+            "hdd_init_frame_injection(adapter)" \
+            "$BASE/core/hdd/src/wlan_hdd_main.c"
+
+          grep -q \
+            "hdd_deinit_frame_injection(adapter)" \
+            "$BASE/core/hdd/src/wlan_hdd_main.c"
+
+          grep -q \
+            "wlan_hdd_frame_inject.o" \
+            "$BASE/Kbuild"
+
+          grep -q \
+            "wlan_hdd_frame_validate.o" \
+            "$BASE/Kbuild"
+
+          grep -q \
+            "wlan_hdd_inject_security.o" \
+            "$BASE/Kbuild"
+
+          grep -q \
+            "wlan_hdd_frame_inject_debug.o" \
+            "$BASE/Kbuild"
+
+          grep -q \
+            "wma_frame_inject.o" \
+            "$BASE/Kbuild"
+
+          grep -q \
+            "FEATURE_FRAME_INJECTION_SUPPORT" \
+            "$BASE/Kbuild"
 
           if grep -R \
             "get_task_cred(" \
@@ -859,41 +881,13 @@ jobs:
             exit 1
           fi
 
-          MAIN_H="$BASE/core/hdd/inc/wlan_hdd_main.h"
-          MAIN_C="$BASE/core/hdd/src/wlan_hdd_main.c"
-          KBUILD="$BASE/Kbuild"
-
-          grep -q \
-            "struct hdd_injection_ctx \*injection_ctx;" \
-            "$MAIN_H"
-
-          grep -q \
-            "hdd_init_frame_injection(adapter)" \
-            "$MAIN_C"
-
-          grep -q \
-            "hdd_deinit_frame_injection(adapter)" \
-            "$MAIN_C"
-
-          grep -q \
-            "wlan_hdd_frame_inject.o" \
-            "$KBUILD"
-
-          grep -q \
-            "wma_frame_inject.o" \
-            "$KBUILD"
-
-          grep -q \
-            "FEATURE_FRAME_INJECTION_SUPPORT" \
-            "$KBUILD"
-
           echo
           echo "========================================"
-          echo "SOURCE ADAPTATION VERIFICATION PASSED"
+          echo "SOURCE ADAPTATION PASSED"
           echo "========================================"
 
       # ============================================================
-      # BUILD
+      # 18. BUILD
       # ============================================================
 
       - name: Build kernel and modules
@@ -913,7 +907,7 @@ jobs:
             modules
 
       # ============================================================
-      # RELEASE
+      # 19. KERNEL RELEASE
       # ============================================================
 
       - name: Verify kernel release
@@ -932,7 +926,7 @@ jobs:
               kernelrelease
           )"
 
-          echo "Kernel release: $RELEASE"
+          echo "$RELEASE"
 
           case "$RELEASE" in
             *-dirty)
@@ -945,10 +939,10 @@ jobs:
             > "$GITHUB_WORKSPACE/kernel-release.txt"
 
       # ============================================================
-      # IMAGE
+      # 20. IMAGE
       # ============================================================
 
-      - name: Verify kernel Image
+      - name: Verify Image
         run: |
           set -eux
 
@@ -961,16 +955,18 @@ jobs:
           sha256sum "$IMAGE"
 
       # ============================================================
-      # MODULE INSTALL
+      # 21. INSTALL MODULES
       # ============================================================
 
       - name: Install modules
         run: |
           set -eux
 
-          rm -rf "$GITHUB_WORKSPACE/modules-staging"
+          rm -rf \
+            "$GITHUB_WORKSPACE/modules-staging"
 
-          mkdir -p "$GITHUB_WORKSPACE/modules-staging"
+          mkdir -p \
+            "$GITHUB_WORKSPACE/modules-staging"
 
           cd "$KERNEL"
 
@@ -993,7 +989,7 @@ jobs:
             | sort
 
       # ============================================================
-      # VERIFY WLAN
+      # 22. VERIFY WLAN
       # ============================================================
 
       - name: Verify wlan.ko
@@ -1011,7 +1007,8 @@ jobs:
           test -n "$WLAN"
           test -f "$WLAN"
 
-          echo "WLAN: $WLAN"
+          echo "WLAN:"
+          echo "$WLAN"
 
           ls -lh "$WLAN"
 
@@ -1023,7 +1020,7 @@ jobs:
           modinfo "$WLAN" || true
 
       # ============================================================
-      # VERIFY HID / BLUETOOTH / USB
+      # 23. VERIFY BLUETOOTH / HID / USB
       # ============================================================
 
       - name: Verify NetHunter modules
@@ -1031,8 +1028,6 @@ jobs:
           set -eux
 
           ROOT="$GITHUB_WORKSPACE/modules-staging"
-
-          echo "===== NetHunter-related modules ====="
 
           for MOD in \
             rfcomm.ko \
@@ -1047,6 +1042,7 @@ jobs:
             rndis_host.ko \
             r8152.ko
           do
+
             RESULT="$(
               find "$ROOT" \
                 -type f \
@@ -1060,13 +1056,14 @@ jobs:
             else
               echo "NOT MODULAR: $MOD"
             fi
+
           done
 
       # ============================================================
-      # WLAN UNDEFINED SYMBOL CHECK
+      # 24. WLAN UNDEFINED SYMBOLS
       # ============================================================
 
-      - name: Verify WLAN symbols
+      - name: Check WLAN undefined symbols
         run: |
           set -eux
 
@@ -1098,7 +1095,7 @@ jobs:
           echo "get_task_cred: PASS"
 
       # ============================================================
-      # VERIMAGIC
+      # 25. VERIMAGIC
       # ============================================================
 
       - name: Verify WLAN vermagic
@@ -1115,22 +1112,19 @@ jobs:
 
           test -n "$WLAN"
 
-          echo "===== WLAN VERIMAGIC ====="
-
           modinfo "$WLAN" \
             | grep '^vermagic:' \
             || true
 
           echo
-          echo "===== KERNEL RELEASE ====="
-
+          echo "Kernel release:"
           cat "$GITHUB_WORKSPACE/kernel-release.txt"
 
       # ============================================================
-      # SAVE CONFIG
+      # 26. SAVE CONFIG
       # ============================================================
 
-      - name: Save final configuration
+      - name: Save final config
         run: |
           set -eux
 
@@ -1139,7 +1133,7 @@ jobs:
             "$GITHUB_WORKSPACE/final-kernel.config"
 
       # ============================================================
-      # BUILD REPORT
+      # 27. BUILD REPORT
       # ============================================================
 
       - name: Generate build report
@@ -1157,7 +1151,7 @@ jobs:
             echo "Kernel Image:"
             ls -lh "$OUT/arch/arm64/boot/Image"
             echo
-            echo "WLAN module:"
+            echo "WLAN:"
             find \
               "$GITHUB_WORKSPACE/modules-staging" \
               -name wlan.ko \
@@ -1177,7 +1171,7 @@ jobs:
           cat "$GITHUB_WORKSPACE/build-report.txt"
 
       # ============================================================
-      # ANYKERNEL3
+      # 28. PREPARE ANYKERNEL3
       # ============================================================
 
       - name: Prepare AnyKernel3
@@ -1199,10 +1193,6 @@ jobs:
             "$OUT/arch/arm64/boot/Image" \
             "$AK3/Image"
 
-          # Moto's existing WLAN modules live under vendor/lib/modules.
-          # Put the newly-built modules there so AK3 installs them to
-          # the same logical Android location.
-
           find \
             "$GITHUB_WORKSPACE/modules-staging" \
             -type f \
@@ -1210,7 +1200,7 @@ jobs:
             -exec cp {} \
               "$AK3/modules/vendor/lib/modules/" \;
 
-          echo "===== AK3 MODULES ====="
+          echo "===== MODULE PACKAGE ====="
 
           find \
             "$AK3/modules/vendor/lib/modules" \
@@ -1220,7 +1210,7 @@ jobs:
             | sort
 
       # ============================================================
-      # ANYKERNEL SCRIPT
+      # 29. ANYKERNEL3 SCRIPT
       # ============================================================
 
       - name: Configure AnyKernel3
@@ -1239,14 +1229,15 @@ jobs:
           do.cleanuponabort=0
           device.name1=cebu
           supported.versions=16
-          supported.patchlevels=
-          supported.vendorpatchlevels=
           '; }
 
-          BLOCK=/dev/block/bootdevice/by-name/boot;
-          IS_SLOT_DEVICE=1;
-          RAMDISK_COMPRESSION=auto;
-          PATCH_VBMETA_FLAG=auto;
+          block=/dev/block/bootdevice/by-name/boot;
+
+          is_slot_device=1;
+
+          ramdisk_compression=auto;
+
+          patch_vbmeta_flag=auto;
 
           . tools/ak3-core.sh;
 
@@ -1255,17 +1246,16 @@ jobs:
           write_boot;
           EOF
 
-          chmod 755 "$AK3/anykernel.sh"
-
-          echo "===== ANYKERNEL SCRIPT ====="
+          chmod 755 \
+            "$AK3/anykernel.sh"
 
           cat "$AK3/anykernel.sh"
 
       # ============================================================
-      # CREATE ZIP
+      # 30. CREATE ZIP
       # ============================================================
 
-      - name: Build flashable AnyKernel3 ZIP
+      - name: Build AnyKernel3 ZIP
         run: |
           set -eux
 
@@ -1288,8 +1278,6 @@ jobs:
 
           test -f "$ZIP"
 
-          echo "===== FINAL ZIP ====="
-
           ls -lh "$ZIP"
 
           sha256sum "$ZIP" \
@@ -1297,7 +1285,7 @@ jobs:
               "$GITHUB_WORKSPACE/kernel-zip.sha256"
 
       # ============================================================
-      # MANIFEST
+      # 31. MANIFEST
       # ============================================================
 
       - name: Create manifest
@@ -1306,9 +1294,8 @@ jobs:
 
           {
             echo "Moto G9 Power / cebu"
-            echo
-            echo "Android: 16"
-            echo "LineageOS: 23.2"
+            echo "Android 16"
+            echo "LineageOS 23.2"
             echo
             echo "Kernel:"
             cat "$GITHUB_WORKSPACE/kernel-release.txt"
@@ -1331,10 +1318,10 @@ jobs:
           cat "$GITHUB_WORKSPACE/manifest.txt"
 
       # ============================================================
-      # ARTIFACTS
+      # 32. UPLOAD ARTIFACTS
       # ============================================================
 
-      - name: Upload build artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: moto-g9-power-cebu-nethunter-kernel
