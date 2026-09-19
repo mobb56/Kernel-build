@@ -745,11 +745,11 @@ jobs:
           # ----------------------------------------------------------
 
           if grep -nE \
-            '^[[:space:]]*(cred|const struct cred|put_cred|get_task_cred)' \
-            kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c; then
+          '^[[:space:]]*(const[[:space:]]+struct[[:space:]]+cred|put_cred|get_task_cred)[[:space:]]' \
+          kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c; then
 
-            echo "ERROR: incompatible credential code remains."
-            exit 1
+          echo "ERROR: incompatible credential code remains."
+           exit 1
           fi
 
           grep -Fq \
