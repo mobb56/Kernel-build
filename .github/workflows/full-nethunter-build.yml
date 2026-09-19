@@ -661,7 +661,6 @@ jobs:
       # ============================================================
       # 14. 4.19 CREDENTIAL COMPATIBILITY
       # ============================================================
-
       - name: Fix 4.19 credential compatibility
         shell: bash
         run: |
@@ -706,12 +705,6 @@ jobs:
               if (!task)
                   task = current;
 
-              /*
-               * get_task_cred() is not exported by this Motorola
-               * 4.19 kernel for the WLAN module.
-               *
-               * Keep the CAP_NET_RAW authorization check.
-               */
               has_capability = capable(CAP_NET_RAW);
 
               if (!has_capability) {
@@ -735,17 +728,8 @@ jobs:
 
           if count != 1:
               raise SystemExit(
-                  "ERROR: could not replace hdd_check_injection_capability()"
-              )
-
-          if "get_task_cred(" in new_text:
-              raise SystemExit(
-                  "ERROR: get_task_cred() still present"
-              )
-
-          if "capable(CAP_NET_RAW)" not in new_text:
-              raise SystemExit(
-                  "ERROR: CAP_NET_RAW check missing"
+                  "ERROR: hdd_check_injection_capability() "
+                  "was not replaced."
               )
 
           path.write_text(new_text)
@@ -753,6 +737,29 @@ jobs:
           print("Credential compatibility patch applied.")
           PY
 
+          # ----------------------------------------------------------
+          # Verify actual executable/source references.
+          #
+          # Do NOT grep the whole file for the string because comments
+          # are allowed to mention the old API.
+          # ----------------------------------------------------------
+
+          if grep -nE \
+            '^[[:space:]]*(cred|const struct cred|put_cred|get_task_cred)' \
+            kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c; then
+
+            echo "ERROR: incompatible credential code remains."
+            exit 1
+          fi
+
+          grep -Fq \
+            'capable(CAP_NET_RAW)' \
+            kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c || {
+              echo "ERROR: CAP_NET_RAW authorization check missing."
+              exit 1
+          }
+
+          echo "4.19 credential compatibility verified."
       # ============================================================
       # 15. INJECTION LIFECYCLE
       # ============================================================
