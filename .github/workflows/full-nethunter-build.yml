@@ -385,6 +385,7 @@ jobs:
             "${OUT_DIR}/.config" \
             nethunter-config/cebu-nethunter.config
 
+          # Resolve all normal Kconfig dependencies first.
           make \
             O="${OUT_DIR}" \
             ARCH="${ARCH}" \
@@ -393,47 +394,21 @@ jobs:
             CROSS_COMPILE="${CROSS_COMPILE}" \
             olddefconfig
 
-          BASE_VERSION="$(
-            make -s \
-              O="${OUT_DIR}" \
-              ARCH="${ARCH}" \
-              LLVM=1 \
-              LLVM_IAS=1 \
-              CROSS_COMPILE="${CROSS_COMPILE}" \
-              kernelversion
-          )"
+          # IMPORTANT:
+          # Do NOT set CONFIG_LOCALVERSION.
+          #
+          # The Motorola kernel already contains its correct
+          # -cip135-st19-perf-g39bcecd5c63d suffix.
+          #
+          # We only prevent Git's automatic dirty suffix.
 
-          RELEASE_SUFFIX="${CLEAN_RELEASE#${BASE_VERSION}}"
-
-          echo "Base version:"
-          echo "${BASE_VERSION}"
-
-          echo "Clean release:"
-          echo "${CLEAN_RELEASE}"
-
-          echo "Release suffix:"
-          echo "${RELEASE_SUFFIX}"
-
-          # Disable automatic Git local-version suffix.
           scripts/config \
             --file "${OUT_DIR}/.config" \
             --disable LOCALVERSION_AUTO
 
-          # Preserve the original clean local-version suffix.
-          scripts/config \
-            --file "${OUT_DIR}/.config" \
-            --set-str LOCALVERSION "${RELEASE_SUFFIX}"
-
-          # DO NOT run olddefconfig here.
-
-          echo
-          echo "scripts/config state:"
-          scripts/config \
-            --file "${OUT_DIR}/.config" \
-            --state LOCALVERSION_AUTO || true
-
-          echo
-          echo "Configured kernel release:"
+          grep -Fxq \
+            "CONFIG_LOCALVERSION_AUTO=n" \
+            "${OUT_DIR}/.config"
 
           CONFIG_RELEASE="$(
             make -s \
@@ -445,20 +420,22 @@ jobs:
               kernelrelease
           )"
 
+          echo "Expected release:"
+          echo "${CLEAN_RELEASE}"
+
+          echo "Configured release:"
           echo "${CONFIG_RELEASE}"
 
-          test "${CONFIG_RELEASE}" = "${CLEAN_RELEASE}" || {
-            echo
-            echo "ERROR: configured release differs from clean release."
-            echo
-            echo "Expected:"
-            echo "${CLEAN_RELEASE}"
-            echo
-            echo "Actual:"
-            echo "${CONFIG_RELEASE}"
-            exit 1
-          }
+          test "${CONFIG_RELEASE}" = "${CLEAN_RELEASE}"
 
+          case "${CONFIG_RELEASE}" in
+            *-dirty|*+)
+              echo "ERROR: automatic SCM suffix detected."
+              exit 1
+              ;;
+          esac
+
+          echo "Kernel release configuration verified."
       # ============================================================
       # 11. VERIFY CONFIGURATION
       #
@@ -1274,7 +1251,6 @@ jobs:
       # ============================================================
       # 20. VERIFY RELEASE
       # ============================================================
-
       - name: Verify kernel release
         shell: bash
         run: |
@@ -1300,16 +1276,31 @@ jobs:
           echo "Built:"
           echo "${BUILT_RELEASE}"
 
-          test "${BUILT_RELEASE}" = "${CLEAN_RELEASE}"
+          if [ "${BUILT_RELEASE}" != "${CLEAN_RELEASE}" ]; then
+            echo "ERROR: kernel release mismatch."
+
+            printf 'Expected bytes: '
+            printf '%s' "${CLEAN_RELEASE}" | od -An -tx1
+
+            printf 'Built bytes:    '
+            printf '%s' "${BUILT_RELEASE}" | od -An -tx1
+
+            exit 1
+          fi
 
           case "${BUILT_RELEASE}" in
             *-dirty)
-              echo "ERROR: dirty release."
+              echo "ERROR: dirty release detected."
+              exit 1
+              ;;
+            *+)
+              echo "ERROR: automatic SCM '+' suffix detected."
               exit 1
               ;;
           esac
 
-          echo "Release verification passed."
+          echo "Kernel release verification passed."
+      
 
       # ============================================================
       # 21. VERIFY IMAGE
