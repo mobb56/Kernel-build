@@ -378,7 +378,7 @@ jobs:
                   1
               )
 
-                     flag = (
+                             flag = (
             "ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT\n"
             "ccflags-y += -I$(src)/core/hdd/inc\n"
             "ccflags-y += -I$(src)/core/hdd/src\n"
@@ -387,18 +387,18 @@ jobs:
           )
 
           if flag not in text:
-              marker = "ccflags-y += $(INCS)\n"
+          marker = "ccflags-y += $(INCS)\n"
 
-              if marker not in text:
-                  raise SystemExit(
-                      "ccflags insertion point not found"
-                  )
+            if marker not in text:
+                raise SystemExit(
+                    "ccflags insertion point not found"
+                )
 
-              text = text.replace(
-                  marker,
-                  marker + flag,
-                  1
-              )
+            text = text.replace(
+                marker,
+                marker + flag,
+                1
+            )
 
           path.write_text(text)
 
