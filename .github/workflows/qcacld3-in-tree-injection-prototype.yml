@@ -6,23 +6,32 @@ on:
 permissions:
   contents: read
 
-env:
-  KERNEL: ${{ github.workspace }}/kernel
-  REFERENCE: ${{ github.workspace }}/reference
-  OUT: ${{ github.workspace }}/out
-  REPORT: ${{ github.workspace }}/qcacld3-v21-report.txt
-
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 120
+
+    env:
+      KERNEL: ${{ github.workspace }}/kernel
+      REFERENCE: ${{ github.workspace }}/reference
+      OUT: ${{ github.workspace }}/out
+      ARCH: arm64
+      LLVM: "1"
+      LLVM_IAS: "1"
+      CROSS_COMPILE: aarch64-linux-gnu-
 
     steps:
 
-      - name: Checkout workflow repository
+      # ------------------------------------------------------------
+      # 1. Checkout workflow repository
+      # ------------------------------------------------------------
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      # ------------------------------------------------------------
+      # 2. Install build dependencies
+      # ------------------------------------------------------------
+      - name: Install dependencies
         run: |
           set -eux
 
@@ -31,455 +40,577 @@ jobs:
           sudo apt-get install -y \
             bc \
             bison \
+            build-essential \
+            ccache \
+            clang \
             flex \
             gcc-aarch64-linux-gnu \
             git \
             libelf-dev \
             libssl-dev \
-            lld-14 \
-            clang-14 \
-            llvm-14 \
-            make \
-            perl \
-            python3
+            lld \
+            llvm \
+            python3 \
+            rsync \
+            unzip \
+            wget \
+            xz-utils
 
-      - name: Set paths
+      # ------------------------------------------------------------
+      # 3. Clone exact Motorola / LineageOS kernel
+      # ------------------------------------------------------------
+      - name: Clone kernel source
         run: |
           set -eux
 
-          rm -rf "$KERNEL" "$REFERENCE" "$OUT"
-
-          mkdir -p \
-            "$KERNEL" \
-            "$REFERENCE" \
-            "$OUT"
-
-      - name: Clone Motorola kernel and reference kernel
-        run: |
-          set -eux
+          rm -rf "$KERNEL"
+          mkdir -p "$KERNEL"
 
           git clone \
-            --depth 1 \
+            --depth=1 \
             --branch lineage-23.2 \
             https://github.com/LineageOS/android_kernel_motorola_sm6225.git \
             "$KERNEL"
 
+          cd "$KERNEL"
+
+          echo "===== KERNEL COMMIT ====="
+          git rev-parse HEAD
+
+          echo "===== KERNEL STATUS ====="
+          git status --short
+
+      # ------------------------------------------------------------
+      # 4. Clone known-working NetHunter QCACLD3 injection reference
+      # ------------------------------------------------------------
+      - name: Clone injection reference
+        run: |
+          set -eux
+
+          rm -rf "$REFERENCE"
+
           git clone \
-            --depth 1 \
+            --depth=1 \
             --branch nethunter-lineage-23.2 \
             https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git \
             "$REFERENCE"
 
-          echo "Motorola kernel:"
-          git -C "$KERNEL" rev-parse HEAD
+          echo "===== REFERENCE COMMIT ====="
+          cd "$REFERENCE"
+          git rev-parse HEAD
 
-          echo "Reference kernel:"
-          git -C "$REFERENCE" rev-parse HEAD
-
-      - name: Configure kernel
-        working-directory: ${{ env.KERNEL }}
+      # ------------------------------------------------------------
+      # 5. Prepare output paths
+      # ------------------------------------------------------------
+      - name: Prepare paths
         run: |
           set -eux
 
-          export PATH="/usr/lib/llvm-14/bin:$PATH"
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+
+          mkdir -p "$GITHUB_WORKSPACE/reports"
+
+          echo "KERNEL=$KERNEL"
+          echo "REFERENCE=$REFERENCE"
+          echo "OUT=$OUT"
+
+      # ------------------------------------------------------------
+      # 6. Verify source trees
+      # ------------------------------------------------------------
+      - name: Verify source trees
+        run: |
+          set -eux
+
+          test -f "$KERNEL/Makefile"
+          test -f "$KERNEL/arch/arm64/Makefile"
+
+          test -f "$KERNEL/drivers/staging/qcacld-3.0/Kbuild"
+
+          test -f "$REFERENCE/drivers/staging/qcacld-3.0/Kbuild"
+
+          echo "===== MOTOROLA QCACLD3 ====="
+          grep -n "KERNEL_BUILD" \
+            "$KERNEL/drivers/staging/qcacld-3.0/Kbuild" | head
+
+          echo "===== REFERENCE INJECTION ====="
+          grep -n "CONFIG_FEATURE_FRAME_INJECTION_SUPPORT" \
+            "$REFERENCE/drivers/staging/qcacld-3.0/Kbuild" | head -20
+
+      # ------------------------------------------------------------
+      # 7. Configure kernel
+      # ------------------------------------------------------------
+      - name: Configure kernel
+        run: |
+          set -eux
+
+          cd "$KERNEL"
 
           make \
             O="$OUT" \
-            ARCH=arm64 \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
+            ARCH="$ARCH" \
+            LLVM="$LLVM" \
+            LLVM_IAS="$LLVM_IAS" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
             vendor/bengal-perf_defconfig
 
-          cat > "$GITHUB_WORKSPACE/qcacld3-probe.config" <<'EOF'
-          CONFIG_QCA_CLD_WLAN=m
-          CONFIG_SENSORS_SSC=y
-          CONFIG_SENSORS_CLASS=m
-          EOF
-
-          scripts/kconfig/merge_config.sh \
-            -m \
-            -O "$OUT" \
-            "$OUT/.config" \
-            "$GITHUB_WORKSPACE/qcacld3-probe.config"
+          scripts/config \
+            --file "$OUT/.config" \
+            --enable CONFIG_QCA_CLD_WLAN \
+            --module CONFIG_QCA_CLD_WLAN \
+            --enable CONFIG_SENSORS_SSC \
+            --module CONFIG_SENSORS_CLASS
 
           make \
             O="$OUT" \
-            ARCH=arm64 \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
+            ARCH="$ARCH" \
+            LLVM="$LLVM" \
+            LLVM_IAS="$LLVM_IAS" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
             olddefconfig
 
-      - name: Verify configuration
-        working-directory: ${{ env.KERNEL }}
-        run: |
-          set -eux
-
+          echo "===== QCACLD CONFIG ====="
           grep -E \
-            '^(CONFIG_QCA_CLD_WLAN|CONFIG_SENSORS_SSC|CONFIG_SENSORS_CLASS)=' \
+            'CONFIG_QCA_CLD_WLAN=|CONFIG_SENSORS_SSC=|CONFIG_SENSORS_CLASS=' \
             "$OUT/.config"
 
+      # ------------------------------------------------------------
+      # 8. Prepare kernel
+      # ------------------------------------------------------------
       - name: Prepare kernel
-        working-directory: ${{ env.KERNEL }}
         run: |
           set -eux
 
-          export PATH="/usr/lib/llvm-14/bin:$PATH"
+          cd "$KERNEL"
 
           make \
             O="$OUT" \
-            ARCH=arm64 \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
+            ARCH="$ARCH" \
+            LLVM="$LLVM" \
+            LLVM_IAS="$LLVM_IAS" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            prepare
+
+          make \
+            O="$OUT" \
+            ARCH="$ARCH" \
+            LLVM="$LLVM" \
+            LLVM_IAS="$LLVM_IAS" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
             modules_prepare
 
-      - name: Build baseline QCACLD3
-        working-directory: ${{ env.KERNEL }}
+      # ------------------------------------------------------------
+      # 9. Baseline QCACLD3 build
+      # ------------------------------------------------------------
+      - name: Baseline QCACLD3 build
         run: |
           set -eux
 
-          export PATH="/usr/lib/llvm-14/bin:$PATH"
+          cd "$KERNEL"
+
+          echo "===== BASELINE BUILD ====="
 
           make \
             O="$OUT" \
-            ARCH=arm64 \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
+            ARCH="$ARCH" \
+            LLVM="$LLVM" \
+            LLVM_IAS="$LLVM_IAS" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            V=1 \
             M=drivers/staging/qcacld-3.0 \
             modules
 
-          test -f \
-            "$OUT/drivers/staging/qcacld-3.0/wlan.ko"
+          test -f "$OUT/drivers/staging/qcacld-3.0/wlan.ko"
 
-          echo "BASELINE_QCACLD3=PASS"
+          echo "===== BASELINE SUCCESS ====="
 
-      - name: Import injection headers and sources
-        working-directory: ${{ env.KERNEL }}
+      # ------------------------------------------------------------
+      # 10. Import complete injection source set
+      # ------------------------------------------------------------
+      - name: Import injection sources and headers
         run: |
           set -eux
 
-          mkdir -p \
-            drivers/staging/qcacld-3.0/core/hdd/inc \
-            drivers/staging/qcacld-3.0/core/hdd/src \
-            drivers/staging/qcacld-3.0/core/wma/inc \
-            drivers/staging/qcacld-3.0/core/wma/src
+          SRC="$REFERENCE/drivers/staging/qcacld-3.0"
+          DST="$KERNEL/drivers/staging/qcacld-3.0"
 
-          cp \
-            "$REFERENCE/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h" \
-            drivers/staging/qcacld-3.0/core/hdd/inc/
+          # HDD headers
+          cp -f \
+            "$SRC/core/hdd/inc/wlan_hdd_frame_inject.h" \
+            "$DST/core/hdd/inc/"
 
-          cp \
-            "$REFERENCE/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_validate.h" \
-            drivers/staging/qcacld-3.0/core/hdd/inc/
+          cp -f \
+            "$SRC/core/hdd/inc/wlan_hdd_frame_validate.h" \
+            "$DST/core/hdd/inc/"
 
-          cp \
-            "$REFERENCE/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_inject_security.h" \
-            drivers/staging/qcacld-3.0/core/hdd/inc/
+          cp -f \
+            "$SRC/core/hdd/inc/wlan_hdd_inject_security.h" \
+            "$DST/core/hdd/inc/"
 
-          cp \
-            "$REFERENCE/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject_debug.h" \
-            drivers/staging/qcacld-3.0/core/hdd/inc/
+          cp -f \
+            "$SRC/core/hdd/inc/wlan_hdd_frame_inject_debug.h" \
+            "$DST/core/hdd/inc/"
 
-          cp \
-            "$REFERENCE/drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h" \
-            drivers/staging/qcacld-3.0/core/wma/inc/
+          # HDD sources
+          cp -f \
+            "$SRC/core/hdd/src/wlan_hdd_frame_inject.c" \
+            "$DST/core/hdd/src/"
 
-          cp \
-            "$REFERENCE/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.c" \
-            drivers/staging/qcacld-3.0/core/hdd/src/
+          cp -f \
+            "$SRC/core/hdd/src/wlan_hdd_frame_validate.c" \
+            "$DST/core/hdd/src/"
 
-          cp \
-            "$REFERENCE/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_validate.c" \
-            drivers/staging/qcacld-3.0/core/hdd/src/
+          cp -f \
+            "$SRC/core/hdd/src/wlan_hdd_inject_security.c" \
+            "$DST/core/hdd/src/"
 
-          cp \
-            "$REFERENCE/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c" \
-            drivers/staging/qcacld-3.0/core/hdd/src/
+          cp -f \
+            "$SRC/core/hdd/src/wlan_hdd_frame_inject_debug.c" \
+            "$DST/core/hdd/src/"
 
-          cp \
-            "$REFERENCE/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c" \
-            drivers/staging/qcacld-3.0/core/hdd/src/
+          # WMA header
+          cp -f \
+            "$SRC/core/wma/inc/wma_frame_inject.h" \
+            "$DST/core/wma/inc/"
 
-          cp \
-            "$REFERENCE/drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c" \
-            drivers/staging/qcacld-3.0/core/wma/src/
+          # WMA source
+          cp -f \
+            "$SRC/core/wma/src/wma_frame_inject.c" \
+            "$DST/core/wma/src/"
 
-          test -f drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h
-          test -f drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_validate.h
-          test -f drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_inject_security.h
-          test -f drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject_debug.h
-          test -f drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h
+          echo "===== IMPORTED FILES ====="
 
-          test -f drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.c
-          test -f drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_validate.c
-          test -f drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c
-          test -f drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c
-          test -f drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c
+          find "$DST/core/hdd/inc" \
+            -maxdepth 1 \
+            -name '*inject*' \
+            -o -name '*validate*' | sort
 
-          echo "INJECTION_SOURCES=PASS"
+          find "$DST/core/hdd/src" \
+            -maxdepth 1 \
+            -name '*inject*' \
+            -o -name '*validate*' | sort
 
-      - name: Adapt hdd_adapter
-        working-directory: ${{ env.KERNEL }}
+          find "$DST/core/wma/inc" \
+            -maxdepth 1 \
+            -name '*inject*' | sort
+
+          find "$DST/core/wma/src" \
+            -maxdepth 1 \
+            -name '*inject*' | sort
+
+      # ------------------------------------------------------------
+      # 11. Adapt Motorola HDD adapter structure
+      # ------------------------------------------------------------
+      - name: Adapt HDD injection context
         run: |
           set -eux
 
-          MAIN_H="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h"
+          MAIN="$KERNEL/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h"
 
-          grep -q \
-            'struct hdd_injection_ctx \*injection_ctx;' \
-            "$MAIN_H" || \
-          sed -i \
-            '/qdf_atomic_t net_dev_hold_ref_count\[NET_DEV_HOLD_ID_MAX\];/a\
-          #ifdef FEATURE_FRAME_INJECTION_SUPPORT\
-          	struct hdd_injection_ctx *injection_ctx;\
-          #endif' \
-            "$MAIN_H"
+          python3 -c 'from pathlib import Path; p=Path("'"$MAIN"'"); s=p.read_text(); old="\tqdf_atomic_t net_dev_hold_ref_count[NET_DEV_HOLD_ID_MAX];\n"; new="\tqdf_atomic_t net_dev_hold_ref_count[NET_DEV_HOLD_ID_MAX];\n#ifdef FEATURE_FRAME_INJECTION_SUPPORT\n\tstruct hdd_injection_ctx *injection_ctx;\n#endif\n"; assert old in s, "hdd_adapter insertion point not found"; assert "struct hdd_injection_ctx *injection_ctx;" not in s; p.write_text(s.replace(old,new,1))'
 
-          grep -q \
-            'struct hdd_injection_ctx \*injection_ctx;' \
-            "$MAIN_H"
+          echo "===== INJECTION CONTEXT ====="
+          grep -n -A4 -B3 \
+            "injection_ctx" \
+            "$MAIN"
 
-          grep -n \
-            -A5 \
-            -B3 \
-            'injection_ctx' \
-            "$MAIN_H"
-
+      # ------------------------------------------------------------
+      # 12. Add injection API include to Motorola HDD main header
+      # ------------------------------------------------------------
       - name: Include injection API
-        working-directory: ${{ env.KERNEL }}
         run: |
           set -eux
 
-          MAIN_H="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h"
+          MAIN="$KERNEL/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h"
 
-          if ! grep -q \
-            '#include "wlan_hdd_frame_inject.h"' \
-            "$MAIN_H"; then
+          python3 -c 'from pathlib import Path; p=Path("'"$MAIN"'"); s=p.read_text(); old="#include \"wlan_hdd_sta_info.h\"\n"; new="#include \"wlan_hdd_sta_info.h\"\n#ifdef FEATURE_FRAME_INJECTION_SUPPORT\n#include \"wlan_hdd_frame_inject.h\"\n#endif\n"; assert old in s, "wlan_hdd_sta_info.h include marker not found"; assert "wlan_hdd_frame_inject.h" not in s; p.write_text(s.replace(old,new,1))'
 
-            sed -i \
-              '/#include "wlan_hdd_sta_info.h"/a\
-          #ifdef FEATURE_FRAME_INJECTION_SUPPORT\
-          #include "wlan_hdd_frame_inject.h"\
-          #endif' \
-              "$MAIN_H"
-          fi
+          echo "===== INJECTION INCLUDE ====="
+          grep -n -A4 -B3 \
+            "wlan_hdd_frame_inject.h" \
+            "$MAIN"
 
-          grep -q \
-            '#include "wlan_hdd_frame_inject.h"' \
-            "$MAIN_H"
-
-          grep -n \
-            -A4 \
-            -B3 \
-            'wlan_hdd_frame_inject.h' \
-            "$MAIN_H"
-
+      # ------------------------------------------------------------
+      # 13. Patch Motorola QCACLD3 Kbuild
+      #
+      # IMPORTANT:
+      # No Perl.
+      # No shell environment substitution.
+      # No embedded Python indentation.
+      #
+      # We use Python -c one-liners with literal Kbuild markers.
+      # ------------------------------------------------------------
       - name: Patch QCACLD3 Kbuild
-        working-directory: ${{ env.KERNEL }}
         run: |
           set -eux
 
-          KBUILD="drivers/staging/qcacld-3.0/Kbuild"
+          KBUILD="$KERNEL/drivers/staging/qcacld-3.0/Kbuild"
 
-          HDD_BLOCK='ifeq ($(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT), y)
-          HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o
-          HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_validate.o
-          HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_inject_security.o
-          HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject_debug.o
-          endif
-          '
+          python3 -c 'from pathlib import Path; p=Path("'"$KBUILD"'"); s=p.read_text(); marker="ifeq ($(CONFIG_WLAN_NUD_TRACKING), y)\n"; block="ifeq ($(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT), y)\nHDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o\nHDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_validate.o\nHDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_inject_security.o\nHDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject_debug.o\nendif\n\n"; assert marker in s, "HDD Kbuild marker not found"; assert "wlan_hdd_frame_inject.o" not in s; p.write_text(s.replace(marker,block+marker,1))'
 
-          WMA_BLOCK='ifeq ($(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT), y)
-          WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o
-          endif
-          '
+          python3 -c 'from pathlib import Path; p=Path("'"$KBUILD"'"); s=p.read_text(); marker="\t\t$(WMA_NDP_OBJS)\n"; block="\nifeq ($(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT), y)\nWMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o\nendif\n"; assert marker in s, "WMA Kbuild marker not found"; assert "wma_frame_inject.o" not in s; p.write_text(s.replace(marker,marker+block,1))'
 
-          perl -0pi -e \
-            's/\Qifeq ($(CONFIG_WLAN_NUD_TRACKING), y)\E/$ENV{HDD_BLOCK}$&/ unless /wlan_hdd_frame_inject\.o/' \
+          python3 -c 'from pathlib import Path; p=Path("'"$KBUILD"'"); s=p.read_text(); marker="ccflags-y += $(INCS)\n"; block="ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT\nccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT\nccflags-y += $(HDD_INC)\nccflags-y += $(WMA_INC)\n"; assert marker in s, "ccflags marker not found"; assert "-DFEATURE_FRAME_INJECTION_SUPPORT" not in s; p.write_text(s.replace(marker,block+marker,1))'
+
+          echo "===== VERIFY HDD OBJECTS ====="
+
+          grep -n \
+            "wlan_hdd_frame_inject.o" \
             "$KBUILD"
 
-          perl -0pi -e \
-            's/\Q#######DIRECT_BUFFER_RX#########\E/$ENV{WMA_BLOCK}$&/ unless /wma_frame_inject\.o/' \
+          grep -n \
+            "wlan_hdd_frame_validate.o" \
             "$KBUILD"
 
-          perl -0pi -e \
-            's/\Qccflags-y += $(INCS)\E/ccflags-y += $(INCS)\nccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT\nccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT\nccflags-y += -I \$(srctree)\/\$(WLAN_ROOT)\/\$(HDD_INC_DIR)\nccflags-y += -I \$(srctree)\/\$(WLAN_ROOT)\/\$(HDD_SRC_DIR)\nccflags-y += -I \$(srctree)\/\$(WLAN_ROOT)\/\$(WMA_INC_DIR)\nccflags-y += -I \$(srctree)\/\$(WLAN_ROOT)\/\$(WMA_SRC_DIR)/ unless /-DFEATURE_FRAME_INJECTION_SUPPORT/' \
+          grep -n \
+            "wlan_hdd_inject_security.o" \
             "$KBUILD"
 
-          grep -q \
-            'wlan_hdd_frame_inject.o' \
+          grep -n \
+            "wlan_hdd_frame_inject_debug.o" \
             "$KBUILD"
 
-          grep -q \
-            'wlan_hdd_frame_validate.o' \
+          echo "===== VERIFY WMA OBJECT ====="
+
+          grep -n \
+            "wma_frame_inject.o" \
             "$KBUILD"
 
-          grep -q \
-            'wlan_hdd_inject_security.o' \
+          echo "===== VERIFY FLAGS ====="
+
+          grep -n \
+            "FEATURE_FRAME_INJECTION_SUPPORT" \
             "$KBUILD"
 
-          grep -q \
-            'wlan_hdd_frame_inject_debug.o' \
+          grep -n \
+            "FEATURE_MONITOR_MODE_SUPPORT" \
             "$KBUILD"
 
-          grep -q \
-            'wma_frame_inject.o' \
+          echo "===== VERIFY INCLUDE PATHS ====="
+
+          grep -n \
+            'ccflags-y += $(HDD_INC)' \
             "$KBUILD"
 
-          grep -q \
-            'FEATURE_FRAME_INJECTION_SUPPORT' \
+          grep -n \
+            'ccflags-y += $(WMA_INC)' \
             "$KBUILD"
 
-          echo "KBUILD_INJECTION_PATCH=PASS"
-
-      - name: Show final injection Kbuild
-        working-directory: ${{ env.KERNEL }}
+      # ------------------------------------------------------------
+      # 14. Show final patched Kbuild
+      # ------------------------------------------------------------
+      - name: Show patched QCACLD3 Kbuild
         run: |
           set -eux
 
-          KBUILD="drivers/staging/qcacld-3.0/Kbuild"
+          KBUILD="$KERNEL/drivers/staging/qcacld-3.0/Kbuild"
 
-          grep -n \
-            -A8 \
-            -B3 \
-            'wlan_hdd_frame_inject.o' \
+          echo "===== HDD INJECTION BLOCK ====="
+
+          grep -n -A8 -B2 \
+            "wlan_hdd_frame_inject.o" \
             "$KBUILD"
 
-          grep -n \
-            -A4 \
-            -B3 \
-            'wma_frame_inject.o' \
+          echo "===== WMA INJECTION BLOCK ====="
+
+          grep -n -A4 -B3 \
+            "wma_frame_inject.o" \
             "$KBUILD"
 
-          grep -n \
-            -A6 \
-            'ccflags-y += $(INCS)' \
+          echo "===== FLAGS / INCLUDE PATHS ====="
+
+          grep -n -A5 -B2 \
+            "FEATURE_FRAME_INJECTION_SUPPORT" \
             "$KBUILD"
 
+      # ------------------------------------------------------------
+      # 15. Clean only QCACLD3 module outputs
+      # ------------------------------------------------------------
       - name: Clean QCACLD3 module outputs
-        working-directory: ${{ env.KERNEL }}
         run: |
           set -eux
+
+          cd "$KERNEL"
 
           rm -f \
             "$OUT/drivers/staging/qcacld-3.0/wlan.ko" \
             "$OUT/drivers/staging/qcacld-3.0/wlan.o" \
             "$OUT/drivers/staging/qcacld-3.0/wlan.lto.o" \
-            "$OUT/drivers/staging/qcacld-3.0/wlan.mod.o"
+            "$OUT/drivers/staging/qcacld-3.0/wlan.mod.c" \
+            "$OUT/drivers/staging/qcacld-3.0/wlan.mod.o" \
+            "$OUT/drivers/staging/qcacld-3.0/modules.order" \
+            "$OUT/drivers/staging/qcacld-3.0/Module.symvers"
 
+          find "$OUT/drivers/staging/qcacld-3.0" \
+            -name '*.o' \
+            -delete || true
+
+          find "$OUT/drivers/staging/qcacld-3.0" \
+            -name '*.o.cmd' \
+            -delete || true
+
+      # ------------------------------------------------------------
+      # 16. Build injection-enabled QCACLD3
+      # ------------------------------------------------------------
       - name: Build injection-enabled QCACLD3
-        working-directory: ${{ env.KERNEL }}
         run: |
           set -eux
 
-          export PATH="/usr/lib/llvm-14/bin:$PATH"
+          cd "$KERNEL"
+
+          echo "===== INJECTION BUILD ====="
 
           make \
             O="$OUT" \
-            ARCH=arm64 \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
+            ARCH="$ARCH" \
+            LLVM="$LLVM" \
+            LLVM_IAS="$LLVM_IAS" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            V=1 \
+            CONFIG_QCA_CLD_WLAN=m \
             CONFIG_FEATURE_FRAME_INJECTION_SUPPORT=y \
             CONFIG_FEATURE_MONITOR_MODE_SUPPORT=y \
             M=drivers/staging/qcacld-3.0 \
-            V=1 \
             modules
 
-          test -f \
-            "$OUT/drivers/staging/qcacld-3.0/wlan.ko"
-
-          test -f \
-            "$OUT/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.o"
-
-          test -f \
-            "$OUT/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_validate.o"
-
-          test -f \
-            "$OUT/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.o"
-
-          test -f \
-            "$OUT/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.o"
-
-          test -f \
-            "$OUT/drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.o"
-
-          echo "INJECTION_BUILD=PASS"
-
-      - name: Verify wlan.ko
-        working-directory: ${{ env.KERNEL }}
+      # ------------------------------------------------------------
+      # 17. Verify every injection object and final wlan.ko
+      # ------------------------------------------------------------
+      - name: Verify injection build
         run: |
           set -eux
 
-          modinfo \
-            "$OUT/drivers/staging/qcacld-3.0/wlan.ko" \
-            > "$GITHUB_WORKSPACE/wlan-modinfo.txt" || true
+          BASE="$OUT/drivers/staging/qcacld-3.0"
 
-          file \
-            "$OUT/drivers/staging/qcacld-3.0/wlan.ko"
+          test -f "$BASE/wlan.ko"
 
-          ls -lh \
-            "$OUT/drivers/staging/qcacld-3.0/wlan.ko"
+          test -f "$BASE/core/hdd/src/wlan_hdd_frame_inject.o"
+          test -f "$BASE/core/hdd/src/wlan_hdd_frame_validate.o"
+          test -f "$BASE/core/hdd/src/wlan_hdd_inject_security.o"
+          test -f "$BASE/core/hdd/src/wlan_hdd_frame_inject_debug.o"
+          test -f "$BASE/core/wma/src/wma_frame_inject.o"
 
+          echo "INJECTION_OBJECTS=5"
+          echo "INJECTION_BUILD=SUCCESS"
+
+          echo "===== FINAL MODULE ====="
+
+          ls -lh "$BASE/wlan.ko"
+
+          echo "===== MODULE INFO ====="
+
+          file "$BASE/wlan.ko"
+
+          modinfo "$BASE/wlan.ko" || true
+
+      # ------------------------------------------------------------
+      # 18. Collect diagnostics
+      # ------------------------------------------------------------
       - name: Collect diagnostics
         if: always()
-        working-directory: ${{ env.KERNEL }}
         run: |
           set +e
 
+          REPORT="$GITHUB_WORKSPACE/reports/qcacld3-injection-report.txt"
+
           {
-            echo "=== QCACLD3 v21 diagnostic ==="
+            echo "=================================================="
+            echo "QCACLD3 INJECTION BUILD REPORT"
+            echo "=================================================="
             echo
 
-            echo "Motorola kernel:"
-            git rev-parse HEAD
+            echo "DATE:"
+            date -u
             echo
 
-            echo "Reference kernel:"
-            git -C "$REFERENCE" rev-parse HEAD
+            echo "MOTOROLA KERNEL COMMIT:"
+            cd "$KERNEL" 2>/dev/null && git rev-parse HEAD
             echo
 
-            echo "Kernel release:"
-            make -s \
-              O="$OUT" \
-              ARCH=arm64 \
-              LLVM=1 \
-              LLVM_IAS=1 \
-              CROSS_COMPILE=aarch64-linux-gnu- \
-              kernelrelease
-
+            echo "REFERENCE COMMIT:"
+            cd "$REFERENCE" 2>/dev/null && git rev-parse HEAD
             echo
 
-            echo "Injection objects:"
-            find \
-              "$OUT/drivers/staging/qcacld-3.0" \
-              -type f \
-              \( \
-                -name 'wlan_hdd_frame_inject.o' -o \
-                -name 'wlan_hdd_frame_validate.o' -o \
-                -name 'wlan_hdd_inject_security.o' -o \
-                -name 'wlan_hdd_frame_inject_debug.o' -o \
-                -name 'wma_frame_inject.o' \
-              \) \
-              -print
+            echo "=================================================="
+            echo "INJECTION SOURCES"
+            echo "=================================================="
+
+            find "$KERNEL/drivers/staging/qcacld-3.0/core/hdd" \
+              -maxdepth 2 \
+              \( -name '*inject*' -o -name '*validate*' \) \
+              -print 2>/dev/null | sort
+
+            find "$KERNEL/drivers/staging/qcacld-3.0/core/wma" \
+              -maxdepth 2 \
+              -name '*inject*' \
+              -print 2>/dev/null | sort
 
             echo
+            echo "=================================================="
+            echo "KBUILD INJECTION REFERENCES"
+            echo "=================================================="
 
-            echo "wlan.ko:"
-            ls -lh \
-              "$OUT/drivers/staging/qcacld-3.0/wlan.ko"
+            grep -n \
+              -E 'FRAME_INJECTION|wlan_hdd_.*inject|wma_frame_inject|HDD_INC|WMA_INC' \
+              "$KERNEL/drivers/staging/qcacld-3.0/Kbuild" \
+              2>/dev/null
 
-          } > "$REPORT"
+            echo
+            echo "=================================================="
+            echo "INJECTION CONTEXT"
+            echo "=================================================="
 
+            grep -n -A4 -B4 \
+              "injection_ctx" \
+              "$KERNEL/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h" \
+              2>/dev/null
+
+            echo
+            echo "=================================================="
+            echo "BUILD OUTPUT"
+            echo "=================================================="
+
+            find "$OUT/drivers/staging/qcacld-3.0" \
+              -maxdepth 5 \
+              \( -name '*.o' -o -name '*.ko' \) \
+              -print 2>/dev/null | sort
+
+            echo
+            echo "=================================================="
+            echo "WLAN MODULE"
+            echo "=================================================="
+
+            if [ -f "$OUT/drivers/staging/qcacld-3.0/wlan.ko" ]; then
+              ls -lh "$OUT/drivers/staging/qcacld-3.0/wlan.ko"
+              sha256sum "$OUT/drivers/staging/qcacld-3.0/wlan.ko"
+              file "$OUT/drivers/staging/qcacld-3.0/wlan.ko"
+            else
+              echo "wlan.ko NOT BUILT"
+            fi
+
+          } > "$REPORT" 2>&1
+
+          echo "===== REPORT ====="
+          cat "$REPORT"
+
+      # ------------------------------------------------------------
+      # 19. Upload diagnostics
+      # ------------------------------------------------------------
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: qcacld3-v21-report
-          path: |
-            ${{ env.REPORT }}
-            ${{ github.workspace }}/wlan-modinfo.txt
+          name: qcacld3-injection-report
+          path: reports/qcacld3-injection-report.txt
           if-no-files-found: warn
+
+      # ------------------------------------------------------------
+      # 20. Upload successful WLAN module
+      # ------------------------------------------------------------
+      - name: Upload successful wlan module
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcacld3-injection-wlan-module
+          path: out/drivers/staging/qcacld-3.0/wlan.ko
+          if-no-files-found: error
