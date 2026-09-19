@@ -242,7 +242,7 @@ jobs:
             cp "$GITHUB_WORKSPACE/reference/drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c" \
               drivers/staging/qcacld-3.0/core/wma/src/
 
-                        echo "Imported injection implementation sources:"
+            echo "Imported injection implementation sources:"
             ls -l \
               drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_*.c \
               drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c \
