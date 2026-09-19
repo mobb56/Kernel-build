@@ -378,13 +378,13 @@ jobs:
                   1
               )
 
-             flag = (
+                     flag = (
             "ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT\n"
             "ccflags-y += -I$(src)/core/hdd/inc\n"
             "ccflags-y += -I$(src)/core/hdd/src\n"
             "ccflags-y += -I$(src)/core/wma/inc\n"
             "ccflags-y += -I$(src)/core/wma/src\n"
-            )
+          )
 
           if flag not in text:
               marker = "ccflags-y += $(INCS)\n"
