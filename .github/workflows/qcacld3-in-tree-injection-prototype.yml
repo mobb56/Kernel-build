@@ -224,6 +224,50 @@ jobs:
           "$QCACLD/core/hdd/src/wma_frame_inject.h" \
           "$QCACLD/core/hdd/src/wlan_hdd_frame_inject.c"
 
+
+      - name: Add injection context to hdd_adapter
+        working-directory: ${{ env.KERNEL }}
+        run: |
+          set -eux
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path(
+              "drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h"
+          )
+
+          s = p.read_text()
+
+          marker = """\tqdf_atomic_t net_dev_hold_ref_count[NET_DEV_HOLD_ID_MAX];
+          };"""
+
+          replacement = """\tqdf_atomic_t net_dev_hold_ref_count[NET_DEV_HOLD_ID_MAX];
+
+          #ifdef FEATURE_FRAME_INJECTION_SUPPORT
+          \tstruct hdd_injection_ctx *injection_ctx;
+          #endif
+          };"""
+
+          if marker not in s:
+              raise SystemExit(
+                  "Could not find hdd_adapter structure insertion point"
+              )
+
+          if "struct hdd_injection_ctx *injection_ctx;" in s:
+              print("injection_ctx already present")
+          else:
+              s = s.replace(marker, replacement, 1)
+              p.write_text(s)
+              print("Added injection_ctx to struct hdd_adapter")
+          PY
+
+          grep -n \
+            -A6 \
+            -B4 \
+            "injection_ctx" \
+            drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h
+
       # ------------------------------------------------------------
       # STEP 5: Temporarily add ONE object
       # ------------------------------------------------------------
