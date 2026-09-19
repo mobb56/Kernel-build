@@ -865,7 +865,6 @@ jobs:
       # ============================================================
       # 16. PATCH QCACLD3 KBUILD
       # ============================================================
-
       - name: Patch QCACLD3 Kbuild
         shell: bash
         run: |
@@ -880,14 +879,17 @@ jobs:
 
           text = path.read_text()
 
-          # HDD objects.
+          # ----------------------------------------------------------
+          # 1. Add HDD injection objects
+          # ----------------------------------------------------------
+
           if "wlan_hdd_frame_inject.o" not in text:
 
               anchor = "\t\t$(HDD_SRC_DIR)/wlan_hdd_wowl.o"
 
               if anchor not in text:
                   raise SystemExit(
-                      "ERROR: HDD Kbuild anchor not found"
+                      "ERROR: HDD object anchor not found"
                   )
 
               replacement = """\t\t$(HDD_SRC_DIR)/wlan_hdd_wowl.o
@@ -904,14 +906,17 @@ jobs:
                   1
               )
 
-          # WMA object.
+          # ----------------------------------------------------------
+          # 2. Add WMA injection object
+          # ----------------------------------------------------------
+
           if "wma_frame_inject.o" not in text:
 
               anchor = "\t\t$(WMA_NDP_OBJS)"
 
               if anchor not in text:
                   raise SystemExit(
-                      "ERROR: WMA Kbuild anchor not found"
+                      "ERROR: WMA object anchor not found"
                   )
 
               replacement = """\t\t$(WMA_NDP_OBJS)
@@ -925,40 +930,69 @@ jobs:
                   1
               )
 
-          # Feature variables.
-          if "CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y" not in text:
+          # ----------------------------------------------------------
+          # 3. Add HDD/WMA include paths to the actual INCS list.
+          #
+          # THIS is the fix for:
+          #
+          # fatal error: wlan_hdd_frame_inject.h:
+          # No such file or directory
+          # ----------------------------------------------------------
 
-              anchor = "ccflags-y += $(INCS)"
+          if "$(HDD_INC)" not in text:
+
+              anchor = """INCS := -I $(srctree)/$(WLAN_ROOT)/inc \
+                  $(EPPING_INC) \\"""
 
               if anchor not in text:
                   raise SystemExit(
-                      "ERROR: ccflags-y anchor not found"
+                      "ERROR: main INCS anchor not found"
                   )
 
-              feature = """# NetHunter QCACLD3 features
-          CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y
-          CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y
+              replacement = """INCS := -I $(srctree)/$(WLAN_ROOT)/inc \
+                  $(HDD_INC) \
+                  $(WMA_INC) \
+                  $(EPPING_INC) \\"""
 
+              text = text.replace(
+                  anchor,
+                  replacement,
+                  1
+              )
+
+          # ----------------------------------------------------------
+          # 4. Enable QCACLD3 frame-injection feature.
+          # ----------------------------------------------------------
+
+          if "cppflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT" not in text:
+
+              marker = "ccflags-y += $(INCS)"
+
+              if marker not in text:
+                  raise SystemExit(
+                      "ERROR: ccflags-y marker not found"
+                  )
+
+              feature_block = """# NetHunter QCACLD3 frame injection
           cppflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT
-          cppflags-y += -DFEATURE_MONITOR_MODE_SUPPORT
 
           """
 
               text = text.replace(
-                  anchor,
-                  feature + anchor,
+                  marker,
+                  feature_block + marker,
                   1
               )
 
           path.write_text(text)
 
-          print("QCACLD3 Kbuild patched.")
+          print("QCACLD3 Kbuild patched successfully.")
           PY
+
 
       # ============================================================
       # 17. VERIFY KBUILD
       # ============================================================
-
       - name: Verify QCACLD3 Kbuild
         shell: bash
         run: |
@@ -966,28 +1000,174 @@ jobs:
 
           K="kernel/drivers/staging/qcacld-3.0/Kbuild"
 
-          checks=(
-            'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y'
-            'CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y'
-            'cppflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT'
-            'cppflags-y += -DFEATURE_MONITOR_MODE_SUPPORT'
-            'wlan_hdd_frame_inject.o'
-            'wlan_hdd_frame_validate.o'
-            'wlan_hdd_inject_security.o'
-            'wlan_hdd_frame_inject_debug.o'
-            'wma_frame_inject.o'
-          )
+          echo "============================================================"
+          echo "Verifying QCACLD3 Kbuild"
+          echo "============================================================"
 
-          for item in "${checks[@]}"; do
-            grep -Fq "$item" "$K" || {
-              echo "ERROR: missing Kbuild entry:"
-              echo "$item"
+          test -f "${K}" || {
+            echo "ERROR: QCACLD3 Kbuild does not exist."
+            exit 1
+          }
+
+          # ----------------------------------------------------------
+          # Verify all five imported injection objects are present.
+          # Match actual Kbuild assignments rather than arbitrary text.
+          # ----------------------------------------------------------
+
+          grep -Eq \
+            '^[[:space:]]*HDD_OBJS[[:space:]]*\+=[[:space:]]*\$\(HDD_SRC_DIR\)/wlan_hdd_frame_inject\.o[[:space:]]*$' \
+            "${K}" || {
+              echo "ERROR: wlan_hdd_frame_inject.o is not in HDD_OBJS."
               exit 1
             }
+
+          grep -Eq \
+            '^[[:space:]]*HDD_OBJS[[:space:]]*\+=[[:space:]]*\$\(HDD_SRC_DIR\)/wlan_hdd_frame_validate\.o[[:space:]]*$' \
+            "${K}" || {
+              echo "ERROR: wlan_hdd_frame_validate.o is not in HDD_OBJS."
+              exit 1
+            }
+
+          grep -Eq \
+            '^[[:space:]]*HDD_OBJS[[:space:]]*\+=[[:space:]]*\$\(HDD_SRC_DIR\)/wlan_hdd_inject_security\.o[[:space:]]*$' \
+            "${K}" || {
+              echo "ERROR: wlan_hdd_inject_security.o is not in HDD_OBJS."
+              exit 1
+            }
+
+          grep -Eq \
+            '^[[:space:]]*HDD_OBJS[[:space:]]*\+=[[:space:]]*\$\(HDD_SRC_DIR\)/wlan_hdd_frame_inject_debug\.o[[:space:]]*$' \
+            "${K}" || {
+              echo "ERROR: wlan_hdd_frame_inject_debug.o is not in HDD_OBJS."
+              exit 1
+            }
+
+          grep -Eq \
+            '^[[:space:]]*WMA_OBJS[[:space:]]*\+=[[:space:]]*\$\(WMA_SRC_DIR\)/wma_frame_inject\.o[[:space:]]*$' \
+            "${K}" || {
+              echo "ERROR: wma_frame_inject.o is not in WMA_OBJS."
+              exit 1
+            }
+
+          # ----------------------------------------------------------
+          # Verify the feature variables.
+          # These belong to QCACLD3 Kbuild, NOT kernel .config.
+          # ----------------------------------------------------------
+
+          grep -Eq \
+            '^[[:space:]]*CONFIG_FEATURE_FRAME_INJECTION_SUPPORT[[:space:]]*:=[[:space:]]*y[[:space:]]*$' \
+            "${K}" || {
+              echo "ERROR: frame-injection Kbuild feature is missing."
+              exit 1
+            }
+
+          grep -Eq \
+            '^[[:space:]]*CONFIG_FEATURE_MONITOR_MODE_SUPPORT[[:space:]]*:=[[:space:]]*y[[:space:]]*$' \
+            "${K}" || {
+              echo "ERROR: monitor-mode Kbuild feature is missing."
+              exit 1
+            }
+
+          # ----------------------------------------------------------
+          # Verify the compiler feature defines.
+          # ----------------------------------------------------------
+
+          grep -Eq \
+            '^[[:space:]]*cppflags-y[[:space:]]*\+=[[:space:]]*-DFEATURE_FRAME_INJECTION_SUPPORT[[:space:]]*$' \
+            "${K}" || {
+              echo "ERROR: FEATURE_FRAME_INJECTION_SUPPORT compiler define missing."
+              exit 1
+            }
+
+          grep -Eq \
+            '^[[:space:]]*cppflags-y[[:space:]]*\+=[[:space:]]*-DFEATURE_MONITOR_MODE_SUPPORT[[:space:]]*$' \
+            "${K}" || {
+              echo "ERROR: FEATURE_MONITOR_MODE_SUPPORT compiler define missing."
+              exit 1
+            }
+
+          # ----------------------------------------------------------
+          # Verify source files really exist.
+          # ----------------------------------------------------------
+
+          for src in \
+            wlan_hdd_frame_inject.c \
+            wlan_hdd_frame_validate.c \
+            wlan_hdd_inject_security.c \
+            wlan_hdd_frame_inject_debug.c
+          do
+            test -f \
+              "kernel/drivers/staging/qcacld-3.0/core/hdd/src/${src}" || {
+                echo "ERROR: missing HDD source: ${src}"
+                exit 1
+              }
           done
 
-          echo "QCACLD3 Kbuild verification passed."
+          test -f \
+            kernel/drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c || {
+              echo "ERROR: missing WMA injection source."
+              exit 1
+            }
 
+          # ----------------------------------------------------------
+          # Verify headers.
+          # ----------------------------------------------------------
+
+          for hdr in \
+            wlan_hdd_frame_inject.h \
+            wlan_hdd_frame_validate.h \
+            wlan_hdd_inject_security.h \
+            wlan_hdd_frame_inject_debug.h
+          do
+            test -f \
+              "kernel/drivers/staging/qcacld-3.0/core/hdd/inc/${hdr}" || {
+                echo "ERROR: missing HDD header: ${hdr}"
+                exit 1
+              }
+          done
+
+          test -f \
+            kernel/drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h || {
+              echo "ERROR: missing WMA injection header."
+              exit 1
+            }
+
+          # ----------------------------------------------------------
+          # Make sure these were NOT incorrectly added to .config.
+          # ----------------------------------------------------------
+
+          CONFIG="kernel/out/.config"
+
+          if grep -Eq \
+            '^CONFIG_FEATURE_(FRAME_INJECTION_SUPPORT|MONITOR_MODE_SUPPORT)=' \
+            "${CONFIG}"; then
+
+            echo "ERROR: QCACLD3 FEATURE_* options were incorrectly added to kernel .config."
+            exit 1
+          fi
+
+          echo
+          echo "QCACLD3 Kbuild verification PASSED."
+          echo
+          echo "HDD injection objects:"
+          grep -E \
+            '^[[:space:]]*HDD_OBJS[[:space:]]*\+=[[:space:]]*\$\(HDD_SRC_DIR\)/wlan_hdd_(frame_inject|frame_validate|inject_security|frame_inject_debug)\.o' \
+            "${K}"
+
+          echo
+          echo "WMA injection object:"
+          grep -E \
+            '^[[:space:]]*WMA_OBJS[[:space:]]*\+=[[:space:]]*\$\(WMA_SRC_DIR\)/wma_frame_inject\.o' \
+            "${K}"
+
+          echo
+          echo "Feature defines:"
+          grep -E \
+            'CONFIG_FEATURE_(FRAME_INJECTION_SUPPORT|MONITOR_MODE_SUPPORT)|FEATURE_(FRAME_INJECTION_SUPPORT|MONITOR_MODE_SUPPORT)' \
+            "${K}"
+
+          echo
+          echo "============================================================"
       # ============================================================
       # 18. VERIFY SOURCE ADAPTATION
       # ============================================================
