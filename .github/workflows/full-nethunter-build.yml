@@ -883,6 +883,7 @@ jobs:
       # ============================================================
       # 16. PATCH QCACLD3 KBUILD
       # ============================================================
+      
 
       - name: Patch QCACLD3 Kbuild
         shell: bash
@@ -891,6 +892,7 @@ jobs:
 
           python3 <<'PY'
           from pathlib import Path
+          import re
 
           path = Path(
               "kernel/drivers/staging/qcacld-3.0/Kbuild"
@@ -898,11 +900,50 @@ jobs:
 
           text = path.read_text()
 
-          # ----------------------------------------------------------
-          # HDD objects
-          # ----------------------------------------------------------
+          # ==========================================================
+          # 1. Remove ALL previous NetHunter feature flag definitions.
+          #
+          # This is intentionally done globally so repeated workflow
+          # edits cannot leave duplicate cppflags-y/ccflags-y entries.
+          # ==========================================================
 
-          if "wlan_hdd_frame_inject.o" not in text:
+          text = re.sub(
+              r'^[ \t]*(?:cppflags|ccflags)-y[ \t]*\+=[ \t]*'
+              r'-DFEATURE_FRAME_INJECTION_SUPPORT[ \t]*\n?',
+              '',
+              text,
+              flags=re.MULTILINE
+          )
+
+          text = re.sub(
+              r'^[ \t]*(?:cppflags|ccflags)-y[ \t]*\+=[ \t]*'
+              r'-DFEATURE_MONITOR_MODE_SUPPORT[ \t]*\n?',
+              '',
+              text,
+              flags=re.MULTILINE
+          )
+
+          # Remove duplicate NetHunter Kbuild feature assignments.
+          text = re.sub(
+              r'^[ \t]*CONFIG_FEATURE_FRAME_INJECTION_SUPPORT[ \t]*:=[ \t]*y[ \t]*\n?',
+              '',
+              text,
+              flags=re.MULTILINE
+          )
+
+          text = re.sub(
+              r'^[ \t]*CONFIG_FEATURE_MONITOR_MODE_SUPPORT[ \t]*:=[ \t]*y[ \t]*\n?',
+              '',
+              text,
+              flags=re.MULTILINE
+          )
+
+          # ==========================================================
+          # 2. Add HDD injection objects exactly once.
+          # ==========================================================
+
+          if "HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o" not in text:
+
               anchor = "\t\t$(HDD_SRC_DIR)/wlan_hdd_wowl.o"
 
               if anchor not in text:
@@ -924,11 +965,12 @@ jobs:
                   1
               )
 
-          # ----------------------------------------------------------
-          # WMA object
-          # ----------------------------------------------------------
+          # ==========================================================
+          # 3. Add WMA injection object exactly once.
+          # ==========================================================
 
-          if "wma_frame_inject.o" not in text:
+          if "WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o" not in text:
+
               anchor = "\t\t$(WMA_NDP_OBJS)"
 
               if anchor not in text:
@@ -947,13 +989,12 @@ jobs:
                   1
               )
 
-          # ----------------------------------------------------------
-          # Private include directories
-          # ----------------------------------------------------------
+          # ==========================================================
+          # 4. Add HDD/WMA private include directories exactly once.
+          # ==========================================================
 
-          include_line = "INCS += $(HDD_INC) $(WMA_INC)"
+          if "INCS += $(HDD_INC) $(WMA_INC)" not in text:
 
-          if include_line not in text:
               anchor = (
                   "\t\t$(CMN_SYS_INC)\n"
                   "\n"
@@ -980,24 +1021,16 @@ jobs:
                   1
               )
 
-          # ----------------------------------------------------------
-          # NetHunter feature definitions
+          # ==========================================================
+          # 5. Add NetHunter feature definitions exactly once.
           #
-          # These are Kbuild variables/macros, NOT .config symbols.
+          # CONFIG_FEATURE_* are QCACLD3 Kbuild variables.
+          # The C preprocessor definitions belong in ccflags-y.
           #
-          # FIX:
-          # Use ccflags-y for C compiler -D definitions.
-          # ----------------------------------------------------------
+          # DO NOT use cppflags-y here.
+          # ==========================================================
 
-          if "FEATURE_FRAME_INJECTION_SUPPORT" not in text:
-              anchor = "ccflags-y += $(INCS)"
-
-              if anchor not in text:
-                  raise SystemExit(
-                      "ERROR: ccflags-y anchor not found"
-                  )
-
-              feature_block = """# NetHunter QCACLD3 frame injection
+          feature_block = """# NetHunter QCACLD3 frame injection
           CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y
           CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y
 
@@ -1006,27 +1039,66 @@ jobs:
 
           """
 
+          if (
+              "CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y" not in text
+              or
+              "CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y" not in text
+              or
+              "ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT" not in text
+              or
+              "ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT" not in text
+          ):
+
+              anchor = "ccflags-y += $(INCS)"
+
+              if anchor not in text:
+                  raise SystemExit(
+                      "ERROR: ccflags-y include anchor not found"
+                  )
+
               text = text.replace(
                   anchor,
                   feature_block + anchor,
                   1
               )
-          else:
-              # Correct old cppflags-y usage if present.
-              text = text.replace(
-                  "cppflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT",
-                  "ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT"
-              )
 
-              text = text.replace(
-                  "cppflags-y += -DFEATURE_MONITOR_MODE_SUPPORT",
-                  "ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT"
-              )
+          # ==========================================================
+          # 6. Final cleanup:
+          #
+          # Remove ANY remaining obsolete feature cppflags.
+          # This protects against an existing duplicate elsewhere.
+          # ==========================================================
+
+          text = re.sub(
+              r'^[ \t]*cppflags-y[ \t]*\+=[ \t]*'
+              r'-DFEATURE_FRAME_INJECTION_SUPPORT[ \t]*\n?',
+              '',
+              text,
+              flags=re.MULTILINE
+          )
+
+          text = re.sub(
+              r'^[ \t]*cppflags-y[ \t]*\+=[ \t]*'
+              r'-DFEATURE_MONITOR_MODE_SUPPORT[ \t]*\n?',
+              '',
+              text,
+              flags=re.MULTILINE
+          )
 
           path.write_text(text)
 
           print("QCACLD3 Kbuild patch completed.")
           PY
+
+          echo
+          echo "========== NET HUNTER KBUILD FLAGS =========="
+
+          grep -nE \
+            'FEATURE_(FRAME_INJECTION_SUPPORT|MONITOR_MODE_SUPPORT)' \
+            kernel/drivers/staging/qcacld-3.0/Kbuild || true
+
+          echo
+          echo "=============================================="
 
       # ============================================================
       # 17. VERIFY KBUILD
@@ -1039,29 +1111,45 @@ jobs:
 
           K="kernel/drivers/staging/qcacld-3.0/Kbuild"
 
+          # ----------------------------------------------------------
+          # Include paths
+          # ----------------------------------------------------------
+
           grep -Fq \
             'INCS += $(HDD_INC) $(WMA_INC)' \
             "${K}"
 
+          # ----------------------------------------------------------
+          # HDD objects
+          # ----------------------------------------------------------
+
           grep -Fq \
-            'wlan_hdd_frame_inject.o' \
+            'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
             "${K}"
 
           grep -Fq \
-            'wlan_hdd_frame_validate.o' \
+            'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_validate.o' \
             "${K}"
 
           grep -Fq \
-            'wlan_hdd_inject_security.o' \
+            'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_inject_security.o' \
             "${K}"
 
           grep -Fq \
-            'wlan_hdd_frame_inject_debug.o' \
+            'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject_debug.o' \
             "${K}"
 
+          # ----------------------------------------------------------
+          # WMA object
+          # ----------------------------------------------------------
+
           grep -Fq \
-            'wma_frame_inject.o' \
+            'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \
             "${K}"
+
+          # ----------------------------------------------------------
+          # QCACLD3 feature variables
+          # ----------------------------------------------------------
 
           grep -Fq \
             'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y' \
@@ -1071,6 +1159,10 @@ jobs:
             'CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y' \
             "${K}"
 
+          # ----------------------------------------------------------
+          # Correct compiler definitions.
+          # ----------------------------------------------------------
+
           grep -Fq \
             'ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT' \
             "${K}"
@@ -1079,22 +1171,53 @@ jobs:
             'ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT' \
             "${K}"
 
-          if grep -Fq \
-            'cppflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT' \
+          # ----------------------------------------------------------
+          # There MUST NOT be any obsolete cppflags definitions.
+          # ----------------------------------------------------------
+
+          if grep -Eq \
+            '^[[:space:]]*cppflags-y[[:space:]]*\+=[[:space:]]*-DFEATURE_(FRAME_INJECTION_SUPPORT|MONITOR_MODE_SUPPORT)' \
             "${K}"; then
-            echo "ERROR: obsolete cppflags-y injection definition remains."
+
+            echo "ERROR: obsolete cppflags-y feature definition remains."
+
+            echo
+            echo "Remaining definitions:"
+            grep -nE \
+              '^[[:space:]]*(cppflags|ccflags)-y.*FEATURE_(FRAME_INJECTION_SUPPORT|MONITOR_MODE_SUPPORT)' \
+              "${K}" || true
+
             exit 1
           fi
 
-          if grep -Fq \
-            'cppflags-y += -DFEATURE_MONITOR_MODE_SUPPORT' \
-            "${K}"; then
-            echo "ERROR: obsolete cppflags-y monitor definition remains."
-            exit 1
-          fi
+          # ----------------------------------------------------------
+          # Ensure each definition occurs exactly once.
+          # ----------------------------------------------------------
 
+          FRAME_COUNT="$(
+            grep -Fc \
+              'ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT' \
+              "${K}"
+          )"
+
+          MONITOR_COUNT="$(
+            grep -Fc \
+              'ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT' \
+              "${K}"
+          )"
+
+          test "${FRAME_COUNT}" -eq 1
+          test "${MONITOR_COUNT}" -eq 1
+
+          echo
           echo "QCACLD3 Kbuild verification passed."
-
+          echo
+          echo "Feature compiler definitions:"
+          grep -nE \
+            '^[[:space:]]*ccflags-y.*FEATURE_(FRAME_INJECTION_SUPPORT|MONITOR_MODE_SUPPORT)' \
+            "${K}"
+      
+    
       # ============================================================
       # 18. VERIFY SOURCE ADAPTATION
       # ============================================================
