@@ -12,6 +12,7 @@ env:
 
   NETHUNTER_REPO: https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git
   NETHUNTER_BRANCH: nethunter-lineage-23.2
+  LOCALVERSION: ""
 
   ANYKERNEL_REPO: https://github.com/osm0sis/AnyKernel3.git
   ANYKERNEL_BRANCH: master
