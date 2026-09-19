@@ -1042,7 +1042,6 @@ jobs:
       # ============================================================
       # 19. BUILD KERNEL + MODULES
       # ============================================================
-
       - name: Build kernel and modules
         shell: bash
         run: |
@@ -1052,22 +1051,100 @@ jobs:
 
           export PATH="${LLVM_DIR}/bin:${PATH}"
 
+          BUILD_LOG="${GITHUB_WORKSPACE}/kernel-build.log"
+
+          echo "============================================================"
+          echo "STARTING KERNEL BUILD"
+          echo "============================================================"
+
           make -j2 \
             O="${OUT_DIR}" \
             ARCH="${ARCH}" \
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
+            V=1 \
             Image \
             modules \
-            2>&1 | tee "${GITHUB_WORKSPACE}/kernel-build.log"
+            2>&1 | tee "${BUILD_LOG}"
 
-          status="${PIPESTATUS[0]}"
+          BUILD_STATUS="${PIPESTATUS[0]}"
 
-          if [ "${status}" -ne 0 ]; then
-            echo "Kernel compilation failed."
-            exit "${status}"
+          if [ "${BUILD_STATUS}" -ne 0 ]; then
+            echo
+            echo "============================================================"
+            echo "KERNEL BUILD FAILED"
+            echo "============================================================"
+            echo
+            echo "Searching for the FIRST useful compiler/linker error..."
+            echo
+
+            grep -nEi \
+              '(^|[[:space:]])(error:|fatal error:|undefined reference|undefined!|No such file|not found|failed|Error [0-9]+)' \
+              "${BUILD_LOG}" \
+              | head -80 || true
+
+            echo
+            echo "============================================================"
+            echo "LAST 150 BUILD LINES"
+            echo "============================================================"
+
+            tail -150 "${BUILD_LOG}"
+
+            echo
+            echo "============================================================"
+            echo "BUILD STATUS: ${BUILD_STATUS}"
+            echo "============================================================"
+
+            exit "${BUILD_STATUS}"
           fi
+
+          echo
+          echo "============================================================"
+          echo "KERNEL BUILD SUCCESSFUL"
+          echo "============================================================"
+
+                - name: Diagnose build result
+           if: failure()
+          shell: bash
+          run: |
+          set +e
+
+          echo "============================================================"
+          echo "BUILD DIAGNOSTIC"
+          echo "============================================================"
+
+          if [ ! -f kernel-build.log ]; then
+            echo "kernel-build.log does not exist."
+            exit 0
+          fi
+
+          echo
+          echo "Potential errors:"
+          echo
+
+          grep -nEi \
+            'error:|fatal error:|undefined reference|undefined!|No such file|not found|failed|Error [0-9]+' \
+            kernel-build.log \
+            | head -100 || true
+
+          echo
+          echo "============================================================"
+          echo "QCACLD3 BUILD LINES"
+          echo "============================================================"
+
+          grep -n \
+            'qcacld-3.0\|wlan_hdd_frame_inject\|wlan_hdd_frame_validate\|wlan_hdd_inject_security\|wlan_hdd_frame_inject_debug\|wma_frame_inject' \
+            kernel-build.log \
+            | tail -150 || true
+
+          echo
+          echo "============================================================"
+          echo "FINAL BUILD LINES"
+          echo "============================================================"
+
+          tail -200 kernel-build.log
+      
 
       # ============================================================
       # 20. VERIFY RELEASE
