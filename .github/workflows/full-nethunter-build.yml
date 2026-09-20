@@ -440,85 +440,145 @@ jobs:
       - name: Merge NetHunter configuration
         shell: bash
         run: |
-          set -euxo pipefail
+           set -euxo pipefail
+           cd kernel
 
-          cd kernel
+            # ============================================================
+            # MERGE NETHUNTER CONFIGURATION
+            # ============================================================
 
-          scripts/kconfig/merge_config.sh \
-            -m \
-            -O "${OUT_DIR}" \
-            "${OUT_DIR}/.config" \
-            nethunter-config/cebu-nethunter.config
+            test -s nethunter-config/cebu-nethunter.config
 
-          make \
-            O="${OUT_DIR}" \
-            ARCH="${ARCH}" \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            CROSS_COMPILE="${CROSS_COMPILE}" \
-            olddefconfig
+            echo "===== NetHunter configuration ====="
+            cat nethunter-config/cebu-nethunter.config
+            echo "==================================="
 
-          BASE_VERSION="$(
+            # Merge the NetHunter configuration into the base device config.
+            scripts/kconfig/merge_config.sh \
+              -m \
+              "${OUT_DIR}/.config" \
+              nethunter-config/cebu-nethunter.config
+
+            # Resolve all Kconfig dependencies.
             make -s \
               O="${OUT_DIR}" \
               ARCH="${ARCH}" \
               LLVM=1 \
               LLVM_IAS=1 \
               CROSS_COMPILE="${CROSS_COMPILE}" \
-              kernelversion
-          )"
+              olddefconfig
 
-          RELEASE_SUFFIX="${CLEAN_RELEASE#${BASE_VERSION}}"
+            # ============================================================
+            # PRESERVE THE STOCK KERNEL RELEASE
+            # ============================================================
 
-          echo "Base version:   ${BASE_VERSION}"
-          echo "Clean release:  ${CLEAN_RELEASE}"
-          echo "Release suffix: ${RELEASE_SUFFIX}"
+            BASE_VERSION="$(
+              make -s \
+                O="${OUT_DIR}" \
+                ARCH="${ARCH}" \
+                LLVM=1 \
+                LLVM_IAS=1 \
+                CROSS_COMPILE="${CROSS_COMPILE}" \
+                kernelversion
+            )"
 
-          # IMPORTANT:
-          # These are AFTER olddefconfig.
-          scripts/config \
-            --file "${OUT_DIR}/.config" \
-            --disable LOCALVERSION_AUTO
+            RELEASE_SUFFIX="${CLEAN_RELEASE#${BASE_VERSION}}"
 
-          scripts/config \
-            --file "${OUT_DIR}/.config" \
-            --set-str LOCALVERSION "${RELEASE_SUFFIX}"
+            echo "Base version:    ${BASE_VERSION}"
+            echo "Clean release:   ${CLEAN_RELEASE}"
+            echo "Release suffix:  ${RELEASE_SUFFIX}"
 
-            make O="${OUT_DIR}" \
-           ARCH="${ARCH}" \
-           LLVM=1 \
-           LLVM_IAS=1 \
-           CROSS_COMPILE="${CROSS_COMPILE}" \
-           syncconfig
-
-           export LOCALVERSION=""
-
-          # Do NOT call olddefconfig here.
-
-          LOCALVERSION_AUTO_STATE="$(
+            # Disable automatic SCM/local version suffixes.
             scripts/config \
               --file "${OUT_DIR}/.config" \
-              --state LOCALVERSION_AUTO
-          )"
+              --disable LOCALVERSION_AUTO
 
-          echo "LOCALVERSION_AUTO state: ${LOCALVERSION_AUTO_STATE}"
+            # Keep the exact release suffix used by the stock kernel.
+            scripts/config \
+              --file "${OUT_DIR}/.config" \
+              --set-str CONFIG_LOCALVERSION "${RELEASE_SUFFIX}"
 
-          test "${LOCALVERSION_AUTO_STATE}" = "n"
-
-          CONFIG_RELEASE="$(
+            # Synchronize the final configuration.
             make -s \
               O="${OUT_DIR}" \
               ARCH="${ARCH}" \
               LLVM=1 \
               LLVM_IAS=1 \
               CROSS_COMPILE="${CROSS_COMPILE}" \
-              kernelrelease
-          )"
+              syncconfig
 
-          echo "Configured release: ${CONFIG_RELEASE}"
+            # Confirm LOCALVERSION_AUTO is disabled.
+            LOCALVERSION_AUTO_STATE="$(
+              scripts/config \
+                --file "${OUT_DIR}/.config" \
+                --state LOCALVERSION_AUTO
+            )"
 
-          test "${CONFIG_RELEASE}" = "${CLEAN_RELEASE}"
+            echo "LOCALVERSION_AUTO state: ${LOCALVERSION_AUTO_STATE}"
 
+            test "${LOCALVERSION_AUTO_STATE}" = "n"
+
+            # ============================================================
+            # FIX LOCALVERSION EXPORT
+            #
+            # The 4.19 kernel setlocalversion script can append "+"
+            # when LOCALVERSION is not exported to it.
+            # Export LOCALVERSION from the kernel Makefile.
+            # ============================================================
+
+            grep -q \
+              'export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION' \
+              Makefile
+
+            python3 - <<'PY'
+            from pathlib import Path
+
+            path = Path("Makefile")
+            text = path.read_text()
+
+            old = "export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION"
+            new = old + " LOCALVERSION"
+
+            target = "export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION LOCALVERSION"
+
+            if target not in text:
+                if old not in text:
+                    raise SystemExit(
+                        "ERROR: expected kernel Makefile export line not found."
+                    )
+
+                text = text.replace(old, new, 1)
+                path.write_text(text)
+
+            print("Kernel Makefile LOCALVERSION export patched.")
+            PY
+
+            # Verify the Makefile was actually patched.
+            grep -Fq \
+              'export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION LOCALVERSION' \
+              Makefile
+
+            # Prevent the shell environment from supplying another value.
+            export LOCALVERSION=""
+
+            # ============================================================
+            # VERIFY KERNEL RELEASE
+            # ============================================================
+
+            CONFIG_RELEASE="$(
+              make -s \
+                O="${OUT_DIR}" \
+                ARCH="${ARCH}" \
+                LLVM=1 \
+                LLVM_IAS=1 \
+                CROSS_COMPILE="${CROSS_COMPILE}" \
+                kernelrelease
+            )"
+
+            echo "Configured release: ${CONFIG_RELEASE}"
+            echo "Expected release:   ${CLEAN_RELEASE}"
+
+            test "${CONFIG_RELEASE}" = "${CLEAN_RELEASE}"
       # ============================================================
       # 12. VERIFY KERNEL CONFIG
       #
