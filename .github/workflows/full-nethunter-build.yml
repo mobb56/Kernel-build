@@ -1960,137 +1960,85 @@ jobs:
            echo "WLAN undefined-symbol verification passed."
   
 
-                # ============================================================
+      # ============================================================
       # 28. STAGE FINAL MODULES
       # ============================================================
-
       - name: Prepare NetHunter modules
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
-          rm -rf module-stage
+           MODULE_INSTALL_DIR="${GITHUB_WORKSPACE}/module-install"
+           STAGE_DIR="${GITHUB_WORKSPACE}/kernel/module-stage"
+           STAGE_MODULE_DIR="${STAGE_DIR}/vendor/lib/modules"
 
-          mkdir -p \
-            module-stage/vendor/lib/modules
-            
-           WLAN_MODULE="$(
-          find "${GITHUB_WORKSPACE}/module-install" \
-           -type f \
-            -name "wlan.ko" \
-            -print -quit
-             )"
+           echo "Module install directory:"
+           echo "${MODULE_INSTALL_DIR}"
 
-          test -n "${WLAN_MODULE}"
+           echo "Module staging directory:"
+           echo "${STAGE_MODULE_DIR}"
 
-          # The Moto cebu vendor module is staged under the expected
-          # NetHunter-compatible filename.
-          cp \
-            "${WLAN_MODULE}" \
-            module-stage/vendor/lib/modules/qca_cld3_wlan.ko
+           test -d "${MODULE_INSTALL_DIR}" || {
+           echo "ERROR: module-install directory does not exist."
+           exit 1
+           }
 
-          # ----------------------------------------------------------
-          # Bluetooth / HID
-          # ----------------------------------------------------------
+             rm -rf "${STAGE_DIR}"
 
-          for name in \
-            bluetooth.ko \
-            hci_uart.ko \
-            hci_vhci.ko \
-            hid.ko \
-            hid_generic.ko \
-            hidp.ko \
-            rfcomm.ko \
-            bnep.ko
-          do
+             mkdir -p "${STAGE_MODULE_DIR}"
 
-            found="$(
-              find module-install \
-                -type f \
-                -name "${name}" \
-                -print -quit
-            )"
+            echo "Copying built kernel modules..."
 
-            if [ -n "${found}" ]; then
-              cp \
-                "${found}" \
-                module-stage/vendor/lib/modules/
-            fi
-          done
+             find "${MODULE_INSTALL_DIR}" \
+            -type f \
+             -name "*.ko" \
+            -exec cp {} "${STAGE_MODULE_DIR}/" \;
 
-          # ----------------------------------------------------------
-          # USB / network
-          # ----------------------------------------------------------
+           echo "Checking WLAN module..."
 
-          for name in \
-            cdc_acm.ko \
-            usbserial.ko \
-            cdc_ether.ko \
-            cdc_ncm.ko \
-            rndis_host.ko \
-            r8150.ko \
-            r8152.ko \
-            usb_f_ncm.ko \
-            usb_f_rndis.ko \
-            usb_f_ecm.ko \
-            usb_f_eem.ko \
-            usb_f_hid.ko \
-            usb_f_mass_storage.ko
-          do
+           test -f "${STAGE_MODULE_DIR}/wlan.ko" || {
+          echo "ERROR: wlan.ko was not found."
+          exit 1
+           }
 
-            found="$(
-              find module-install \
-                -type f \
-                -name "${name}" \
-                -print -quit
-            )"
+          mv \
+          "${STAGE_MODULE_DIR}/wlan.ko" \
+          "${STAGE_MODULE_DIR}/qca_cld3_wlan.ko"
 
-            if [ -n "${found}" ]; then
-              cp \
-                "${found}" \
-                module-stage/vendor/lib/modules/
-            fi
-          done
+           echo "WLAN module staged as qca_cld3_wlan.ko"
 
-          # ----------------------------------------------------------
-          # Sensors
-          # ----------------------------------------------------------
+          echo "RFCOMM is built into the kernel."
+          echo "Removing any unexpected rfcomm.ko..."
 
-          found="$(
-            find module-install \
-              -type f \
-              -name 'sensors_class.ko' \
-              -print -quit
-          )"
+          rm -f "${STAGE_MODULE_DIR}/rfcomm.ko"
 
-          if [ -n "${found}" ]; then
-            cp \
-              "${found}" \
-              module-stage/vendor/lib/modules/
-          fi
+          echo "Checking required modules..."
 
-          # ----------------------------------------------------------
-          # Minimum required files
-          # ----------------------------------------------------------
+          test -s "${STAGE_MODULE_DIR}/qca_cld3_wlan.ko" || {
+           echo "ERROR: qca_cld3_wlan.ko is missing or empty."
+          exit 1
+           }
 
-          test -f \
-            module-stage/vendor/lib/modules/qca_cld3_wlan.ko
+          test -s "${STAGE_MODULE_DIR}/hci_vhci.ko" || {
+          echo "ERROR: hci_vhci.ko is missing or empty."
+          exit 1
+          }
 
-          test -f \
-            module-stage/vendor/lib/modules/hci_vhci.ko
-
-          test -f \
-            module-stage/vendor/lib/modules/hidp.ko
+           test -s "${STAGE_MODULE_DIR}/hidp.ko" || {
+           echo "ERROR: hidp.ko is missing or empty."
+           exit 1
+          }
 
           echo "Final staged modules:"
 
-          find \
-            module-stage/vendor/lib/modules \
-            -type f \
-            -name '*.ko' \
-            -printf '%f\n' |
-            sort
+          find "${STAGE_MODULE_DIR}" \
+          -type f \
+          -name "*.ko" \
+          -printf "%f\n" |
+           sort
 
+           echo "NetHunter module staging passed."
+      
       # ============================================================
       # 29. SAVE BUILD INFORMATION
       # ============================================================
