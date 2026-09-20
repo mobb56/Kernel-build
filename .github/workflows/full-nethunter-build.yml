@@ -421,6 +421,10 @@ jobs:
 
           CONFIG_PACKET=y
 
+          # Debug information
+          # Do not include DWARF debug information in production modules.
+          # CONFIG_DEBUG_INFO is not set
+
           EOF
 
           test -s \
@@ -677,6 +681,25 @@ jobs:
             LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
             syncconfig
+
+            # ============================================================
+            # Verify DEBUG_INFO is disabled
+            # ============================================================
+
+             DEBUG_INFO_STATE="$(
+             scripts/config \
+             --file "${OUT_DIR}/.config" \
+            --state DEBUG_INFO
+             )"
+
+              echo "DEBUG_INFO: ${DEBUG_INFO_STATE}"
+
+               test "${DEBUG_INFO_STATE}" = "n" || {
+               echo "ERROR: CONFIG_DEBUG_INFO is still enabled."
+                exit 1
+               }
+
+            echo "CONFIG_DEBUG_INFO is disabled."
 
           # ----------------------------------------------------------
           # Confirm LOCALVERSION_AUTO is disabled.
@@ -1763,7 +1786,9 @@ jobs:
           set -euxo pipefail
 
           cd kernel
-
+          
+          MODULE_INSTALL_DIR="${GITHUB_WORKSPACE}/module-install"
+          
           rm -rf \
             "${GITHUB_WORKSPACE}/module-install"
 
@@ -1778,6 +1803,63 @@ jobs:
             CROSS_COMPILE="${CROSS_COMPILE}" \
             INSTALL_MOD_PATH="${GITHUB_WORKSPACE}/module-install" \
             modules_install
+
+            echo "Checking LLVM strip tool..."
+
+            LLVM_STRIP="${LLVM_DIR}/bin/llvm-strip"
+
+            test -x "${LLVM_STRIP}" || {
+            echo "ERROR: llvm-strip was not found:"
+             echo "${LLVM_STRIP}"
+            exit 1
+              }
+
+              echo "LLVM strip tool:"
+              echo "${LLVM_STRIP}"
+
+             echo "Stripping debug information from installed kernel modules..."
+
+              find "${MODULE_INSTALL_DIR}" \
+                -type f \
+                -name "*.ko" \
+               -exec "${LLVM_STRIP}" --strip-debug {} \;
+
+             echo "Kernel module debug information stripped."
+
+
+             echo "Verifying WLAN module size..."
+
+               WLAN_MODULE_CHECK="$(
+               find "${MODULE_INSTALL_DIR}" \
+               -type f \
+                -name "wlan.ko" \
+                -print \
+                 -quit
+                  )"
+
+             test -n "${WLAN_MODULE_CHECK}" || {
+             echo "ERROR: wlan.ko not found after stripping."
+              exit 1
+               }
+
+              test -s "${WLAN_MODULE_CHECK}" || {
+              echo "ERROR: wlan.ko is empty after stripping."
+              exit 1
+               }
+
+             echo "WLAN module:"
+             echo "${WLAN_MODULE_CHECK}"
+
+              ls -lh "${WLAN_MODULE_CHECK}"
+
+              echo "Checking that no DWARF sections remain..."
+
+              if readelf -S "${WLAN_MODULE_CHECK}" | grep -q '\.debug_'; then
+              echo "ERROR: DWARF debug sections remain in wlan.ko."
+              exit 1
+               fi
+
+            echo "No DWARF debug sections remain in wlan.ko."
 
           find \
             "${GITHUB_WORKSPACE}/module-install" \
@@ -1794,29 +1876,48 @@ jobs:
         run: |
           set -euxo pipefail
 
-          WLAN_MODULE="$(
-            find module-install \
+           MODULE_INSTALL_DIR="${GITHUB_WORKSPACE}/module-install"
+
+             WLAN_MODULE="$(
+             find "${MODULE_INSTALL_DIR}" \
               -type f \
-              -name 'wlan.ko' \
-              -print -quit
-          )"
+              -name "wlan.ko" \
+              -print \
+              -quit
+               )"
 
-          test -n "${WLAN_MODULE}"
+           test -n "${WLAN_MODULE}" || {
+          echo "ERROR: wlan.ko was not found."
+           exit 1
+           }
 
-          echo "WLAN module:"
-          echo "${WLAN_MODULE}"
+          test -s "${WLAN_MODULE}" || {
+          echo "ERROR: wlan.ko is empty."
+           exit 1
+            }
 
-          VERMAGIC="$(
+           echo "WLAN module:"
+           echo "${WLAN_MODULE}"
+
+            echo "WLAN module size:"
+            ls -lh "${WLAN_MODULE}"
+
+            VERMAGIC="$(
             modinfo \
-              -F vermagic \
-              "${WLAN_MODULE}"
-          )"
+            -F vermagic \
+            "${WLAN_MODULE}"
+            )"
 
           echo "WLAN vermagic:"
           echo "${VERMAGIC}"
 
-          echo "${VERMAGIC}" | \
-            grep -Fq "${CLEAN_RELEASE}"
+          echo "${VERMAGIC}" |
+           grep -Fq "${CLEAN_RELEASE}" || {
+           echo "ERROR: WLAN vermagic does not match CLEAN_RELEASE."
+           echo "Expected:"
+           echo "${CLEAN_RELEASE}"
+           exit 1
+            }
 
           echo "WLAN vermagic verification passed."
 
