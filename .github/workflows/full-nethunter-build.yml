@@ -1917,39 +1917,47 @@ jobs:
       - name: Check WLAN undefined symbols
         shell: bash
         run: |
-         set -euxo pipefail
+           set -euxo pipefail
 
-         cd kernel
+           cd kernel
 
-         test -s kernel-build.log
+            KERNEL_BUILD_LOG="${GITHUB_WORKSPACE}/kernel-build.log"
 
-         echo "Checking WLAN module for undefined symbols..."
+            echo "Checking kernel build log:"
+           echo "${KERNEL_BUILD_LOG}"
 
-          if grep -E 'ERROR: "[^"]+" \[[^]]+\] wlan\.ko\] undefined' kernel-build.log; then
-          echo "ERROR: wlan.ko has undefined symbols."
-         exit 1
-         fi
+           test -s "${KERNEL_BUILD_LOG}" || {
+           echo "ERROR: kernel-build.log is missing or empty."
+           exit 1
+           }
+ 
+           echo "Checking WLAN module for undefined symbols..."
 
-              if grep -E 'undefined!$' kernel-build.log; then
-             echo "ERROR: undefined kernel symbols detected."
-             exit 1
-             fi
+           if grep -E 'ERROR: "[^"]+" \[[^]]+\] wlan\.ko\] undefined' \
+           "${KERNEL_BUILD_LOG}"; then
+           echo "ERROR: wlan.ko has undefined symbols."
+           exit 1
+           fi
+
+           if grep -E 'undefined!$' "${KERNEL_BUILD_LOG}"; then
+           echo "ERROR: undefined kernel symbols detected."
+           exit 1
+           fi
 
             WLAN_MODULE="$(
-           find "${GITHUB_WORKSPACE}/module-install" \
-           -type f \
-           -name "wlan.ko" \
-           -print -quit
-           )"
+            find "${GITHUB_WORKSPACE}/module-install" \
+            -type f \
+            -name "wlan.ko" \
+            -print -quit
+             )"
 
-          test -n "${WLAN_MODULE}"
+            test -n "${WLAN_MODULE}"
+            test -f "${WLAN_MODULE}"
 
-          test -f "${WLAN_MODULE}"
+           echo "Confirmed WLAN module exists:"
+           echo "${WLAN_MODULE}"
 
-          echo "Confirmed WLAN module exists:"
-          echo "${WLAN_MODULE}"
-
-          echo "WLAN undefined-symbol verification passed."
+           echo "WLAN undefined-symbol verification passed."
   
 
                 # ============================================================
@@ -1965,13 +1973,13 @@ jobs:
 
           mkdir -p \
             module-stage/vendor/lib/modules
-
-          WLAN_MODULE="$(
-            find module-install \
-              -type f \
-              -name 'wlan.ko' \
-              -print -quit
-          )"
+            
+           WLAN_MODULE="$(
+          find "${GITHUB_WORKSPACE}/module-install" \
+           -type f \
+            -name "wlan.ko" \
+            -print -quit
+             )"
 
           test -n "${WLAN_MODULE}"
 
