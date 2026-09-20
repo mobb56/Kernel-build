@@ -537,8 +537,22 @@ jobs:
             echo "Kernel Makefile LOCALVERSION export patched."
 
             # Keep LOCALVERSION defined but empty.
-            # This prevents setlocalversion from adding the unwanted "+".
             export LOCALVERSION=""
+
+            CONFIG_RELEASE="$(
+              make -s \
+                O="${OUT_DIR}" \
+                ARCH="${ARCH}" \
+                LLVM=1 \
+                LLVM_IAS=1 \
+                CROSS_COMPILE="${CROSS_COMPILE}" \
+                kernelrelease
+            )"
+
+            echo "Configured release: ${CONFIG_RELEASE}"
+            echo "Expected release:   ${CLEAN_RELEASE}"
+
+            test "${CONFIG_RELEASE}" = "${CLEAN_RELEASE}"
 
             # ============================================================
             # VERIFY KERNEL RELEASE
