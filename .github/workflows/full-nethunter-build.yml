@@ -1917,36 +1917,31 @@ jobs:
       - name: Check WLAN undefined symbols
         shell: bash
         run: |
-          set -euxo pipefail
+         set -euxo pipefail
 
-          test -s kernel-build.log
+         cd kernel
 
-          if grep -E \
-            'ERROR: "[^"]+" \[[^]]*wlan\.ko\] undefined!' \
-            kernel-build.log; then
+         test -s kernel-build.log
 
-            echo "ERROR: wlan.ko has undefined symbols."
-            exit 1
+         echo "Checking WLAN module for undefined symbols..."
+
+          if grep -E 'ERROR: "[^"]+" \[[^]]+\] wlan\.ko\] undefined' kernel-build.log; then
+          echo "ERROR: wlan.ko has undefined symbols."
+         exit 1
+         fi
+
+          if grep -E 'undefined!$' kernel-build.log; then
+          echo "ERROR: undefined kernel symbols detected."
+          exit 1
           fi
 
-          if grep -E \
-            'undefined!$' \
-            kernel-build.log; then
+         test -f "${WLAN_MODULE}"
 
-            echo "ERROR: undefined kernel symbols detected."
-            exit 1
-          fi
+         echo "Confirmed WLAN module exists:"
+         echo "${WLAN_MODULE}"
 
-          grep -Fq \
-            'LD [M] drivers/staging/qcacld-3.0/wlan.ko' \
-            kernel-build.log || {
-
-            echo "ERROR: wlan.ko was not linked."
-            exit 1
-          }
-
-          echo "WLAN MODPOST verification passed."
-
+         echo "WLAN undefined-symbol verification passed."
+  
 
                 # ============================================================
       # 28. STAGE FINAL MODULES
