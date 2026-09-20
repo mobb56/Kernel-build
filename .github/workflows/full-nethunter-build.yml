@@ -2085,25 +2085,31 @@ jobs:
         run: |
           set -euxo pipefail
 
-          cp \
-            kernel/out/arch/arm64/boot/Image \
-            AnyKernel3/Image
+           test -f "${GITHUB_WORKSPACE}/kernel/out/arch/arm64/boot/Image"
 
-          rm -rf \
-            AnyKernel3/modules
+           test -d "${GITHUB_WORKSPACE}/kernel/module-stage/vendor"
 
-          mkdir -p \
-            AnyKernel3/modules
+           test -d "${GITHUB_WORKSPACE}/AnyKernel3"
 
-          cp -a \
-            module-stage/vendor \
-            AnyKernel3/modules/
+           rm -rf "${GITHUB_WORKSPACE}/AnyKernel3/Image"
+           rm -rf "${GITHUB_WORKSPACE}/AnyKernel3/modules"
+
+           mkdir -p "${GITHUB_WORKSPACE}/AnyKernel3/modules"
+
+           cp \
+          "${GITHUB_WORKSPACE}/kernel/out/arch/arm64/boot/Image" \
+          "${GITHUB_WORKSPACE}/AnyKernel3/Image"
+
+           cp -a \
+          "${GITHUB_WORKSPACE}/kernel/module-stage/vendor" \
+          "${GITHUB_WORKSPACE}/AnyKernel3/modules/"
+
+          test -f "${GITHUB_WORKSPACE}/AnyKernel3/Image"
 
           test -f \
-            AnyKernel3/Image
+          "${GITHUB_WORKSPACE}/AnyKernel3/modules/vendor/lib/modules/qca_cld3_wlan.ko"
 
-          test -f \
-            AnyKernel3/modules/vendor/lib/modules/qca_cld3_wlan.ko
+          echo "AnyKernel3 preparation passed."
 
       # ============================================================
       # 31. CONFIGURE ANYKERNEL3
