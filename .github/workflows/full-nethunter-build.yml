@@ -17,10 +17,10 @@ env:
   ARCH: arm64
   CROSS_COMPILE: aarch64-linux-gnu-
   OUT_DIR: out
-  CLEAN_RELEASE: 4.19.325-cip135-st19-perf-g39bcecd5c63d
 
 jobs:
   build:
+    name: Moto G9 Power cebu NetHunter
     runs-on: ubuntu-22.04
     timeout-minutes: 180
 
@@ -32,70 +32,124 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            bc bison build-essential ccache flex git libelf-dev libssl-dev \
-            python3 rsync unzip zip \
-            clang-14 lld-14 llvm-14 \
-            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
-      - name: Verify toolchain
-        shell: bash
-        run: |
-          set -euxo pipefail
-          export PATH="${LLVM_DIR}/bin:${PATH}"
-          clang --version
-          ld.lld --version
-          llvm-objcopy --version
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            bc \
+            bison \
+            build-essential \
+            ccache \
+            clang-14 \
+            flex \
+            gcc-aarch64-linux-gnu \
+            git \
+            kmod \
+            libssl-dev \
+            lld-14 \
+            llvm-14 \
+            python3 \
+            rsync \
+            unzip \
+            wget \
+            zip
+
+          test -x "${LLVM_DIR}/bin/clang"
+          test -x "${LLVM_DIR}/bin/ld.lld"
+          test -x "${LLVM_DIR}/bin/llvm-ar"
+          test -x "${LLVM_DIR}/bin/llvm-nm"
+          test -x "${LLVM_DIR}/bin/llvm-objcopy"
+
+          "${LLVM_DIR}/bin/clang" --version
+          "${LLVM_DIR}/bin/ld.lld" --version
+          "${LLVM_DIR}/bin/llvm-ar" --version
           aarch64-linux-gnu-gcc --version
+          make --version
 
       - name: Clone Motorola kernel
         shell: bash
         run: |
           set -euxo pipefail
-          git clone --depth=1 --branch "${KERNEL_BRANCH}" \
-            "${KERNEL_REPO}" kernel
-          cd kernel
-          test -f arch/arm64/configs/vendor/bengal-perf_defconfig
-          test -f drivers/staging/qcacld-3.0/Kbuild
-          test -f drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c
-          test -f drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h
+
+          git clone \
+            --depth=1 \
+            --branch "${KERNEL_BRANCH}" \
+            "${KERNEL_REPO}" \
+            kernel
+
+          git -C kernel rev-parse HEAD
+          git -C kernel status --short
 
       - name: Clone NetHunter QCACLD3 reference
         shell: bash
         run: |
           set -euxo pipefail
-          git clone --depth=1 --branch "${NETHUNTER_BRANCH}" \
-            "${NETHUNTER_REPO}" nethunter-ref
+
+          git clone \
+            --depth=1 \
+            --branch "${NETHUNTER_BRANCH}" \
+            "${NETHUNTER_REPO}" \
+            nethunter-reference
+
+          R="nethunter-reference/drivers/staging/qcacld-3.0"
 
           for f in \
-            drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.c \
-            drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_validate.c \
-            drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c \
-            drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
-            drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h \
-            drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_validate.h \
-            drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_inject_security.h \
-            drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject_debug.h \
-            drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c \
-            drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h
+            core/hdd/src/wlan_hdd_frame_inject.c \
+            core/hdd/src/wlan_hdd_frame_validate.c \
+            core/hdd/src/wlan_hdd_inject_security.c \
+            core/hdd/src/wlan_hdd_frame_inject_debug.c \
+            core/wma/src/wma_frame_inject.c \
+            core/hdd/inc/wlan_hdd_frame_inject.h \
+            core/hdd/inc/wlan_hdd_frame_validate.h \
+            core/hdd/inc/wlan_hdd_inject_security.h \
+            core/hdd/inc/wlan_hdd_frame_inject_debug.h \
+            core/wma/inc/wma_frame_inject.h
           do
-            test -f "nethunter-ref/$f"
+            test -f "${R}/${f}"
           done
+
+          echo "QCACLD3 reference verified."
 
       - name: Clone AnyKernel3
         shell: bash
         run: |
           set -euxo pipefail
-          git clone --depth=1 --branch "${ANYKERNEL_BRANCH}" \
-            "${ANYKERNEL_REPO}" AnyKernel3
+
+          git clone \
+            --depth=1 \
+            --branch "${ANYKERNEL_BRANCH}" \
+            "${ANYKERNEL_REPO}" \
+            AnyKernel3
+
+          test -f AnyKernel3/anykernel.sh
+          test -f AnyKernel3/tools/ak3-core.sh
+          test -f AnyKernel3/META-INF/com/google/android/update-binary
+
+      - name: Verify source trees
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          test -f kernel/arch/arm64/configs/vendor/bengal-perf_defconfig
+          test -f kernel/drivers/staging/qcacld-3.0/Kbuild
+          test -f kernel/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h
+          test -f kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c
+
+          echo "Motorola source tree verified."
 
       - name: Configure LLVM 14
         shell: bash
         run: |
           set -euxo pipefail
-          echo "${LLVM_DIR}/bin" >> "${GITHUB_PATH}"
+
           export PATH="${LLVM_DIR}/bin:${PATH}"
+
+          command -v clang
+          command -v ld.lld
+          command -v llvm-ar
+          command -v llvm-nm
+          command -v llvm-objcopy
+
           clang --version
           ld.lld --version
 
@@ -103,6 +157,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+
           cd kernel
           rm -rf "${OUT_DIR}"
           mkdir -p "${OUT_DIR}"
@@ -111,25 +166,54 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+
           cd kernel
           export PATH="${LLVM_DIR}/bin:${PATH}"
-          make O="${OUT_DIR}" ARCH="${ARCH}" LLVM=1 LLVM_IAS=1 \
+
+          make \
+            O="${OUT_DIR}" \
+            ARCH="${ARCH}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
             vendor/bengal-perf_defconfig
-          test -s "${OUT_DIR}/.config"
+
+          CLEAN_RELEASE="$({
+            make -s \
+              O="${OUT_DIR}" \
+              ARCH="${ARCH}" \
+              LLVM=1 \
+              LLVM_IAS=1 \
+              CROSS_COMPILE="${CROSS_COMPILE}" \
+              kernelrelease
+          })"
+
+          test -n "${CLEAN_RELEASE}"
+
+          case "${CLEAN_RELEASE}" in
+            *-dirty)
+              echo "ERROR: base checkout is already dirty"
+              exit 1
+              ;;
+          esac
+
+          echo "CLEAN_RELEASE=${CLEAN_RELEASE}" >> "${GITHUB_ENV}"
+          echo "Clean kernel release: ${CLEAN_RELEASE}"
 
       - name: Create NetHunter configuration
         shell: bash
         run: |
           set -euxo pipefail
-          cd kernel
-          mkdir -p nethunter-config
-          cat > nethunter-config/cebu-nethunter.config <<'EOF'
+
+          mkdir -p kernel/nethunter-config
+
+          cat > kernel/nethunter-config/cebu-nethunter.config <<'EOF'
+          # Moto G9 Power cebu NetHunter configuration
+
           # HID
-          CONFIG_HID=y
           CONFIG_HIDRAW=y
           CONFIG_UHID=y
-          
+
           # Bluetooth
           CONFIG_BT=y
           CONFIG_BT_BREDR=y
@@ -140,28 +224,28 @@ jobs:
           CONFIG_BT_BNEP_MC_FILTER=y
           CONFIG_BT_BNEP_PROTO_FILTER=y
           CONFIG_BT_HIDP=m
-          CONFIG_BT_HCIBTUSB=m
-          CONFIG_BT_HCIBTUSB_BCM=y
-          CONFIG_BT_HCIBTUSB_RTL=y
           CONFIG_BT_HCIUART=m
           CONFIG_BT_HCIUART_H4=y
           CONFIG_BT_HCIUART_BCM=y
           CONFIG_BT_HCIUART_RTL=y
+          CONFIG_BT_HCIBTUSB=m
+          CONFIG_BT_HCIBTUSB_BCM=y
+          CONFIG_BT_HCIBTUSB_RTL=y
           CONFIG_BT_HCIVHCI=m
-          
+
           # USB gadget
           CONFIG_USB_GADGET=y
           CONFIG_USB_CONFIGFS=y
+          CONFIG_USB_CONFIGFS_UEVENT=y
           CONFIG_USB_CONFIGFS_NCM=y
           CONFIG_USB_CONFIGFS_RNDIS=y
           CONFIG_USB_CONFIGFS_ECM=y
           CONFIG_USB_CONFIGFS_EEM=y
           CONFIG_USB_CONFIGFS_F_FS=y
           CONFIG_USB_CONFIGFS_F_HID=y
-          CONFIG_USB_CONFIGFS_ACM=y
           CONFIG_USB_CONFIGFS_MASS_STORAGE=y
-          
-          # USB serial/network
+
+          # USB serial / networking
           CONFIG_USB_ACM=m
           CONFIG_USB_SERIAL=m
           CONFIG_USB_SERIAL_GENERIC=y
@@ -171,47 +255,95 @@ jobs:
           CONFIG_USB_NET_RNDIS_HOST=m
           CONFIG_USB_RTL8150=m
           CONFIG_USB_RTL8152=m
-          
-          # Qualcomm WLAN
-          CONFIG_QCA_CLD_WLAN=m
-          
-          # Existing Motorola sensor-module dependency
+
+          # Sensors
           CONFIG_SENSORS_SSC=y
           CONFIG_SENSORS_CLASS=m
+
+          # Qualcomm WLAN
+          CONFIG_QCA_CLD_WLAN=m
+
+          # Basic networking
+          CONFIG_PACKET=y
+          CONFIG_NETFILTER=y
           EOF
+
+          test -s kernel/nethunter-config/cebu-nethunter.config
+          cat kernel/nethunter-config/cebu-nethunter.config
 
       - name: Merge NetHunter configuration
         shell: bash
         run: |
           set -euxo pipefail
+
           cd kernel
           export PATH="${LLVM_DIR}/bin:${PATH}"
 
-          scripts/kconfig/merge_config.sh -m -O "${OUT_DIR}" \
+          scripts/kconfig/merge_config.sh \
+            -m \
+            -O "${OUT_DIR}" \
             "${OUT_DIR}/.config" \
             nethunter-config/cebu-nethunter.config
 
-          make O="${OUT_DIR}" ARCH="${ARCH}" LLVM=1 LLVM_IAS=1 \
-            CROSS_COMPILE="${CROSS_COMPILE}" olddefconfig
+          make \
+            O="${OUT_DIR}" \
+            ARCH="${ARCH}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            olddefconfig
 
-          BASE_VERSION="$(make -s O="${OUT_DIR}" ARCH="${ARCH}" LLVM=1 \
-            LLVM_IAS=1 CROSS_COMPILE="${CROSS_COMPILE}" kernelversion)"
-          test "${BASE_VERSION}" = "4.19.325"
+          BASE_VERSION="$({
+            make -s \
+              O="${OUT_DIR}" \
+              ARCH="${ARCH}" \
+              LLVM=1 \
+              LLVM_IAS=1 \
+              CROSS_COMPILE="${CROSS_COMPILE}" \
+              kernelversion
+          })"
 
           RELEASE_SUFFIX="${CLEAN_RELEASE#${BASE_VERSION}}"
 
-          scripts/config --file "${OUT_DIR}/.config" \
+          echo "Base version:   ${BASE_VERSION}"
+          echo "Clean release:  ${CLEAN_RELEASE}"
+          echo "Release suffix: ${RELEASE_SUFFIX}"
+
+          scripts/config \
+            --file "${OUT_DIR}/.config" \
             --disable LOCALVERSION_AUTO
-          scripts/config --file "${OUT_DIR}/.config" \
+
+          scripts/config \
+            --file "${OUT_DIR}/.config" \
             --set-str LOCALVERSION "${RELEASE_SUFFIX}"
 
-          # IMPORTANT: no olddefconfig after this point.
-          grep -Fxq 'CONFIG_LOCALVERSION_AUTO=n' "${OUT_DIR}/.config"
-          grep -Fq 'CONFIG_LOCALVERSION="-cip135-st19-perf-g39bcecd5c63d"' \
-            "${OUT_DIR}/.config"
+          # Rebuild auto.conf while keeping explicit settings.
+          make \
+            O="${OUT_DIR}" \
+            ARCH="${ARCH}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            olddefconfig
 
-          CONFIG_RELEASE="$(make -s O="${OUT_DIR}" ARCH="${ARCH}" LLVM=1 \
-            LLVM_IAS=1 CROSS_COMPILE="${CROSS_COMPILE}" kernelrelease)"
+          LOCALVERSION_AUTO_STATE="$({
+            scripts/config \
+              --file "${OUT_DIR}/.config" \
+              --state LOCALVERSION_AUTO
+          })"
+
+          test "${LOCALVERSION_AUTO_STATE}" = "n"
+
+          CONFIG_RELEASE="$({
+            make -s \
+              O="${OUT_DIR}" \
+              ARCH="${ARCH}" \
+              LLVM=1 \
+              LLVM_IAS=1 \
+              CROSS_COMPILE="${CROSS_COMPILE}" \
+              kernelrelease
+          })"
+
           echo "Configured release: ${CONFIG_RELEASE}"
           test "${CONFIG_RELEASE}" = "${CLEAN_RELEASE}"
 
@@ -219,40 +351,40 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+
           cd kernel
           CONFIG="${OUT_DIR}/.config"
 
           required=(
-            CONFIG_HIDRAW=y
-            CONFIG_UHID=y
-            CONFIG_BT=y
-            CONFIG_BT_BREDR=y
-            CONFIG_BT_LE=y
-            CONFIG_BT_RFCOMM=m
-            CONFIG_BT_BNEP=m
-            CONFIG_BT_HIDP=m
-            CONFIG_BT_HCIBTUSB=m
-            CONFIG_BT_HCIVHCI=m
-            CONFIG_USB_GADGET=y
-            CONFIG_USB_CONFIGFS=y
-            CONFIG_USB_CONFIGFS_NCM=y
-            CONFIG_USB_CONFIGFS_RNDIS=y
-            CONFIG_USB_CONFIGFS_ECM=y
-            CONFIG_USB_CONFIGFS_EEM=y
-            CONFIG_USB_CONFIGFS_F_HID=y
-            CONFIG_USB_CONFIGFS_ACM=y
-            CONFIG_USB_ACM=m
-            CONFIG_USB_SERIAL=m
-            CONFIG_USB_SERIAL_GENERIC=y
-            CONFIG_USB_USBNET=y
-            CONFIG_USB_NET_CDCETHER=m
-            CONFIG_USB_NET_CDC_NCM=m
-            CONFIG_USB_NET_RNDIS_HOST=m
-            CONFIG_USB_RTL8150=m
-            CONFIG_USB_RTL8152=m
-            CONFIG_SENSORS_SSC=y
-            CONFIG_SENSORS_CLASS=m
-            CONFIG_QCA_CLD_WLAN=m
+            "CONFIG_HIDRAW=y"
+            "CONFIG_UHID=y"
+            "CONFIG_BT=y"
+            "CONFIG_BT_BREDR=y"
+            "CONFIG_BT_LE=y"
+            "CONFIG_BT_RFCOMM=m"
+            "CONFIG_BT_BNEP=m"
+            "CONFIG_BT_HIDP=m"
+            "CONFIG_BT_HCIUART=m"
+            "CONFIG_BT_HCIVHCI=m"
+            "CONFIG_USB_GADGET=y"
+            "CONFIG_USB_CONFIGFS=y"
+            "CONFIG_USB_CONFIGFS_NCM=y"
+            "CONFIG_USB_CONFIGFS_RNDIS=y"
+            "CONFIG_USB_CONFIGFS_ECM=y"
+            "CONFIG_USB_CONFIGFS_EEM=y"
+            "CONFIG_USB_CONFIGFS_F_HID=y"
+            "CONFIG_USB_ACM=m"
+            "CONFIG_USB_SERIAL=m"
+            "CONFIG_USB_SERIAL_GENERIC=y"
+            "CONFIG_USB_USBNET=y"
+            "CONFIG_USB_NET_CDCETHER=m"
+            "CONFIG_USB_NET_CDC_NCM=m"
+            "CONFIG_USB_NET_RNDIS_HOST=m"
+            "CONFIG_USB_RTL8150=m"
+            "CONFIG_USB_RTL8152=m"
+            "CONFIG_SENSORS_SSC=y"
+            "CONFIG_SENSORS_CLASS=m"
+            "CONFIG_QCA_CLD_WLAN=m"
           )
 
           for item in "${required[@]}"; do
@@ -262,489 +394,1043 @@ jobs:
             }
           done
 
-          grep -Fxq 'CONFIG_LOCALVERSION_AUTO=n' "${CONFIG}"
-          echo "Important configuration verified."
+          test \
+            "$(scripts/config --file "${CONFIG}" --state LOCALVERSION_AUTO)" \
+            = "n"
+
+          if grep -Eq \
+            '^CONFIG_FEATURE_(MONITOR_MODE_SUPPORT|FRAME_INJECTION_SUPPORT)=' \
+            "${CONFIG}"; then
+            echo "ERROR: QCACLD3 feature variables leaked into kernel .config"
+            exit 1
+          fi
+
+          echo "Kernel configuration verification passed."
 
       - name: Import QCACLD3 injection framework
         shell: bash
         run: |
           set -euxo pipefail
 
-          copy_one() {
-            mkdir -p "$(dirname "$2")"
-            cp -f "$1" "$2"
-          }
+          K="kernel/drivers/staging/qcacld-3.0"
+          R="nethunter-reference/drivers/staging/qcacld-3.0"
 
-          copy_one nethunter-ref/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.c \
-            kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.c
-          copy_one nethunter-ref/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_validate.c \
-            kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_validate.c
-          copy_one nethunter-ref/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c \
-            kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c
-          copy_one nethunter-ref/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
-            kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c
+          cp \
+            "${R}/core/hdd/src/wlan_hdd_frame_inject.c" \
+            "${K}/core/hdd/src/"
 
-          copy_one nethunter-ref/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h \
-            kernel/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h
-          copy_one nethunter-ref/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_validate.h \
-            kernel/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_validate.h
-          copy_one nethunter-ref/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_inject_security.h \
-            kernel/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_inject_security.h
-          copy_one nethunter-ref/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject_debug.h \
-            kernel/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject_debug.h
+          cp \
+            "${R}/core/hdd/src/wlan_hdd_frame_validate.c" \
+            "${K}/core/hdd/src/"
 
-          copy_one nethunter-ref/drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c \
-            kernel/drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c
-          copy_one nethunter-ref/drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h \
-            kernel/drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h
+          cp \
+            "${R}/core/hdd/src/wlan_hdd_inject_security.c" \
+            "${K}/core/hdd/src/"
+
+          cp \
+            "${R}/core/hdd/src/wlan_hdd_frame_inject_debug.c" \
+            "${K}/core/hdd/src/"
+
+          cp \
+            "${R}/core/wma/src/wma_frame_inject.c" \
+            "${K}/core/wma/src/"
+
+          cp \
+            "${R}/core/hdd/inc/wlan_hdd_frame_inject.h" \
+            "${K}/core/hdd/inc/"
+
+          cp \
+            "${R}/core/hdd/inc/wlan_hdd_frame_validate.h" \
+            "${K}/core/hdd/inc/"
+
+          cp \
+            "${R}/core/hdd/inc/wlan_hdd_inject_security.h" \
+            "${K}/core/hdd/inc/"
+
+          cp \
+            "${R}/core/hdd/inc/wlan_hdd_frame_inject_debug.h" \
+            "${K}/core/hdd/inc/"
+
+          cp \
+            "${R}/core/wma/inc/wma_frame_inject.h" \
+            "${K}/core/wma/inc/"
+
+          echo "QCACLD3 injection framework imported."
 
       - name: Add injection context to Motorola HDD
         shell: bash
         run: |
           set -euxo pipefail
+
           python3 <<'PY'
           from pathlib import Path
-          p = Path("kernel/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h")
-          s = p.read_text()
-          line = "\tstruct hdd_injection_ctx *injection_ctx;"
-          if line not in s:
-              marker = "\tqdf_atomic_t net_dev_hold_ref_count[NET_DEV_HOLD_ID_MAX];"
-              if marker not in s:
-                  raise SystemExit("ERROR: HDD injection context anchor not found.")
-              s = s.replace(marker, marker +
-                  "\n#ifdef FEATURE_FRAME_INJECTION_SUPPORT\n" +
-                  line + "\n#endif", 1)
-              p.write_text(s)
+
+          path = Path(
+              "kernel/drivers/staging/qcacld-3.0/core/hdd/inc/"
+              "wlan_hdd_main.h"
+          )
+
+          text = path.read_text()
+
+          if "struct hdd_injection_ctx;" not in text:
+              marker = "struct hdd_adapter {"
+
+              if marker not in text:
+                  raise SystemExit(
+                      "ERROR: struct hdd_adapter marker not found"
+                  )
+
+              text = text.replace(
+                  marker,
+                  "struct hdd_injection_ctx;\n\n" + marker,
+                  1
+              )
+
+          if "struct hdd_injection_ctx *injection_ctx;" not in text:
+              marker = (
+                  "\tqdf_atomic_t net_dev_hold_ref_count"
+                  "[NET_DEV_HOLD_ID_MAX];\n"
+              )
+
+              if marker not in text:
+                  raise SystemExit(
+                      "ERROR: injection context insertion anchor not found"
+                  )
+
+              addition = (
+                  marker
+                  + "\n"
+                  + "#ifdef FEATURE_FRAME_INJECTION_SUPPORT\n"
+                  + "\tstruct hdd_injection_ctx *injection_ctx;\n"
+                  + "#endif\n"
+              )
+
+              text = text.replace(
+                  marker,
+                  addition,
+                  1
+              )
+
+          path.write_text(text)
+          print("Injection context added.")
           PY
-          grep -Fq 'struct hdd_injection_ctx *injection_ctx;' \
-            kernel/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h
 
       - name: Fix 4.19 credential compatibility
         shell: bash
         run: |
           set -euxo pipefail
+
           python3 <<'PY'
           from pathlib import Path
           import re
 
-          p = Path("kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c")
-          s = p.read_text()
-
-          pat = re.compile(
-              r"QDF_STATUS\s+hdd_check_injection_capability\s*"
-              r"\(\s*struct\s+task_struct\s*\*\s*task\s*\)\s*\{.*?\n\}",
-              re.S
+          path = Path(
+              "kernel/drivers/staging/qcacld-3.0/core/hdd/src/"
+              "wlan_hdd_inject_security.c"
           )
 
-          replacement = (
-              "QDF_STATUS hdd_check_injection_capability(\n"
-              "\tstruct task_struct *task)\n"
-              "{\n"
-              "\tbool has_capability;\n\n"
-              "\thdd_security_debug(\n"
-              '\t\t"Checking injection capabilities");\n\n'
-              "\tif (!task)\n"
-              "\t\ttask = current;\n\n"
-              "\thas_capability = capable(CAP_NET_RAW);\n\n"
-              "\tif (!has_capability) {\n"
-              "\t\thdd_security_warn(\n"
-              '\t\t\t"Process lacks CAP_NET_RAW capability");\n\n'
-              "\t\treturn QDF_STATUS_E_PERM;\n"
-              "\t}\n\n"
-              "\thdd_security_debug(\n"
-              '\t\t"Process has CAP_NET_RAW capability");\n\n'
-              "\treturn QDF_STATUS_SUCCESS;\n"
-              "}"
+          text = path.read_text()
+
+          pattern = re.compile(
+              r"""
+              QDF_STATUS
+              \s+
+              hdd_check_injection_capability
+              \s*
+              \(
+                  \s*struct\s+task_struct\s*\*\s*task\s*
+              \)
+              \s*
+              \{
+              .*?
+              \n\}
+              """,
+              re.S | re.X,
           )
 
-          ns, count = pat.subn(replacement, s, count=1)
+          replacement = r'''QDF_STATUS hdd_check_injection_capability(
+              struct task_struct *task)
+          {
+              bool has_capability;
+
+              hdd_security_debug(
+                  "Checking injection capabilities");
+
+              if (!task)
+                  task = current;
+
+              has_capability = capable(CAP_NET_RAW);
+
+              if (!has_capability) {
+                  hdd_security_warn(
+                      "Process lacks CAP_NET_RAW capability");
+
+                  return QDF_STATUS_E_PERM;
+              }
+
+              hdd_security_debug(
+                  "Process has CAP_NET_RAW capability");
+
+              return QDF_STATUS_SUCCESS;
+          }'''
+
+          new_text, count = pattern.subn(
+              replacement,
+              text,
+              count=1,
+          )
+
           if count != 1:
-              raise SystemExit("ERROR: hdd_check_injection_capability() was not replaced.")
-          p.write_text(ns)
+              raise SystemExit(
+                  "ERROR: hdd_check_injection_capability() was not replaced"
+              )
+
+          path.write_text(new_text)
           PY
 
-          SRC=kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c
-          if grep -nE '^[[:space:]]*(cred|const struct cred|put_cred|get_task_cred)' "$SRC"; then
-            echo "ERROR: incompatible credential code remains."
+          if grep -nE \
+            '^[[:space:]]*(cred|const struct cred|put_cred|get_task_cred)' \
+            kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c; then
+            echo "ERROR: incompatible credential code remains"
             exit 1
           fi
-          grep -Fq 'capable(CAP_NET_RAW)' "$SRC"
+
+          grep -Fq \
+            'capable(CAP_NET_RAW)' \
+            kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c
+
           echo "4.19 credential compatibility verified."
 
       - name: Integrate injection lifecycle
         shell: bash
         run: |
           set -euxo pipefail
+
           python3 <<'PY'
           from pathlib import Path
-          p = Path("kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c")
-          s = p.read_text()
 
-          inc = '#include "wlan_hdd_frame_inject.h"'
-          anchor = '#include "wlan_hdd_rx_monitor.h"'
-          if inc not in s:
-              if anchor not in s:
-                  raise SystemExit("ERROR: HDD include anchor not found.")
-              s = s.replace(anchor, anchor + "\n" + inc, 1)
-
-          init_anchor = "\thdd_periodic_sta_stats_init(adapter);\n\n\treturn adapter;"
-          init = (
-              "\thdd_periodic_sta_stats_init(adapter);\n\n"
-              "#ifdef FEATURE_FRAME_INJECTION_SUPPORT\n"
-              "\tif (QDF_STATUS_SUCCESS != hdd_init_frame_injection(adapter)) {\n"
-              "\t\thdd_err(\"Failed to initialize frame injection for adapter\");\n"
-              "\t}\n"
-              "#endif\n\n"
-              "\treturn adapter;"
+          path = Path(
+              "kernel/drivers/staging/qcacld-3.0/core/hdd/src/"
+              "wlan_hdd_main.c"
           )
-          if "hdd_init_frame_injection(adapter)" not in s:
-              if init_anchor not in s:
-                  raise SystemExit("ERROR: HDD adapter-init anchor not found.")
-              s = s.replace(init_anchor, init, 1)
 
-          cleanup_anchor = "\thdd_adapter_feature_update_work_deinit(adapter);\n\thdd_cleanup_adapter(hdd_ctx, adapter, rtnl_held);"
-          cleanup = (
-              "\thdd_adapter_feature_update_work_deinit(adapter);\n\n"
-              "#ifdef FEATURE_FRAME_INJECTION_SUPPORT\n"
-              "\thdd_deinit_frame_injection(adapter);\n"
-              "#endif\n\n"
-              "\thdd_cleanup_adapter(hdd_ctx, adapter, rtnl_held);"
-          )
-          if "hdd_deinit_frame_injection(adapter)" not in s:
-              if cleanup_anchor not in s:
-                  raise SystemExit("ERROR: HDD cleanup anchor not found.")
-              s = s.replace(cleanup_anchor, cleanup, 1)
+          text = path.read_text()
 
-          p.write_text(s)
+          include_marker = '#include "wlan_hdd_rx_monitor.h"\n'
+
+          if '#include "wlan_hdd_frame_inject.h"' not in text:
+              if include_marker not in text:
+                  raise SystemExit(
+                      "ERROR: RX monitor include marker not found"
+                  )
+
+              text = text.replace(
+                  include_marker,
+                  include_marker
+                  '#ifdef FEATURE_FRAME_INJECTION_SUPPORT\n'
+                  '#include "wlan_hdd_frame_inject.h"\n'
+                  '#endif\n',
+                  1,
+              )
+
+          if "hdd_init_frame_injection(adapter)" not in text:
+              marker = (
+                  "\thdd_periodic_sta_stats_init(adapter);\n"
+                  "\n"
+                  "\treturn adapter;"
+              )
+
+              if marker not in text:
+                  raise SystemExit(
+                      "ERROR: adapter initialization marker not found"
+                  )
+
+              replacement = (
+                  "\thdd_periodic_sta_stats_init(adapter);\n"
+                  "\n"
+                  "#ifdef FEATURE_FRAME_INJECTION_SUPPORT\n"
+                  "\tif (QDF_STATUS_SUCCESS !=\n"
+                  "\t    hdd_init_frame_injection(adapter)) {\n"
+                  "\t\thdd_err(\n"
+                  "\t\t\t\"Failed to initialize frame injection for adapter\");\n"
+                  "\t\t/* Continue without frame injection support */\n"
+                  "\t}\n"
+                  "#endif\n"
+                  "\n"
+                  "\treturn adapter;"
+              )
+
+              text = text.replace(marker, replacement, 1)
+
+          if "hdd_deinit_frame_injection(adapter)" not in text:
+              marker = (
+                  "\thdd_adapter_feature_update_work_deinit(adapter);\n"
+                  "\thdd_cleanup_adapter(hdd_ctx, adapter, rtnl_held);"
+              )
+
+              if marker not in text:
+                  raise SystemExit(
+                      "ERROR: adapter cleanup marker not found"
+                  )
+
+              replacement = (
+                  "\thdd_adapter_feature_update_work_deinit(adapter);\n"
+                  "\n"
+                  "#ifdef FEATURE_FRAME_INJECTION_SUPPORT\n"
+                  "\thdd_deinit_frame_injection(adapter);\n"
+                  "#endif\n"
+                  "\n"
+                  "\thdd_cleanup_adapter(hdd_ctx, adapter, rtnl_held);"
+              )
+
+              text = text.replace(marker, replacement, 1)
+
+          path.write_text(text)
+          print("Injection lifecycle integrated.")
           PY
-
-          SRC=kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c
-          grep -Fq '#include "wlan_hdd_frame_inject.h"' "$SRC"
-          grep -Fq 'hdd_init_frame_injection(adapter)' "$SRC"
-          grep -Fq 'hdd_deinit_frame_injection(adapter)' "$SRC"
 
       - name: Patch QCACLD3 Kbuild
         shell: bash
         run: |
           set -euxo pipefail
+
           python3 <<'PY'
           from pathlib import Path
-          p = Path("kernel/drivers/staging/qcacld-3.0/Kbuild")
-          s = p.read_text()
 
-          if "$(HDD_SRC_DIR)/wlan_hdd_frame_inject.o" not in s:
-              a = "$(HDD_SRC_DIR)/wlan_hdd_wowl.o"
-              if a not in s:
-                  raise SystemExit("ERROR: HDD Kbuild anchor not found.")
-              s = s.replace(
-                  a,
-                  a + " \\\n"
-                  "  $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o \\\n"
-                  "  $(HDD_SRC_DIR)/wlan_hdd_frame_validate.o \\\n"
-                  "  $(HDD_SRC_DIR)/wlan_hdd_inject_security.o \\\n"
-                  "  $(HDD_SRC_DIR)/wlan_hdd_frame_inject_debug.o",
-                  1
+          path = Path(
+              "kernel/drivers/staging/qcacld-3.0/Kbuild"
+          )
+
+          text = path.read_text()
+
+          if "wlan_hdd_frame_inject.o" not in text:
+              anchor = "\t\t$(HDD_SRC_DIR)/wlan_hdd_wowl.o"
+
+              if anchor not in text:
+                  raise SystemExit(
+                      "ERROR: HDD Kbuild anchor not found"
+                  )
+
+              replacement = (
+                  anchor
+                  + "\n"
+                  + "ifeq ($(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT), y)\n"
+                  + "HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o\n"
+                  + "HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_validate.o\n"
+                  + "HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_inject_security.o\n"
+                  + "HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject_debug.o\n"
+                  + "endif"
               )
 
-          if "$(WMA_SRC_DIR)/wma_frame_inject.o" not in s:
-              a = "$(WMA_NDP_OBJS)"
-              if a not in s:
-                  raise SystemExit("ERROR: WMA Kbuild anchor not found.")
-              s = s.replace(
-                  a,
-                  a + " \\\n  $(WMA_SRC_DIR)/wma_frame_inject.o",
-                  1
+              text = text.replace(anchor, replacement, 1)
+
+          if "wma_frame_inject.o" not in text:
+              anchor = "\t\t$(WMA_NDP_OBJS)"
+
+              if anchor not in text:
+                  raise SystemExit(
+                      "ERROR: WMA Kbuild anchor not found"
+                  )
+
+              replacement = (
+                  anchor
+                  + "\n"
+                  + "ifeq ($(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT), y)\n"
+                  + "WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o\n"
+                  + "endif"
               )
 
-          if "-I $(srctree)/$(WLAN_ROOT)/$(HDD_INC_DIR)" not in s:
-              a = "$(CMN_SYS_INC)"
-              if a not in s:
-                  raise SystemExit("ERROR: INCS anchor not found.")
-              s = s.replace(
-                  a,
-                  a + " \\\n"
-                  "          -I $(srctree)/$(WLAN_ROOT)/$(HDD_INC_DIR) \\\n"
-                  "          -I $(srctree)/$(WLAN_ROOT)/$(HDD_SRC_DIR) \\\n"
-                  "          -I $(srctree)/$(WLAN_ROOT)/$(WMA_INC_DIR) \\\n"
-                  "          -I $(srctree)/$(WLAN_ROOT)/$(WMA_SRC_DIR)",
-                  1
+              text = text.replace(anchor, replacement, 1)
+
+          if "CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y" not in text:
+              monitor_marker = (
+                  "#For both legacy and lithium chip's monitor mode config\n"
+                  "ifeq ($(CONFIG_FEATURE_MONITOR_MODE_SUPPORT), y)"
               )
 
-          if "cppflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT" not in s:
-              a = "ccflags-y += $(INCS)"
-              if a not in s:
-                  raise SystemExit("ERROR: ccflags anchor not found.")
-              s = s.replace(
-                  a,
+              if monitor_marker not in text:
+                  raise SystemExit(
+                      "ERROR: existing Motorola monitor-mode Kbuild block not found"
+                  )
+
+              injection_block = (
+                  "ifeq ($(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT), y)\n"
                   "cppflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT\n"
-                  "CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y\n" + a,
-                  1
+                  "CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y\n"
+                  "endif\n\n"
               )
 
-          p.write_text(s)
+              text = text.replace(
+                  monitor_marker,
+                  injection_block + monitor_marker,
+                  1,
+              )
+
+          path.write_text(text)
+          print("QCACLD3 Kbuild patched.")
           PY
 
-          K=kernel/drivers/staging/qcacld-3.0/Kbuild
-          grep -Fq 'wlan_hdd_frame_inject.o' "$K"
-          grep -Fq 'wlan_hdd_frame_validate.o' "$K"
-          grep -Fq 'wlan_hdd_inject_security.o' "$K"
-          grep -Fq 'wlan_hdd_frame_inject_debug.o' "$K"
-          grep -Fq 'wma_frame_inject.o' "$K"
-          grep -Fq 'FEATURE_FRAME_INJECTION_SUPPORT' "$K"
+      - name: Verify QCACLD3 Kbuild
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          K="kernel/drivers/staging/qcacld-3.0/Kbuild"
+
+          grep -Fq \
+            'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y' \
+            "${K}"
+
+          grep -Fq \
+            'cppflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT' \
+            "${K}"
+
+          grep -Fq \
+            'CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y' \
+            "${K}"
+
+          grep -Fq 'wlan_hdd_frame_inject.o' "${K}"
+          grep -Fq 'wlan_hdd_frame_validate.o' "${K}"
+          grep -Fq 'wlan_hdd_inject_security.o' "${K}"
+          grep -Fq 'wlan_hdd_frame_inject_debug.o' "${K}"
+          grep -Fq 'wma_frame_inject.o' "${K}"
+
+          echo "QCACLD3 Kbuild verification passed."
 
       - name: Verify source adaptation
         shell: bash
         run: |
           set -euxo pipefail
-          test -f kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.c
-          test -f kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_validate.c
-          test -f kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c
-          test -f kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c
-          test -f kernel/drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c
-          grep -Fq 'struct hdd_injection_ctx *injection_ctx;' \
-            kernel/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h
-          grep -Fq 'hdd_init_frame_injection(adapter)' \
-            kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c
-          grep -Fq 'hdd_deinit_frame_injection(adapter)' \
-            kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c
+
+          K="kernel/drivers/staging/qcacld-3.0"
+
+          for f in \
+            core/hdd/src/wlan_hdd_frame_inject.c \
+            core/hdd/src/wlan_hdd_frame_validate.c \
+            core/hdd/src/wlan_hdd_inject_security.c \
+            core/hdd/src/wlan_hdd_frame_inject_debug.c \
+            core/wma/src/wma_frame_inject.c \
+            core/hdd/inc/wlan_hdd_frame_inject.h \
+            core/hdd/inc/wlan_hdd_frame_validate.h \
+            core/hdd/inc/wlan_hdd_inject_security.h \
+            core/hdd/inc/wlan_hdd_frame_inject_debug.h \
+            core/wma/inc/wma_frame_inject.h
+          do
+            test -f "${K}/${f}"
+          done
+
+          grep -Fq \
+            'struct hdd_injection_ctx *injection_ctx;' \
+            "${K}/core/hdd/inc/wlan_hdd_main.h"
+
+          grep -Fq \
+            'hdd_init_frame_injection(adapter)' \
+            "${K}/core/hdd/src/wlan_hdd_main.c"
+
+          grep -Fq \
+            'hdd_deinit_frame_injection(adapter)' \
+            "${K}/core/hdd/src/wlan_hdd_main.c"
+
+          if grep -nE \
+            '^[[:space:]]*(cred|const struct cred|put_cred|get_task_cred)' \
+            "${K}/core/hdd/src/wlan_hdd_inject_security.c"; then
+            echo "ERROR: incompatible credential code remains"
+            exit 1
+          fi
+
+          grep -Fq \
+            'capable(CAP_NET_RAW)' \
+            "${K}/core/hdd/src/wlan_hdd_inject_security.c"
+
+          echo "Source adaptation verified."
+
+      # ============================================================
+      # DO NOT CHANGE THIS BUILD COMMAND
+      # This is the working kernel build.
+      # ============================================================
 
       - name: Build kernel and modules
+        id: build
         shell: bash
         run: |
           set -o pipefail
+
           cd kernel
           export PATH="${LLVM_DIR}/bin:${PATH}"
-          mkdir -p "${GITHUB_WORKSPACE}/artifacts"
 
-          {
-            echo "===== BUILD START ====="
-            date -u
-            echo "Kernel commit: $(git rev-parse HEAD)"
-            make -j"$(nproc)" \
-              O="${OUT_DIR}" \
-              ARCH="${ARCH}" \
-              LLVM=1 \
-              LLVM_IAS=1 \
-              CROSS_COMPILE="${CROSS_COMPILE}" \
-              Image modules
-            echo "===== BUILD END ====="
-          } 2>&1 | tee "${GITHUB_WORKSPACE}/artifacts/kernel-build.log"
+          BUILD_LOG="${GITHUB_WORKSPACE}/kernel-build.log"
 
-      - name: Show build failure context
-        if: failure()
+          make -j2 \
+            O="${OUT_DIR}" \
+            ARCH="${ARCH}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            Image \
+            modules \
+            2>&1 | tee "${BUILD_LOG}"
+
+          status="${PIPESTATUS[0]}"
+
+          if [ "${status}" -ne 0 ]; then
+            echo "Kernel build failed with status ${status}."
+            exit "${status}"
+          fi
+
+      - name: Diagnose failed kernel build
+        if: ${{ failure() && steps.build.outcome == 'failure' }}
         shell: bash
         run: |
           set +e
-          if [ -f artifacts/kernel-build.log ]; then
-            echo "===== ERROR LINES ====="
-            grep -nEi 'error:|error |undefined reference|undefined symbol|No rule to make|fatal error|Error [0-9]+' \
-              artifacts/kernel-build.log | tail -n 100 || true
-            echo "===== LAST 300 LINES ====="
-            tail -n 300 artifacts/kernel-build.log
-          fi
+
+          echo "========== LAST BUILD LOG =========="
+          tail -n 250 kernel-build.log || true
+
+          echo "========== ERROR LINES =========="
+          grep -nE \
+            '(^|[^A-Za-z])(error:|Error:|ERROR:|undefined!|No such file|No rule to make target|recipe for target).*' \
+            kernel-build.log | tail -n 100 || true
+
+          echo "===================================="
+          exit 1
 
       - name: Verify kernel release
         shell: bash
         run: |
           set -euxo pipefail
+
           cd kernel
           export PATH="${LLVM_DIR}/bin:${PATH}"
-          BUILT_RELEASE="$(make -s O="${OUT_DIR}" ARCH="${ARCH}" LLVM=1 \
-            LLVM_IAS=1 CROSS_COMPILE="${CROSS_COMPILE}" kernelrelease)"
-          echo "Built release: ${BUILT_RELEASE}"
+
+          BUILT_RELEASE="$({
+            make -s \
+              O="${OUT_DIR}" \
+              ARCH="${ARCH}" \
+              LLVM=1 \
+              LLVM_IAS=1 \
+              CROSS_COMPILE="${CROSS_COMPILE}" \
+              kernelrelease
+          })"
+
+          echo "Expected release: ${CLEAN_RELEASE}"
+          echo "Built release:    ${BUILT_RELEASE}"
+
           test "${BUILT_RELEASE}" = "${CLEAN_RELEASE}"
+
           case "${BUILT_RELEASE}" in
-            *-dirty) exit 1 ;;
+            *-dirty)
+              echo "ERROR: dirty kernel release detected"
+              exit 1
+              ;;
           esac
+
+          echo "Kernel release verification passed."
 
       - name: Verify Image
         shell: bash
         run: |
           set -euxo pipefail
-          test -s kernel/out/arch/arm64/boot/Image
-          stat -c '%n %s bytes' kernel/out/arch/arm64/boot/Image
+
+          IMAGE="kernel/out/arch/arm64/boot/Image"
+
+          test -f "${IMAGE}"
+
+          IMAGE_SIZE="$(stat -c%s "${IMAGE}")"
+
+          echo "Image size: ${IMAGE_SIZE}"
+
+          test "${IMAGE_SIZE}" -gt 10000000
+
+          file "${IMAGE}"
 
       - name: Install modules
         shell: bash
         run: |
           set -euxo pipefail
-          cd kernel
-          rm -rf "${GITHUB_WORKSPACE}/module-stage"
-          mkdir -p "${GITHUB_WORKSPACE}/module-stage"
-          make O="${OUT_DIR}" ARCH="${ARCH}" LLVM=1 LLVM_IAS=1 \
-            CROSS_COMPILE="${CROSS_COMPILE}" \
-            INSTALL_MOD_PATH="${GITHUB_WORKSPACE}/module-stage" modules_install
-          test -d "${GITHUB_WORKSPACE}/module-stage/lib/modules"
 
-      - name: Verify WLAN and NetHunter modules
+          cd kernel
+          export PATH="${LLVM_DIR}/bin:${PATH}"
+
+          rm -rf "${GITHUB_WORKSPACE}/module-install"
+          mkdir -p "${GITHUB_WORKSPACE}/module-install"
+
+          make \
+            O="${OUT_DIR}" \
+            ARCH="${ARCH}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            INSTALL_MOD_PATH="${GITHUB_WORKSPACE}/module-install" \
+            modules_install
+
+          find "${GITHUB_WORKSPACE}/module-install" \
+            -type f \
+            -name '*.ko' \
+            -print | sort
+
+      - name: Verify WLAN module
         shell: bash
         run: |
           set -euxo pipefail
-          WLAN="$(find module-stage -type f -name 'wlan.ko' -print -quit)"
-          test -n "$WLAN"
 
-          required=(
-            hci_vhci.ko hidp.ko hci_uart.ko rfcomm.ko bnep.ko
-            uhid.ko hidraw.ko usb_f_fs.ko usb_f_hid.ko
-            usb_f_mass_storage.ko usb_f_rndis.ko usb_f_ecm.ko
-            usb_f_ncm.ko usb_serial.ko cdc_acm.ko cdc_ether.ko
-            cdc_ncm.ko r8152.ko r8150.ko sensors_class.ko
+          WLAN_MODULE="$({
+            find module-install \
+              -type f \
+              -name 'wlan.ko' \
+              -print -quit
+          })"
+
+          test -n "${WLAN_MODULE}"
+          test -f "${WLAN_MODULE}"
+
+          echo "WLAN module: ${WLAN_MODULE}"
+
+          modinfo -F name "${WLAN_MODULE}" | \
+            grep -Fxq 'wlan'
+
+          VERMAGIC="$(
+            modinfo -F vermagic "${WLAN_MODULE}"
+          )"
+
+          test -n "${VERMAGIC}"
+
+          echo "WLAN vermagic: ${VERMAGIC}"
+
+          echo "${VERMAGIC}" | \
+            grep -Fq "${CLEAN_RELEASE}"
+
+          MODULE_UNAME="$(
+            modinfo -F uname "${WLAN_MODULE}" || true
+          )"
+
+          if [ -n "${MODULE_UNAME}" ]; then
+            test "${MODULE_UNAME}" = "${CLEAN_RELEASE}"
+          fi
+
+          echo "WLAN module verification passed."
+
+      - name: Verify NetHunter modules
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          declare -A EXPECTED_MODULES=(
+            [hci_vhci.ko]=CONFIG_BT_HCIVHCI
+            [hci_uart.ko]=CONFIG_BT_HCIUART
+            [hidp.ko]=CONFIG_BT_HIDP
+            [rfcomm.ko]=CONFIG_BT_RFCOMM
+            [bnep.ko]=CONFIG_BT_BNEP
+            [cdc_acm.ko]=CONFIG_USB_ACM
+            [usbserial.ko]=CONFIG_USB_SERIAL
+            [cdc_ether.ko]=CONFIG_USB_NET_CDCETHER
+            [cdc_ncm.ko]=CONFIG_USB_NET_CDC_NCM
+            [rndis_host.ko]=CONFIG_USB_NET_RNDIS_HOST
+            [r8150.ko]=CONFIG_USB_RTL8150
+            [r8152.ko]=CONFIG_USB_RTL8152
+            [sensors_class.ko]=CONFIG_SENSORS_CLASS
           )
 
-          for m in "${required[@]}"; do
-            find module-stage -type f -name "$m" -print -quit | grep -q . || {
-              echo "ERROR: required module missing: $m"
+          CONFIG="kernel/out/.config"
+
+          for module in "${!EXPECTED_MODULES[@]}"; do
+            symbol="${EXPECTED_MODULES[${module}]}"
+
+            state="$({
+              kernel/scripts/config \
+                --file "${CONFIG}" \
+                --state "${symbol#CONFIG_}"
+            })"
+
+            test "${state}" = "m"
+
+            found="$({
+              find module-install \
+                -type f \
+                -name "${module}" \
+                -print -quit
+            })"
+
+            test -n "${found}" || {
+              echo "ERROR: ${module} is configured as a module but was not built"
               exit 1
             }
+
+            modinfo -F name "${found}" >/dev/null
+
+            VERMAGIC="$(
+              modinfo -F vermagic "${found}"
+            )"
+
+            test -n "${VERMAGIC}"
+
+            echo "${VERMAGIC}" | \
+              grep -Fq "${CLEAN_RELEASE}"
+
+            echo "Verified ${module}: ${found}"
           done
 
-          "${LLVM_DIR}/bin/llvm-nm" -u "$WLAN" > artifacts/wlan-undefined.txt || true
-          find module-stage -type f -name '*.ko' -print | sort
+          # Configfs gadget functions are boolean/built-in here.
+          # Verify the configuration rather than expecting .ko files.
+          grep -Fxq 'CONFIG_USB_CONFIGFS=y' "${CONFIG}"
+          grep -Fxq 'CONFIG_USB_CONFIGFS_NCM=y' "${CONFIG}"
+          grep -Fxq 'CONFIG_USB_CONFIGFS_RNDIS=y' "${CONFIG}"
+          grep -Fxq 'CONFIG_USB_CONFIGFS_ECM=y' "${CONFIG}"
+          grep -Fxq 'CONFIG_USB_CONFIGFS_EEM=y' "${CONFIG}"
+          grep -Fxq 'CONFIG_USB_CONFIGFS_F_HID=y' "${CONFIG}"
+
+          echo "NetHunter module verification passed."
+
+      - name: Check WLAN undefined symbols
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          if grep -E \
+            'ERROR: "[^"]+" \[[^]]*wlan\.ko\] undefined!' \
+            kernel-build.log; then
+            echo "ERROR: wlan.ko has undefined symbols."
+            exit 1
+          fi
+
+          if grep -E 'undefined!$' kernel-build.log; then
+            echo "ERROR: undefined symbols found in build."
+            exit 1
+          fi
+
+          grep -Fq \
+            'LD [M] drivers/staging/qcacld-3.0/wlan.ko' \
+            kernel-build.log
+
+          echo "WLAN MODPOST verification passed."
+
+      - name: Verify all module vermagic
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          count=0
+
+          while IFS= read -r module; do
+            [ -n "${module}" ] || continue
+
+            VERMAGIC="$(
+              modinfo -F vermagic "${module}"
+            )"
+
+            test -n "${VERMAGIC}"
+
+            echo "${VERMAGIC}" | \
+              grep -Fq "${CLEAN_RELEASE}"
+
+            count=$((count + 1))
+          done < <(
+            find module-install \
+              -type f \
+              -name '*.ko' \
+              -print | sort
+          )
+
+          test "${count}" -gt 0
+
+          echo "Verified vermagic on ${count} kernel modules."
 
       - name: Prepare NetHunter modules
         shell: bash
         run: |
           set -euxo pipefail
-          rm -rf module-package
-          mkdir -p module-package/vendor/lib/modules
 
-          while IFS= read -r f; do
-            cp -a "$f" module-package/vendor/lib/modules/
-          done < <(find module-stage -type f -name '*.ko' | sort)
+          rm -rf module-stage
+          mkdir -p module-stage/vendor/lib/modules
 
-          test -f module-package/vendor/lib/modules/wlan.ko
-          test -f module-package/vendor/lib/modules/hci_vhci.ko
-          test -f module-package/vendor/lib/modules/hidp.ko
+          WLAN_MODULE="$({
+            find module-install \
+              -type f \
+              -name 'wlan.ko' \
+              -print -quit
+          })"
+
+          test -n "${WLAN_MODULE}"
+
+          cp \
+            "${WLAN_MODULE}" \
+            module-stage/vendor/lib/modules/qca_cld3_wlan.ko
+
+          for name in \
+            bluetooth.ko \
+            hci_uart.ko \
+            hci_vhci.ko \
+            hidp.ko \
+            rfcomm.ko \
+            bnep.ko \
+            hid.ko \
+            hid_generic.ko \
+            cdc_acm.ko \
+            usbserial.ko \
+            usbserial_generic.ko \
+            cdc_ether.ko \
+            cdc_ncm.ko \
+            rndis_host.ko \
+            r8150.ko \
+            r8152.ko
+          do
+            found="$({
+              find module-install \
+                -type f \
+                -name "${name}" \
+                -print -quit
+            })"
+
+            if [ -n "${found}" ]; then
+              cp \
+                "${found}" \
+                module-stage/vendor/lib/modules/
+            fi
+          done
+
+          found="$({
+            find module-install \
+              -type f \
+              -name 'sensors_class.ko' \
+              -print -quit
+          })"
+
+          if [ -n "${found}" ]; then
+            cp \
+              "${found}" \
+              module-stage/vendor/lib/modules/
+          fi
+
+          test -f module-stage/vendor/lib/modules/qca_cld3_wlan.ko
+          test -f module-stage/vendor/lib/modules/hci_vhci.ko
+          test -f module-stage/vendor/lib/modules/hidp.ko
+          test -f module-stage/vendor/lib/modules/rfcomm.ko
+          test -f module-stage/vendor/lib/modules/bnep.ko
+
+          find \
+            module-stage/vendor/lib/modules \
+            -type f \
+            -name '*.ko' \
+            -printf '%f\n' | sort
 
       - name: Save build information
         shell: bash
         run: |
           set -euxo pipefail
-          mkdir -p artifacts
-          cp kernel/out/.config artifacts/final-kernel.config
-          cp kernel/nethunter-config/cebu-nethunter.config \
-            artifacts/nethunter-config-used.config
 
-          cat > artifacts/build-manifest.txt <<EOF
+          cp \
+            kernel/out/.config \
+            final-kernel.config
+
+          cp \
+            kernel/nethunter-config/cebu-nethunter.config \
+            nethunter-config-used.config
+
+          cat > build-manifest.txt <<EOF
           Device: Motorola Moto G9 Power
           Codename: cebu
-          ROM: LineageOS 23.2
+          Android base: LineageOS 23.2
           Kernel branch: ${KERNEL_BRANCH}
           Kernel release: ${CLEAN_RELEASE}
           Architecture: ${ARCH}
           LLVM: 14
-          HID: enabled
-          Bluetooth HID/VHCI: enabled
-          USB gadget/networking: enabled
-          Qualcomm WLAN: enabled
           QCACLD3 injection framework: imported
+          QCACLD3 frame injection Kbuild: enabled
+          QCACLD3 monitor mode compile path: enabled
+          HIDRAW/UHID: enabled
+          Bluetooth HID/RFCOMM/BNEP/VHCI: configured
+          USB gadget/networking: configured
+          Sensor class compatibility: configured
+          Internal WLAN driver build: qca_cld3_wlan.ko
           EOF
+
+          cat build-manifest.txt
 
       - name: Prepare AnyKernel3
         shell: bash
         run: |
           set -euxo pipefail
-          rm -rf AnyKernel3/Image AnyKernel3/modules
-          cp kernel/out/arch/arm64/boot/Image AnyKernel3/Image
-          mkdir -p AnyKernel3/modules/vendor/lib/modules
-          cp -a module-package/vendor/lib/modules/*.ko \
-            AnyKernel3/modules/vendor/lib/modules/
-          test -s AnyKernel3/Image
-          test -f AnyKernel3/modules/vendor/lib/modules/wlan.ko
-          test -f AnyKernel3/modules/vendor/lib/modules/hci_vhci.ko
-          test -f AnyKernel3/modules/vendor/lib/modules/hidp.ko
+
+          cp \
+            kernel/out/arch/arm64/boot/Image \
+            AnyKernel3/Image
+
+          rm -rf AnyKernel3/modules
+          mkdir -p AnyKernel3/modules
+
+          cp -a \
+            module-stage/vendor \
+            AnyKernel3/modules/
+
+          test -f AnyKernel3/Image
+          test -f \
+            AnyKernel3/modules/vendor/lib/modules/qca_cld3_wlan.ko
 
       - name: Configure AnyKernel3
         shell: bash
         run: |
           set -euxo pipefail
+
           cat > AnyKernel3/anykernel.sh <<'EOF'
-                    #!/bin/bash
-          
-                    properties() { '
-                    kernel.string=Motorola Moto G9 Power cebu NetHunter
-                    do.devicecheck=1
-                    do.modules=1
-                    do.systemless=1
-                    do.cleanup=1
-                    do.cleanup_on_abort=0
-                    device.name1=cebu
-                    device.name2=
-                    device.name3=
-                    device.name4=
-                    device.name5=
-                    supported.versions=
-                    supported.patchlevels=
-                    supported.vendorpatchlevels=
-                    '; }
-          
-                    BLOCK=boot;
-                    IS_SLOT_DEVICE=auto;
-                    RAMDISK_COMPRESSION=auto;
-                    PATCH_VBMETA_FLAG=auto;
-          
-                    . tools/ak3-core.sh;
-          
-                    dump_boot;
-                    write_boot;
-                    EOF
-          
-                    chmod 0755 AnyKernel3/anykernel.sh
-                    grep -Fq 'device.name1=cebu' AnyKernel3/anykernel.sh
-                    grep -Fq 'BLOCK=boot;' AnyKernel3/anykernel.sh
-                    grep -Fq 'IS_SLOT_DEVICE=auto;' AnyKernel3/anykernel.sh
-          
-                - name: Build AnyKernel3 ZIP
-                  shell: bash
-                  run: |
-                    set -euxo pipefail
-                    mkdir -p artifacts
-                    cd AnyKernel3
-                    zip -r9 ../artifacts/moto-g9-power-cebu-nethunter-flashable.zip . \
-                      -x ".git/*" -x "README.md" -x "*placeholder*"
-                    cd ..
-                    test -s artifacts/moto-g9-power-cebu-nethunter-flashable.zip
-                    unzip -t artifacts/moto-g9-power-cebu-nethunter-flashable.zip
-          
-                - name: Verify final package
-                  shell: bash
-                  run: |
-                    set -euxo pipefail
-                    ZIP="artifacts/moto-g9-power-cebu-nethunter-flashable.zip"
-                    unzip -1 "$ZIP" | grep -Fxq "Image"
-                    unzip -1 "$ZIP" | grep -Fq "modules/vendor/lib/modules/wlan.ko"
-                    unzip -1 "$ZIP" | grep -Fq "modules/vendor/lib/modules/hci_vhci.ko"
-                    unzip -1 "$ZIP" | grep -Fq "modules/vendor/lib/modules/hidp.ko"
-                    echo "Final package verification passed."
-          
-                - name: Generate checksums
-                  shell: bash
-                  run: |
-                    set -euxo pipefail
-                    sha256sum \
-                      artifacts/moto-g9-power-cebu-nethunter-flashable.zip \
-                      kernel/out/arch/arm64/boot/Image \
-                      artifacts/final-kernel.config \
-                      artifacts/nethunter-config-used.config \
-                      > artifacts/SHA256SUMS.txt
-                    cat artifacts/SHA256SUMS.txt
-          
-                - name: Upload artifacts
-                  uses: actions/upload-artifact@v4
-                  with:
-                    name: moto-g9-power-cebu-nethunter
-                    path: artifacts/
-                    if-no-files-found: error
-                    retention-days: 30
-          
-                - name: Complete build
-                  shell: bash
-                  run: |
-                    set -euxo pipefail
-                    echo "============================================"
-                    echo "Moto G9 Power cebu NetHunter build complete"
-                    echo "============================================"
-                    echo "Kernel release: ${CLEAN_RELEASE}"
-                    echo "Artifact: moto-g9-power-cebu-nethunter-flashable.zip"
-                    echo "SHA256:"
-                    cat artifacts/SHA256SUMS.txt
+          #!/sbin/sh
+
+          properties() { '
+          kernel.string=Moto G9 Power cebu NetHunter
+          do.devicecheck=1
+          do.modules=1
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=cebu
+          device.name2=
+          device.name3=
+          device.name4=
+          device.name5=
+          supported.versions=
+          supported.patchlevels=
+          supported.vendorpatchlevels=
+          '; }
+
+          BLOCK=/dev/block/bootdevice/by-name/boot;
+          IS_SLOT_DEVICE=1;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+
+          . tools/ak3-core.sh;
+
+          dump_boot;
+          write_boot;
+          EOF
+
+          chmod 0755 AnyKernel3/anykernel.sh
+
+          grep -Fq \
+            'device.name1=cebu' \
+            AnyKernel3/anykernel.sh
+
+          grep -Fq \
+            'IS_SLOT_DEVICE=1' \
+            AnyKernel3/anykernel.sh
+
+          grep -Fq \
+            'BLOCK=/dev/block/bootdevice/by-name/boot' \
+            AnyKernel3/anykernel.sh
+
+      - name: Build AnyKernel3 ZIP
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          mkdir -p artifacts
+
+          cd AnyKernel3
+
+          rm -f \
+            ../artifacts/moto-g9-power-cebu-nethunter-flashable.zip
+
+          zip -r9 \
+            ../artifacts/moto-g9-power-cebu-nethunter-flashable.zip \
+            . \
+            -x '.git/*' \
+            -x 'README.md' \
+            -x '*placeholder'
+
+          cd ..
+
+          test -s \
+            artifacts/moto-g9-power-cebu-nethunter-flashable.zip
+
+          unzip -t \
+            artifacts/moto-g9-power-cebu-nethunter-flashable.zip
+
+      - name: Verify final package
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          ZIP='artifacts/moto-g9-power-cebu-nethunter-flashable.zip'
+
+          unzip -l "${ZIP}"
+
+          unzip -l "${ZIP}" | \
+            grep -Fq 'Image'
+
+          unzip -l "${ZIP}" | \
+            grep -Fq \
+            'modules/vendor/lib/modules/qca_cld3_wlan.ko'
+
+          unzip -l "${ZIP}" | \
+            grep -Fq \
+            'modules/vendor/lib/modules/hci_vhci.ko'
+
+          unzip -l "${ZIP}" | \
+            grep -Fq \
+            'modules/vendor/lib/modules/hidp.ko'
+
+          unzip -l "${ZIP}" | \
+            grep -Fq \
+            'modules/vendor/lib/modules/rfcomm.ko'
+
+          unzip -l "${ZIP}" | \
+            grep -Fq \
+            'modules/vendor/lib/modules/bnep.ko'
+
+          echo "Final package verification passed."
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          sha256sum \
+            artifacts/moto-g9-power-cebu-nethunter-flashable.zip \
+            kernel/out/arch/arm64/boot/Image \
+            final-kernel.config \
+            nethunter-config-used.config \
+            > artifacts/SHA256SUMS.txt
+
+          cat artifacts/SHA256SUMS.txt
+
+      - name: Prepare artifacts
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cp \
+            kernel/out/arch/arm64/boot/Image \
+            artifacts/Image
+
+          cp \
+            final-kernel.config \
+            artifacts/final-kernel.config
+
+          cp \
+            nethunter-config-used.config \
+            artifacts/nethunter-config-used.config
+
+          cp \
+            kernel-build.log \
+            artifacts/kernel-build.log
+
+          cp \
+            build-manifest.txt \
+            artifacts/build-manifest.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: moto-g9-power-cebu-nethunter
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Complete build
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo '=================================================='
+          echo 'MOTO G9 POWER CEBU NETHUNTER BUILD COMPLETE'
+          echo '=================================================='
+          echo "Kernel release: ${CLEAN_RELEASE}"
+          echo 'Artifact: moto-g9-power-cebu-nethunter-flashable.zip'
+          echo '=================================================='
