@@ -493,11 +493,10 @@ jobs:
               --file "${OUT_DIR}/.config" \
               --disable LOCALVERSION_AUTO
 
-            # Do not put the release suffix in CONFIG_LOCALVERSION.
-            # We provide it through LOCALVERSION below so it is applied once.
+           # Keep the stock release suffix in CONFIG_LOCALVERSION.
             scripts/config \
               --file "${OUT_DIR}/.config" \
-              --set-str CONFIG_LOCALVERSION ""
+              --set-str CONFIG_LOCALVERSION "${RELEASE_SUFFIX}"
 
             # Synchronize the final configuration.
             make -s \
@@ -537,8 +536,9 @@ jobs:
 
             echo "Kernel Makefile LOCALVERSION export patched."
 
-            # The suffix is supplied exactly once through LOCALVERSION.
-            export LOCALVERSION="${RELEASE_SUFFIX}"
+            # Keep LOCALVERSION defined but empty.
+            # This prevents setlocalversion from adding the unwanted "+".
+            export LOCALVERSION=""
 
             # ============================================================
             # VERIFY KERNEL RELEASE
