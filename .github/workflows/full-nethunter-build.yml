@@ -1831,6 +1831,16 @@ jobs:
 
           cd kernel
 
+              MODULE_INSTALL_DIR="${GITHUB_WORKSPACE}/module-install"
+
+             echo "Module installation directory:"
+             echo "${MODULE_INSTALL_DIR}"
+
+             test -d "${MODULE_INSTALL_DIR}" || {
+             echo "ERROR: module-install directory does not exist."
+             exit 1
+             }
+ 
           # ----------------------------------------------------------
           # RFCOMM is built into the kernel, not a loadable module.
           #
@@ -1879,12 +1889,12 @@ jobs:
 
           for module in "${required_modules[@]}"; do
 
-            found="$(
-              find module-install \
-                -type f \
-                -name "${module}" \
-                -print -quit
-            )"
+                found="$(
+              find "${MODULE_INSTALL_DIR}" \
+             -type f \
+             -name "${module}" \
+              -print -quit
+              )"
 
             if [ -z "${found}" ]; then
               echo "ERROR: missing ${module}"
