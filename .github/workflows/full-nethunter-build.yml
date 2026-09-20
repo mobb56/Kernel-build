@@ -111,6 +111,7 @@ jobs:
           link_tool /usr/bin/llvm-ar-14 llvm-ar
           link_tool /usr/bin/llvm-nm-14 llvm-nm
           link_tool /usr/bin/llvm-objcopy-14 llvm-objcopy
+          link_tool /usr/bin/llvm-objdump-14 llvm-objdump
           link_tool /usr/bin/llvm-strip-14 llvm-strip
           link_tool /usr/bin/llvm-readelf-14 llvm-readelf
           link_tool /usr/bin/llvm-size-14 llvm-size
@@ -132,6 +133,7 @@ jobs:
           command -v llvm-ar
           command -v llvm-nm
           command -v llvm-objcopy
+          command -v llvm-objdump
           command -v llvm-strip
           command -v llvm-readelf
           command -v llvm-size
@@ -971,7 +973,6 @@ jobs:
       # later monitor-mode and frame-injection conditionals actually
       # see them.
       # ============================================================
-
       - name: Patch QCACLD3 Kbuild
         shell: bash
         run: |
@@ -1008,6 +1009,36 @@ jobs:
               text = text.replace(
                   marker,
                   marker + "\n" + feature_defs,
+                  1
+              )
+
+          # ----------------------------------------------------------
+          # IMPORTANT:
+          #
+          # This Motorola Kbuild defines HDD_INC, but the final INCS
+          # list does not include it.
+          #
+          # Our new frame-injection headers live in:
+          #
+          #   core/hdd/inc/
+          #
+          # Therefore add the existing HDD_INC variable to INCS.
+          # ----------------------------------------------------------
+
+          if "$(HDD_INC)" not in text:
+              inc_marker = (
+                  "INCS := -I $(srctree)/$(WLAN_ROOT)/inc \\"
+              )
+
+              if inc_marker not in text:
+                  raise SystemExit(
+                      "ERROR: QCACLD3 INCS anchor not found."
+                  )
+
+              text = text.replace(
+                  inc_marker,
+                  "INCS := $(HDD_INC) \\\n"
+                  "        -I $(srctree)/$(WLAN_ROOT)/inc \\",
                   1
               )
 
@@ -1108,6 +1139,13 @@ jobs:
           set -euxo pipefail
 
           K="kernel/drivers/staging/qcacld-3.0/Kbuild"
+
+                   grep -Fq \
+            'INCS := $(HDD_INC)' \
+            "${K}" || {
+              echo "ERROR: HDD_INC is not included in QCACLD3 include paths."
+              exit 1
+            }
 
           grep -Fq \
             'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y' \
