@@ -1022,10 +1022,10 @@ jobs:
           #
           #   core/hdd/inc/
           #
-          # Therefore add the existing HDD_INC variable to INCS.
+          # Therefore add the existing HDD_INC and WMA_INC variables to INCS.
           # ----------------------------------------------------------
 
-          if "$(HDD_INC)" not in text:
+          if "$(HDD_INC)" not in text or "$(WMA_INC)" not in text:
               inc_marker = (
                   "INCS := -I $(srctree)/$(WLAN_ROOT)/inc \\"
               )
@@ -1036,12 +1036,12 @@ jobs:
                   )
 
               text = text.replace(
-                  inc_marker,
-                  "INCS := $(HDD_INC) \\\n"
-                  "        -I $(srctree)/$(WLAN_ROOT)/inc \\",
-                  1
-              )
-
+            inc_marker,
+             "INCS := $(HDD_INC) \\\n"
+          "        $(WMA_INC) \\\n"
+          "        -I $(srctree)/$(WLAN_ROOT)/inc \\",
+                 1
+                )
           # ----------------------------------------------------------
           # HDD objects
           # ----------------------------------------------------------
@@ -1146,6 +1146,13 @@ jobs:
               echo "ERROR: HDD_INC is not included in QCACLD3 include paths."
               exit 1
             }
+
+              grep -Fq \
+          '$(WMA_INC)' \
+          "${K}" || {
+          echo "ERROR: WMA_INC is not included in QCACLD3 include paths."
+          exit 1
+          }
 
           grep -Fq \
             'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y' \
