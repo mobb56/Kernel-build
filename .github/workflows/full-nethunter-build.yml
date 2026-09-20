@@ -519,27 +519,20 @@ jobs:
             test "${LOCALVERSION_AUTO_STATE}" = "n"
 
             # ============================================================
-            # FIX LOCALVERSION EXPORT
+            # FIX KERNEL RELEASE SUFFIX
+            #
+            # CONFIG_LOCALVERSION already contains the stock release
+            # suffix. The 4.19 setlocalversion script otherwise adds "+"
+            # when LOCALVERSION_AUTO=n and LOCALVERSION is not set.
+            # Disable only that automatic "+" behavior.
             # ============================================================
 
-            grep -q \
-              'export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION' \
-              Makefile
+            sed -i '199,202d' scripts/setlocalversion
 
-            sed -i \
-              's/^export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION$/export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION LOCALVERSION/' \
-              Makefile
+            echo "Verified setlocalversion automatic '+' suppression:"
+            sed -n '188,205p' scripts/setlocalversion
 
-            grep -Fq \
-              'export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION LOCALVERSION' \
-              Makefile
-
-            echo "Kernel Makefile LOCALVERSION export patched."
-
-            # Keep LOCALVERSION defined but empty.
-            export LOCALVERSION=""
-
-            CONFIG_RELEASE="$(
+                        CONFIG_RELEASE="$(
               make -s \
                 O="${OUT_DIR}" \
                 ARCH="${ARCH}" \
