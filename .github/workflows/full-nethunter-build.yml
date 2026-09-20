@@ -20,6 +20,7 @@ env:
   ARCH: arm64
   CROSS_COMPILE: aarch64-linux-gnu-
   OUT_DIR: out
+  LOCALVERSION: ""
 
 jobs:
   build:
@@ -141,6 +142,7 @@ jobs:
           command -v llvm-as
 
           echo
+
           echo "Resolved LLVM toolchain:"
           clang --version
           ld.lld --version
@@ -440,130 +442,139 @@ jobs:
       - name: Merge NetHunter configuration
         shell: bash
         run: |
-           set -euxo pipefail
-           cd kernel
+          set -euxo pipefail
+          cd kernel
 
-            # ============================================================
-            # MERGE NETHUNTER CONFIGURATION
-            # ============================================================
+          # ============================================================
+          # MERGE NETHUNTER CONFIGURATION
+          # ============================================================
 
-            test -s nethunter-config/cebu-nethunter.config
+          test -s nethunter-config/cebu-nethunter.config
 
-            echo "===== NetHunter configuration ====="
-            cat nethunter-config/cebu-nethunter.config
-            echo "==================================="
+          echo "===== NetHunter configuration ====="
+          cat nethunter-config/cebu-nethunter.config
+          echo "==================================="
 
-            # Merge the NetHunter configuration into the base device config.
-            scripts/kconfig/merge_config.sh \
-              -m \
-              "${OUT_DIR}/.config" \
-              nethunter-config/cebu-nethunter.config
+          # Merge the NetHunter configuration into the base device config.
+          scripts/kconfig/merge_config.sh \
+            -m \
+            "${OUT_DIR}/.config" \
+            nethunter-config/cebu-nethunter.config
 
-            # Resolve all Kconfig dependencies.
-            make -s \
-              O="${OUT_DIR}" \
-              ARCH="${ARCH}" \
-              LLVM=1 \
-              LLVM_IAS=1 \
-              CROSS_COMPILE="${CROSS_COMPILE}" \
-              olddefconfig
-
-            # ============================================================
-            # PRESERVE THE STOCK KERNEL RELEASE
-            # ============================================================
-
-            BASE_VERSION="$(
-              make -s \
-                O="${OUT_DIR}" \
-                ARCH="${ARCH}" \
-                LLVM=1 \
-                LLVM_IAS=1 \
-                CROSS_COMPILE="${CROSS_COMPILE}" \
-                kernelversion
-            )"
-
-            RELEASE_SUFFIX="${CLEAN_RELEASE#${BASE_VERSION}}"
-
-            echo "Base version:    ${BASE_VERSION}"
-            echo "Clean release:   ${CLEAN_RELEASE}"
-            echo "Release suffix:  ${RELEASE_SUFFIX}"
-
-            # Disable automatic SCM/local version suffixes.
-            scripts/config \
-              --file "${OUT_DIR}/.config" \
-              --disable LOCALVERSION_AUTO
-
-           # Keep the stock release suffix in CONFIG_LOCALVERSION.
-            scripts/config \
-              --file "${OUT_DIR}/.config" \
-              --set-str CONFIG_LOCALVERSION "${RELEASE_SUFFIX}"
-
-            # Synchronize the final configuration.
-            make -s \
-              O="${OUT_DIR}" \
-              ARCH="${ARCH}" \
-              LLVM=1 \
-              LLVM_IAS=1 \
-              CROSS_COMPILE="${CROSS_COMPILE}" \
-              syncconfig
-
-            # Confirm LOCALVERSION_AUTO is disabled.
-            LOCALVERSION_AUTO_STATE="$(
-              scripts/config \
-                --file "${OUT_DIR}/.config" \
-                --state LOCALVERSION_AUTO
-            )"
-
-            echo "LOCALVERSION_AUTO state: ${LOCALVERSION_AUTO_STATE}"
-
-            test "${LOCALVERSION_AUTO_STATE}" = "n"
-
-            # ============================================================
-            # FIX KERNEL RELEASE SUFFIX
-            # ============================================================
-            #
-            # CONFIG_LOCALVERSION already contains the stock release
-            # suffix. Prevent setlocalversion from adding the unwanted
-            # "+" for this modified kernel tree.
-            #
-
-            sed -i \
-              '/^[[:space:]]*if test "${LOCALVERSION+set}" != "set"; then$/,/^[[:space:]]*fi$/c\
-             :' \
-            scripts/setlocalversion
-
-            echo "setlocalversion automatic '+' block disabled."
-
-            # Verify the automatic '+' block is gone and the script
-            # still has valid shell syntax.
-            if grep -Fq 'if test "${LOCALVERSION+set}" != "set"; then' \
-            scripts/setlocalversion; then
-            echo "ERROR: automatic '+' block still exists."
-            exit 1
-            fi
-
-            bash -n scripts/setlocalversion
-
-            echo "setlocalversion syntax check passed."
-            # ============================================================
-            # VERIFY KERNEL RELEASE
-            # ============================================================
-
-            CONFIG_RELEASE="$(
-            make -s \
-             O="${OUT_DIR}" \
+          # Resolve all Kconfig dependencies.
+          make -s \
+            O="${OUT_DIR}" \
             ARCH="${ARCH}" \
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
-            kernelrelease
-            )"
+            olddefconfig
 
-           echo "Configured release: ${CONFIG_RELEASE}"
-           echo "Expected release:   ${CLEAN_RELEASE}"
+          # ============================================================
+          # PRESERVE THE STOCK KERNEL RELEASE
+          # ============================================================
 
-           test "${CONFIG_RELEASE}" = "${CLEAN_RELEASE}"
-      # ============================================================
+          BASE_VERSION="$(
+            make -s \
+              O="${OUT_DIR}" \
+              ARCH="${ARCH}" \
+              LLVM=1 \
+              LLVM_IAS=1 \
+              CROSS_COMPILE="${CROSS_COMPILE}" \
+              kernelversion
+          )"
+
+          RELEASE_SUFFIX="${CLEAN_RELEASE#${BASE_VERSION}}"
+
+          echo "Base version:    ${BASE_VERSION}"
+          echo "Clean release:   ${CLEAN_RELEASE}"
+          echo "Release suffix:  ${RELEASE_SUFFIX}"
+
+          # Disable automatic SCM/local version suffixes.
+          scripts/config \
+            --file "${OUT_DIR}/.config" \
+            --disable LOCALVERSION_AUTO
+
+          # Keep the stock release suffix in CONFIG_LOCALVERSION.
+          scripts/config \
+            --file "${OUT_DIR}/.config" \
+            --set-str CONFIG_LOCALVERSION "${RELEASE_SUFFIX}"
+
+          echo "CONFIG_LOCALVERSION:"
+          scripts/config \
+            --file "${OUT_DIR}/.config" \
+            --state LOCALVERSION
+
+          echo "LOCALVERSION=${LOCALVERSION}"
+
+          # Synchronize the final configuration.
+          make -s \
+            O="${OUT_DIR}" \
+            ARCH="${ARCH}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            syncconfig
+
+          # Confirm LOCALVERSION_AUTO is disabled.
+          LOCALVERSION_AUTO_STATE="$(
+            scripts/config \
+              --file "${OUT_DIR}/.config" \
+              --state LOCALVERSION_AUTO
+          )"
+
+          echo "LOCALVERSION_AUTO state: ${LOCALVERSION_AUTO_STATE}"
+
+          test "${LOCALVERSION_AUTO_STATE}" = "n"
+
+          # ============================================================
+          # FIX KERNEL RELEASE SUFFIX
+          # ============================================================
+          #
+          # CONFIG_LOCALVERSION already contains the stock release
+          # suffix. Prevent setlocalversion from adding the unwanted
+          # "+" for this modified kernel tree.
+          #
+
+          sed -i \
+            '/^[[:space:]]*if test "${LOCALVERSION+set}" != "set"; then$/,/^[[:space:]]*fi$/c\
+            :' \
+            scripts/setlocalversion
+
+          echo "setlocalversion automatic '+' block disabled."
+
+          # Verify the automatic '+' block is gone and the script
+          # still has valid shell syntax.
+          if grep -Fq 'if test "${LOCALVERSION+set}" != "set"; then' \
+            scripts/setlocalversion; then
+            echo "ERROR: automatic '+' block still exists."
+            exit 1
+          fi
+
+          bash -n scripts/setlocalversion
+
+          echo "setlocalversion syntax check passed."
+
+          # ============================================================
+          # VERIFY KERNEL RELEASE
+          # ============================================================
+
+          CONFIG_RELEASE="$(
+            make -s \
+              O="${OUT_DIR}" \
+              ARCH="${ARCH}" \
+              LLVM=1 \
+              LLVM_IAS=1 \
+              CROSS_COMPILE="${CROSS_COMPILE}" \
+              kernelrelease
+          )"
+
+          echo "Configured release: ${CONFIG_RELEASE}"
+          echo "Expected release:   ${CLEAN_RELEASE}"
+
+          test "${CONFIG_RELEASE}" = "${CLEAN_RELEASE}"
+
+                # ============================================================
       # 12. VERIFY KERNEL CONFIG
       #
       # For tristate options, accept either y or m when both are
@@ -1019,13 +1030,14 @@ jobs:
           print("Injection lifecycle integrated.")
           PY
 
-      # ============================================================
+                # ============================================================
       # 17. PATCH QCACLD3 KBUILD
       #
       # Feature variables are defined at the TOP of Kbuild so the
       # later monitor-mode and frame-injection conditionals actually
       # see them.
       # ============================================================
+
       - name: Patch QCACLD3 Kbuild
         shell: bash
         run: |
@@ -1089,12 +1101,13 @@ jobs:
                   )
 
               text = text.replace(
-            inc_marker,
-             "INCS := $(HDD_INC) \\\n"
-          "        $(WMA_INC) \\\n"
-          "        -I $(srctree)/$(WLAN_ROOT)/inc \\",
-                 1
-                )
+                  inc_marker,
+                  "INCS := $(HDD_INC) \\\n"
+                  "        $(WMA_INC) \\\n"
+                  "        -I $(srctree)/$(WLAN_ROOT)/inc \\",
+                  1
+              )
+
           # ----------------------------------------------------------
           # HDD objects
           # ----------------------------------------------------------
@@ -1193,18 +1206,18 @@ jobs:
 
           K="kernel/drivers/staging/qcacld-3.0/Kbuild"
 
-                   grep -Fq \
+          grep -Fq \
             'INCS := $(HDD_INC)' \
             "${K}" || {
               echo "ERROR: HDD_INC is not included in QCACLD3 include paths."
               exit 1
             }
 
-              grep -Fq \
-          '$(WMA_INC)' \
-          "${K}" || {
-          echo "ERROR: WMA_INC is not included in QCACLD3 include paths."
-          exit 1
+          grep -Fq \
+            '$(WMA_INC)' \
+            "${K}" || {
+            echo "ERROR: WMA_INC is not included in QCACLD3 include paths."
+            exit 1
           }
 
           grep -Fq \
@@ -1335,6 +1348,7 @@ jobs:
           echo "============================================================"
 
           if [ -f kernel-build.log ]; then
+
             echo
             echo "First likely compiler/linker errors:"
             grep -nEi \
@@ -1533,6 +1547,7 @@ jobs:
 
           grep -Fq \
             'LD [M] drivers/staging/qcacld-3.0/wlan.ko' \
+            
             kernel-build.log || {
 
             echo "ERROR: wlan.ko was not linked."
@@ -1541,7 +1556,7 @@ jobs:
 
           echo "WLAN MODPOST verification passed."
 
-      # ============================================================
+                # ============================================================
       # 28. STAGE FINAL MODULES
       # ============================================================
 
@@ -1927,14 +1942,18 @@ jobs:
           echo "============================================================"
           echo "MOTO G9 POWER CEBU NETHUNTER BUILD COMPLETE"
           echo "============================================================"
+
           echo
           echo "Kernel release:"
           echo "${CLEAN_RELEASE}"
+
           echo
           echo "ZIP:"
           echo "moto-g9-power-cebu-nethunter-flashable.zip"
+
           echo
           echo "Artifacts:"
           echo "moto-g9-power-cebu-nethunter"
+
           echo
           echo "============================================================"
