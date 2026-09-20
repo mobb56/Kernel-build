@@ -491,6 +491,8 @@ jobs:
            CROSS_COMPILE="${CROSS_COMPILE}" \
            syncconfig
 
+           export LOCALVERSION=""
+
           # Do NOT call olddefconfig here.
 
           LOCALVERSION_AUTO_STATE="$(
