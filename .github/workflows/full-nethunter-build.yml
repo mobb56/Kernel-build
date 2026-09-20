@@ -291,30 +291,68 @@ jobs:
         run: |
           set -euxo pipefail
 
-          WLAN="$(
+          WLAN_MODULE="$(
             find module-install \
               -type f \
               -name 'wlan.ko' \
               -print -quit
           )"
 
-          if [ -n "${WLAN}" ]; then
-            echo "WLAN module found:"
-            echo "${WLAN}"
+          if [ -z "${WLAN_MODULE}" ]; then
+            echo "ERROR: wlan.ko was not found."
 
-            modinfo "${WLAN}" || true
+            echo "Available WLAN modules:"
+            find module-install \
+              -type f \
+              \( \
+                -name 'wlan.ko' \
+                -o -name 'qca*.ko' \
+              \) \
+              -print || true
 
-            VERMAGIC="$(
-              modinfo -F vermagic "${WLAN}" || true
-            )
-
-            echo "WLAN vermagic:"
-            echo "${VERMAGIC}"
-          else
-            echo "No standalone wlan.ko found."
-            echo "The build may contain WLAN support differently."
+            exit 1
           fi
 
+          echo "Found WLAN module:"
+          echo "${WLAN_MODULE}"
+
+          echo
+          echo "WLAN module information:"
+          modinfo "${WLAN_MODULE}" || true
+
+          VERMAGIC="$(
+            modinfo -F vermagic "${WLAN_MODULE}"
+          )"
+
+          MODULE_RELEASE="$(
+            printf '%s\n' "${VERMAGIC}" |
+            awk '{print $1}'
+          )"
+
+          echo
+          echo "Expected kernel release:"
+          echo "${CLEAN_RELEASE}"
+
+          echo
+          echo "WLAN vermagic:"
+          echo "${VERMAGIC}"
+
+          echo
+          echo "WLAN module release:"
+          echo "${MODULE_RELEASE}"
+
+          if [ -z "${VERMAGIC}" ]; then
+            echo "ERROR: Could not read WLAN module vermagic."
+            exit 1
+          fi
+
+          if [ "${MODULE_RELEASE}" != "${CLEAN_RELEASE}" ]; then
+            echo "ERROR: WLAN module release does not match kernel release."
+            exit 1
+          fi
+
+          echo
+          echo "WLAN module verification passed."
       # ------------------------------------------------------------
       # SHOW MODULES
       # ------------------------------------------------------------
