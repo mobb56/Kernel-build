@@ -1930,17 +1930,26 @@ jobs:
          exit 1
          fi
 
-          if grep -E 'undefined!$' kernel-build.log; then
-          echo "ERROR: undefined kernel symbols detected."
-          exit 1
-          fi
+              if grep -E 'undefined!$' kernel-build.log; then
+             echo "ERROR: undefined kernel symbols detected."
+             exit 1
+             fi
 
-         test -f "${WLAN_MODULE}"
+            WLAN_MODULE="$(
+           find "${GITHUB_WORKSPACE}/module-install" \
+           -type f \
+           -name "wlan.ko" \
+           -print -quit
+           )"
 
-         echo "Confirmed WLAN module exists:"
-         echo "${WLAN_MODULE}"
+          test -n "${WLAN_MODULE}"
 
-         echo "WLAN undefined-symbol verification passed."
+          test -f "${WLAN_MODULE}"
+
+          echo "Confirmed WLAN module exists:"
+          echo "${WLAN_MODULE}"
+
+          echo "WLAN undefined-symbol verification passed."
   
 
                 # ============================================================
