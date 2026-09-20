@@ -520,45 +520,22 @@ jobs:
 
             # ============================================================
             # FIX LOCALVERSION EXPORT
-            #
-            # The 4.19 kernel setlocalversion script can append "+"
-            # when LOCALVERSION is not exported to it.
-            # Export LOCALVERSION from the kernel Makefile.
             # ============================================================
 
             grep -q \
               'export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION' \
               Makefile
 
-            python3 - <<'PY'
-            from pathlib import Path
+            sed -i \
+              's/^export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION$/export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION LOCALVERSION/' \
+              Makefile
 
-            path = Path("Makefile")
-            text = path.read_text()
-
-            old = "export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION"
-            new = old + " LOCALVERSION"
-
-            target = "export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION LOCALVERSION"
-
-            if target not in text:
-                if old not in text:
-                    raise SystemExit(
-                        "ERROR: expected kernel Makefile export line not found."
-                    )
-
-                text = text.replace(old, new, 1)
-                path.write_text(text)
-
-            print("Kernel Makefile LOCALVERSION export patched.")
-            PY
-
-            # Verify the Makefile was actually patched.
             grep -Fq \
               'export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION LOCALVERSION' \
               Makefile
 
-            # Prevent the shell environment from supplying another value.
+            echo "Kernel Makefile LOCALVERSION export patched."
+
             export LOCALVERSION=""
 
             # ============================================================
