@@ -100,7 +100,7 @@ jobs:
             fi
 
             echo "ERROR: LLVM tool not found: ${target}"
-            return 1
+            exit 1
           }
 
           link_tool /usr/bin/clang-14 clang
@@ -117,18 +117,29 @@ jobs:
           link_tool /usr/bin/llvm-ranlib-14 llvm-ranlib
           link_tool /usr/bin/llvm-as-14 llvm-as
 
+          # Make the tools available BOTH:
+          # 1. immediately in this shell
+          # 2. to all subsequent GitHub Actions steps
+          export PATH="${LLVM_BIN}:${PATH}"
           echo "${LLVM_BIN}" >> "${GITHUB_PATH}"
+
           echo "LLVM_BIN=${LLVM_BIN}" >> "${GITHUB_ENV}"
 
           echo "LLVM tools:"
           command -v clang
+          command -v clang++
           command -v ld.lld
           command -v llvm-ar
           command -v llvm-nm
           command -v llvm-objcopy
           command -v llvm-strip
           command -v llvm-readelf
+          command -v llvm-size
+          command -v llvm-ranlib
+          command -v llvm-as
 
+          echo
+          echo "Resolved LLVM toolchain:"
           clang --version
           ld.lld --version
           llvm-ar --version
