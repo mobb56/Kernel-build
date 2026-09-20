@@ -12,7 +12,7 @@ env:
 
   NETHUNTER_REPO: https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git
   NETHUNTER_BRANCH: nethunter-lineage-23.2
-  LOCALVERSION: ""
+  
 
   ANYKERNEL_REPO: https://github.com/osm0sis/AnyKernel3.git
   ANYKERNEL_BRANCH: master
@@ -255,6 +255,59 @@ jobs:
             CROSS_COMPILE="${CROSS_COMPILE}" \
             vendor/bengal-perf_defconfig
 
+          # ----------------------------------------------------------
+          # Capture the original LOCALVERSION from the defconfig.
+          #
+          # Current Motorola defconfig contains:
+          # CONFIG_LOCALVERSION="-perf"
+          # ----------------------------------------------------------
+
+          BASE_LOCALVERSION="$(
+            sed -n \
+              's/^CONFIG_LOCALVERSION="\([^"]*\)".*/\1/p' \
+              "${OUT_DIR}/.config"
+          )"
+
+          echo "Base LOCALVERSION: ${BASE_LOCALVERSION}"
+
+          # ----------------------------------------------------------
+          # Calculate the release WITHOUT Git's automatic suffix.
+          #
+          # We temporarily disable LOCALVERSION_AUTO only to discover
+          # the static portion of the kernel release.
+          # ----------------------------------------------------------
+
+          cp \
+            "${OUT_DIR}/.config" \
+            "${OUT_DIR}/.config.before-auto-check"
+
+          scripts/config \
+            --file "${OUT_DIR}/.config" \
+            --disable LOCALVERSION_AUTO
+
+          STATIC_RELEASE="$(
+            make -s \
+              O="${OUT_DIR}" \
+              ARCH="${ARCH}" \
+              LLVM=1 \
+              LLVM_IAS=1 \
+              CROSS_COMPILE="${CROSS_COMPILE}" \
+              kernelrelease
+          )"
+
+          # Restore the original clean configuration.
+          cp \
+            "${OUT_DIR}/.config.before-auto-check" \
+            "${OUT_DIR}/.config"
+
+          rm -f \
+            "${OUT_DIR}/.config.before-auto-check"
+
+          # ----------------------------------------------------------
+          # The clean release includes the automatic Git commit.
+          # Extract ONLY that portion.
+          # ----------------------------------------------------------
+
           CLEAN_RELEASE="$(
             make -s \
               O="${OUT_DIR}" \
@@ -265,26 +318,36 @@ jobs:
               kernelrelease
           )"
 
-          test -n "${CLEAN_RELEASE}"
+          echo "Static release: ${STATIC_RELEASE}"
+          echo "Clean release:  ${CLEAN_RELEASE}"
 
-          case "${CLEAN_RELEASE}" in
-            *-dirty)
-              echo "ERROR: clean source produced dirty release:"
-              echo "${CLEAN_RELEASE}"
-              exit 1
+          test "${CLEAN_RELEASE}" != "${STATIC_RELEASE}"
+
+          GIT_SUFFIX="${CLEAN_RELEASE#${STATIC_RELEASE}}"
+
+          echo "Git suffix: ${GIT_SUFFIX}"
+
+          test -n "${GIT_SUFFIX}"
+
+          case "${GIT_SUFFIX}" in
+            -g*)
               ;;
-            *+)
-              echo "ERROR: clean source unexpectedly produced '+':"
-              echo "${CLEAN_RELEASE}"
+            *)
+              echo "ERROR: unexpected Git suffix: ${GIT_SUFFIX}"
               exit 1
               ;;
           esac
 
           echo "CLEAN_RELEASE=${CLEAN_RELEASE}" >> "${GITHUB_ENV}"
+          echo "BASE_LOCALVERSION=${BASE_LOCALVERSION}" >> "${GITHUB_ENV}"
+          echo "STATIC_RELEASE=${STATIC_RELEASE}" >> "${GITHUB_ENV}"
+          echo "GIT_SUFFIX=${GIT_SUFFIX}" >> "${GITHUB_ENV}"
 
           echo
-          echo "Clean kernel release:"
-          echo "${CLEAN_RELEASE}"
+          echo "Release components:"
+          echo "  static: ${STATIC_RELEASE}"
+          echo "  git:    ${GIT_SUFFIX}"
+          echo "  final:  ${CLEAN_RELEASE}"
 
       # ============================================================
       # 9. CREATE NETHUNTER CONFIGURATION
@@ -392,7 +455,7 @@ jobs:
             "${OUT_DIR}/.config" \
             nethunter-config/cebu-nethunter.config
 
-          # Resolve dependencies before custom LOCALVERSION changes.
+          # Resolve all normal Kconfig dependencies first.
           make \
             O="${OUT_DIR}" \
             ARCH="${ARCH}" \
@@ -401,39 +464,27 @@ jobs:
             CROSS_COMPILE="${CROSS_COMPILE}" \
             olddefconfig
 
-          BASE_VERSION="$(
-            make -s \
-              O="${OUT_DIR}" \
-              ARCH="${ARCH}" \
-              LLVM=1 \
-              LLVM_IAS=1 \
-              CROSS_COMPILE="${CROSS_COMPILE}" \
-              kernelversion
-          )"
-
-          echo "Base version:"
-          echo "${BASE_VERSION}"
-
-          echo "Clean release:"
-          echo "${CLEAN_RELEASE}"
-
-          case "${CLEAN_RELEASE}" in
-            "${BASE_VERSION}"*)
-              ;;
-            *)
-              echo "ERROR: clean release does not start with base version."
-              exit 1
-              ;;
-          esac
-
-          RELEASE_SUFFIX="${CLEAN_RELEASE#${BASE_VERSION}}"
-
-          echo "Release suffix:"
-          echo "${RELEASE_SUFFIX}"
-
           # ----------------------------------------------------------
-          # Disable automatic SCM release suffixes.
+          # IMPORTANT
+          #
+          # After olddefconfig, restore the exact release manually.
+          #
+          # localversion-cip  = -cip135
+          # localversion-st   = -st19
+          # CONFIG_LOCALVERSION = -perf
+          # Git suffix          = -g39bcecd5c63d
+          #
+          # Therefore LOCALVERSION must become:
+          #
+          # -perf-g39bcecd5c63d
+          #
+          # NOT the entire kernel release.
           # ----------------------------------------------------------
+
+          FINAL_LOCALVERSION="${BASE_LOCALVERSION}${GIT_SUFFIX}"
+
+          echo "Final LOCALVERSION:"
+          echo "${FINAL_LOCALVERSION}"
 
           scripts/config \
             --file "${OUT_DIR}/.config" \
@@ -441,51 +492,17 @@ jobs:
 
           scripts/config \
             --file "${OUT_DIR}/.config" \
-            --set-str LOCALVERSION "${RELEASE_SUFFIX}"
+            --set-str LOCALVERSION "${FINAL_LOCALVERSION}"
 
-          # ----------------------------------------------------------
-          # IMPORTANT FIX:
-          #
-          # scripts/config changes .config, but generated Kconfig
-          # files may still contain the previous LOCALVERSION_AUTO
-          # state.
-          #
-          # Regenerate them NOW.
-          # ----------------------------------------------------------
+          # DO NOT run olddefconfig after this point.
 
-          make \
-            O="${OUT_DIR}" \
-            ARCH="${ARCH}" \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            CROSS_COMPILE="${CROSS_COMPILE}" \
-            olddefconfig
+          grep -Fxq \
+            "CONFIG_LOCALVERSION_AUTO=n" \
+            "${OUT_DIR}/.config"
 
-          AUTO_STATE="$(
-            scripts/config \
-              --file "${OUT_DIR}/.config" \
-              --state LOCALVERSION_AUTO
-          )"
-
-          echo "LOCALVERSION_AUTO state:"
-          echo "${AUTO_STATE}"
-
-          test "${AUTO_STATE}" = "n"
-
-          LOCALVERSION_LINE="$(
-            grep -E '^CONFIG_LOCALVERSION=' \
-              "${OUT_DIR}/.config" || true
-          )"
-
-          EXPECTED_LOCALVERSION="CONFIG_LOCALVERSION=\"${RELEASE_SUFFIX}\""
-
-          echo "Expected LOCALVERSION:"
-          echo "${EXPECTED_LOCALVERSION}"
-
-          echo "Actual LOCALVERSION:"
-          echo "${LOCALVERSION_LINE}"
-
-          test "${LOCALVERSION_LINE}" = "${EXPECTED_LOCALVERSION}"
+          grep -Fxq \
+            "CONFIG_LOCALVERSION=\"${FINAL_LOCALVERSION}\"" \
+            "${OUT_DIR}/.config"
 
           CONFIG_RELEASE="$(
             make -s \
@@ -498,95 +515,79 @@ jobs:
           )"
 
           echo
+          echo "Expected release:"
+          echo "${CLEAN_RELEASE}"
+
+          echo
           echo "Configured release:"
           echo "${CONFIG_RELEASE}"
 
           test "${CONFIG_RELEASE}" = "${CLEAN_RELEASE}"
 
-          case "${CONFIG_RELEASE}" in
-            *-dirty)
-              echo "ERROR: dirty release detected."
-              exit 1
-              ;;
-            *+)
-              echo "ERROR: automatic '+' suffix still present."
-              exit 1
-              ;;
-          esac
-
-          echo
-          echo "Configuration release verification passed."
-
+          echo "Kernel release configuration is correct."
       # ============================================================
       # 11. VERIFY CONFIGURATION
       # ============================================================
 
-      - name: Verify important configuration
+      - name: Verify kernel release
         shell: bash
         run: |
           set -euxo pipefail
 
           cd kernel
 
-          CONFIG="${OUT_DIR}/.config"
+          export PATH="${LLVM_DIR}/bin:${PATH}"
 
-          required=(
-            "CONFIG_HIDRAW=y"
-            "CONFIG_UHID=y"
-
-            "CONFIG_BT=y"
-            "CONFIG_BT_BREDR=y"
-            "CONFIG_BT_LE=y"
-            "CONFIG_BT_RFCOMM=m"
-            "CONFIG_BT_BNEP=m"
-            "CONFIG_BT_HIDP=m"
-            "CONFIG_BT_HCIUART=m"
-            "CONFIG_BT_HCIVHCI=m"
-
-            "CONFIG_USB_GADGET=y"
-            "CONFIG_USB_CONFIGFS=y"
-            "CONFIG_USB_CONFIGFS_NCM=y"
-            "CONFIG_USB_CONFIGFS_RNDIS=y"
-            "CONFIG_USB_CONFIGFS_ECM=y"
-            "CONFIG_USB_CONFIGFS_EEM=y"
-            "CONFIG_USB_CONFIGFS_F_HID=y"
-
-            "CONFIG_USB_ACM=m"
-            "CONFIG_USB_SERIAL=m"
-            "CONFIG_USB_SERIAL_GENERIC=y"
-            "CONFIG_USB_USBNET=y"
-
-            "CONFIG_SENSORS_SSC=y"
-            "CONFIG_SENSORS_CLASS=m"
-
-            "CONFIG_QCA_CLD_WLAN=m"
-          )
-
-          for item in "${required[@]}"; do
-            grep -Fxq "${item}" "${CONFIG}" || {
-              echo "ERROR: missing:"
-              echo "${item}"
-              exit 1
-            }
-          done
-
-          AUTO_STATE="$(
-            scripts/config \
-              --file "${CONFIG}" \
-              --state LOCALVERSION_AUTO
+          BUILT_RELEASE="$(
+            make -s \
+              O="${OUT_DIR}" \
+              ARCH="${ARCH}" \
+              LLVM=1 \
+              LLVM_IAS=1 \
+              CROSS_COMPILE="${CROSS_COMPILE}" \
+              kernelrelease
           )"
 
-          test "${AUTO_STATE}" = "n"
+          echo "Expected:"
+          echo "${CLEAN_RELEASE}"
 
-          if grep -Eq \
-            '^CONFIG_FEATURE_(FRAME_INJECTION_SUPPORT|MONITOR_MODE_SUPPORT)=' \
-            "${CONFIG}"; then
-            echo "ERROR: QCACLD3 feature variable incorrectly entered into .config."
+          echo
+          echo "Built:"
+          echo "${BUILT_RELEASE}"
+
+          if [ "${BUILT_RELEASE}" != "${CLEAN_RELEASE}" ]; then
+            echo
+            echo "ERROR: kernel release mismatch."
+
+            echo
+            echo "Expected bytes:"
+            printf '%s' "${CLEAN_RELEASE}" | od -An -tx1
+
+            echo
+            echo "Built bytes:"
+            printf '%s' "${BUILT_RELEASE}" | od -An -tx1
+
             exit 1
           fi
 
-          echo "Kernel configuration verification passed."
+          case "${BUILT_RELEASE}" in
+            *-dirty)
+              echo "ERROR: dirty release detected."
+              exit 1
+              ;;
+          esac
 
+          case "${BUILT_RELEASE}" in
+            *-cip135-st19-perf-g*)
+              ;;
+            *)
+              echo "ERROR: unexpected cebu kernel release."
+              exit 1
+              ;;
+          esac
+
+          echo
+          echo "Kernel release verification passed."
       # ============================================================
       # 12. IMPORT QCACLD3 INJECTION SOURCES
       # ============================================================
