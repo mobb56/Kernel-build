@@ -484,6 +484,13 @@ jobs:
             --file "${OUT_DIR}/.config" \
             --set-str LOCALVERSION "${RELEASE_SUFFIX}"
 
+            make O="${OUT_DIR}" \
+           ARCH="${ARCH}" \
+           LLVM=1 \
+           LLVM_IAS=1 \
+           CROSS_COMPILE="${CROSS_COMPILE}" \
+           syncconfig
+
           # Do NOT call olddefconfig here.
 
           LOCALVERSION_AUTO_STATE="$(
