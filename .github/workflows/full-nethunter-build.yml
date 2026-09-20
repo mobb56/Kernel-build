@@ -476,6 +476,67 @@ jobs:
             "${OUT_DIR}/.config" \
             nethunter-config/cebu-nethunter.config
 
+
+                      echo
+          echo "============================================================"
+          echo "RFCOMM CONFIG AFTER MERGE, BEFORE OLDDEFCONFIG"
+          echo "============================================================"
+
+          scripts/config \
+            --file "${OUT_DIR}/.config" \
+            --state BT
+
+          scripts/config \
+            --file "${OUT_DIR}/.config" \
+            --state BT_BREDR
+
+          scripts/config \
+            --file "${OUT_DIR}/.config" \
+            --state BT_LE
+
+          scripts/config \
+            --file "${OUT_DIR}/.config" \
+            --state BT_RFCOMM
+
+          scripts/config \
+            --file "${OUT_DIR}/.config" \
+            --state BT_RFCOMM_TTY
+
+          grep -E \
+            '^(CONFIG_BT=|CONFIG_BT_BREDR=|CONFIG_BT_LE=|CONFIG_BT_RFCOMM=|CONFIG_BT_RFCOMM_TTY=|# CONFIG_BT_RFCOMM|# CONFIG_BT_RFCOMM_TTY)' \
+            "${OUT_DIR}/.config" || true
+
+          echo
+          echo "============================================================"
+          echo "RUNNING OLDDEFCONFIG"
+          echo "============================================================"
+
+          scripts/config \
+            --file "${OUT_DIR}/.config" \
+            --state BT
+
+          scripts/config \
+            --file "${OUT_DIR}/.config" \
+            --state BT_BREDR
+
+          scripts/config \
+            --file "${OUT_DIR}/.config" \
+            --state BT_LE
+
+          scripts/config \
+            --file "${OUT_DIR}/.config" \
+            --state BT_RFCOMM
+
+          scripts/config \
+            --file "${OUT_DIR}/.config" \
+            --state BT_RFCOMM_TTY
+
+          grep -E \
+            '^(CONFIG_BT=|CONFIG_BT_BREDR=|CONFIG_BT_LE=|CONFIG_BT_RFCOMM=|CONFIG_BT_RFCOMM_TTY=|# CONFIG_BT_RFCOMM|# CONFIG_BT_RFCOMM_TTY)' \
+            "${OUT_DIR}/.config" || true
+
+         
+
           # Resolve Kconfig dependencies BEFORE changing the final
           # LOCALVERSION settings.
           make -s \
