@@ -1829,11 +1829,51 @@ jobs:
         run: |
           set -euxo pipefail
 
+          cd kernel
+
+          # ----------------------------------------------------------
+          # RFCOMM is built into the kernel, not a loadable module.
+          #
+          # CONFIG_BT_RFCOMM=y
+          # CONFIG_BT_RFCOMM_TTY=y
+          #
+          # Therefore rfcomm.ko must NOT be searched for below.
+          # ----------------------------------------------------------
+
+          echo "Checking built-in Bluetooth RFCOMM..."
+
+          RFCOMM_STATE="$(
+            scripts/config \
+              --file "${OUT_DIR}/.config" \
+              --state BT_RFCOMM
+          )"
+
+          echo "BT_RFCOMM: ${RFCOMM_STATE}"
+
+          test "${RFCOMM_STATE}" = "y" || {
+            echo "ERROR: BT_RFCOMM is not built-in."
+            exit 1
+          }
+
+          RFCOMM_TTY_STATE="$(
+            scripts/config \
+              --file "${OUT_DIR}/.config" \
+              --state BT_RFCOMM_TTY
+          )"
+
+          echo "BT_RFCOMM_TTY: ${RFCOMM_TTY_STATE}"
+
+          test "${RFCOMM_TTY_STATE}" = "y" || {
+            echo "ERROR: BT_RFCOMM_TTY is not built-in."
+            exit 1
+          }
+
+          echo "Built-in RFCOMM verification passed."
+
           required_modules=(
             hci_vhci.ko
             hci_uart.ko
             hidp.ko
-            rfcomm.ko
             bnep.ko
           )
 
