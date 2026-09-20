@@ -528,36 +528,41 @@ jobs:
             #
 
             sed -i \
-              '/if test "${LOCALVERSION+set}" != "set"; then/,/fi/d' \
-              scripts/setlocalversion
+              '/^[[:space:]]*if test "${LOCALVERSION+set}" != "set"; then$/,/^[[:space:]]*fi$/c\
+             :' \
+            scripts/setlocalversion
 
-            echo "setlocalversion automatic '+' block removed."
+            echo "setlocalversion automatic '+' block disabled."
 
-            # Verify the automatic '+' block is gone.
+            # Verify the automatic '+' block is gone and the script
+            # still has valid shell syntax.
             if grep -Fq 'if test "${LOCALVERSION+set}" != "set"; then' \
-              scripts/setlocalversion; then
-              echo "ERROR: automatic '+' block still exists."
-              exit 1
+            scripts/setlocalversion; then
+            echo "ERROR: automatic '+' block still exists."
+            exit 1
             fi
 
+            bash -n scripts/setlocalversion
+
+            echo "setlocalversion syntax check passed."
             # ============================================================
             # VERIFY KERNEL RELEASE
             # ============================================================
 
             CONFIG_RELEASE="$(
-              make -s \
-                O="${OUT_DIR}" \
-                ARCH="${ARCH}" \
-                LLVM=1 \
-                LLVM_IAS=1 \
-                CROSS_COMPILE="${CROSS_COMPILE}" \
-                kernelrelease
+            make -s \
+             O="${OUT_DIR}" \
+            ARCH="${ARCH}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            kernelrelease
             )"
 
-            echo "Configured release: ${CONFIG_RELEASE}"
-            echo "Expected release:   ${CLEAN_RELEASE}"
+           echo "Configured release: ${CONFIG_RELEASE}"
+           echo "Expected release:   ${CLEAN_RELEASE}"
 
-            test "${CONFIG_RELEASE}" = "${CLEAN_RELEASE}"
+           test "${CONFIG_RELEASE}" = "${CLEAN_RELEASE}"
       # ============================================================
       # 12. VERIFY KERNEL CONFIG
       #
