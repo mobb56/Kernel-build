@@ -520,32 +520,25 @@ jobs:
 
             # ============================================================
             # FIX KERNEL RELEASE SUFFIX
+            # ============================================================
             #
             # CONFIG_LOCALVERSION already contains the stock release
-            # suffix. The 4.19 setlocalversion script otherwise adds "+"
-            # when LOCALVERSION_AUTO=n and LOCALVERSION is not set.
-            # Disable only that automatic "+" behavior.
-            # ============================================================
+            # suffix. Prevent setlocalversion from adding the unwanted
+            # "+" for this modified kernel tree.
+            #
 
-            sed -i '199,202d' scripts/setlocalversion
+            sed -i \
+              '/if test "${LOCALVERSION+set}" != "set"; then/,/fi/d' \
+              scripts/setlocalversion
 
-            echo "Verified setlocalversion automatic '+' suppression:"
-            sed -n '188,205p' scripts/setlocalversion
+            echo "setlocalversion automatic '+' block removed."
 
-                        CONFIG_RELEASE="$(
-              make -s \
-                O="${OUT_DIR}" \
-                ARCH="${ARCH}" \
-                LLVM=1 \
-                LLVM_IAS=1 \
-                CROSS_COMPILE="${CROSS_COMPILE}" \
-                kernelrelease
-            )"
-
-            echo "Configured release: ${CONFIG_RELEASE}"
-            echo "Expected release:   ${CLEAN_RELEASE}"
-
-            test "${CONFIG_RELEASE}" = "${CLEAN_RELEASE}"
+            # Verify the automatic '+' block is gone.
+            if grep -Fq 'if test "${LOCALVERSION+set}" != "set"; then' \
+              scripts/setlocalversion; then
+              echo "ERROR: automatic '+' block still exists."
+              exit 1
+            fi
 
             # ============================================================
             # VERIFY KERNEL RELEASE
