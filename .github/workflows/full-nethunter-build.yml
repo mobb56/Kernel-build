@@ -227,7 +227,7 @@ jobs:
           echo "Output directory prepared."
 
 
-                # ============================================================
+      # ============================================================
       # 9. GENERATE CLEAN BASE CONFIGURATION
       # ============================================================
 
@@ -602,7 +602,7 @@ jobs:
           echo "Kernel release verification passed."
 
 
-                # ============================================================
+      # ============================================================
       # 15. VERIFY IMPORTANT CONFIGURATION
       # ============================================================
 
@@ -1102,7 +1102,7 @@ jobs:
           echo "Injection lifecycle verification passed."
 
 
-                # ============================================================
+      # ============================================================
       # 20. PATCH QCACLD3 KBUILD
       # ============================================================
 
@@ -1551,7 +1551,7 @@ jobs:
           echo "============================================================"
 
 
-                # ============================================================
+      # ============================================================
       # 25. BUILD KERNEL + MODULES
       # ============================================================
 
@@ -2020,8 +2020,7 @@ jobs:
 
           echo "WLAN undefined-symbol verification passed."
 
-
-                # ============================================================
+      # ============================================================
       # 36. STAGE FINAL NETHUNTER MODULES
       # ============================================================
 
@@ -2457,7 +2456,7 @@ jobs:
 
 
 
-                - name: Final safety and hardware configuration audit
+      - name: Final safety and hardware configuration audit
         shell: bash
         run: |
           set -euo pipefail
@@ -2709,7 +2708,7 @@ jobs:
 
 
 
-                - name: Prepare safe stock-boot replacement script
+      - name: Prepare safe stock-boot replacement script
         shell: bash
         run: |
           set -euo pipefail
