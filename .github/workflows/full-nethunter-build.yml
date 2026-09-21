@@ -482,7 +482,6 @@ jobs:
 
           cd kernel
 
-          
           EXPECTED_RELEASE="4.19.325-cip135-st19-perf-g39bcecd5c63d"
           RELEASE_SUFFIX="-perf-g39bcecd5c63d"
 
@@ -498,15 +497,13 @@ jobs:
           echo "Initial configuration generated."
 
           echo
-          echo "===== DISABLING AUTOMATIC LOCAL VERSION ====="
+          echo "===== SETTING STOCK LOCAL VERSION ====="
 
           scripts/config --file out/.config \
             --disable LOCALVERSION_AUTO
 
-          # Keep CONFIG_LOCALVERSION empty.
-          # The exact stock suffix is supplied explicitly to Kbuild.
           scripts/config --file out/.config \
-            --set-str LOCALVERSION ""
+            --set-str LOCALVERSION "${RELEASE_SUFFIX}"
 
           test "$(scripts/config --file out/.config --state LOCALVERSION_AUTO)" = "n"
 
@@ -524,7 +521,6 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
-            LOCALVERSION="${RELEASE_SUFFIX}" \
             olddefconfig
 
           echo
@@ -536,7 +532,6 @@ jobs:
               LLVM=1 \
               LLVM_IAS=1 \
               CROSS_COMPILE="${CROSS_COMPILE}" \
-              LOCALVERSION="${RELEASE_SUFFIX}" \
               kernelrelease
           )"
 
@@ -555,8 +550,14 @@ jobs:
               ;;
           esac
 
+          echo
+          echo "===== VERIFYING CONFIGURATION HEADERS ====="
+
           test -f "${OUT_DIR}/include/generated/autoconf.h"
           test -f "${OUT_DIR}/include/config/auto.conf"
+
+          echo "autoconf.h: OK"
+          echo "auto.conf: OK"
 
           {
             echo "CLEAN_RELEASE=${EXPECTED_RELEASE}"
@@ -564,6 +565,7 @@ jobs:
             echo "RELEASE_SUFFIX=${RELEASE_SUFFIX}"
           } >> "${GITHUB_ENV}"
 
+          echo
           echo "Kernel release preserved successfully."
       # ============================================================
       # 13. DISABLE DEBUG INFORMATION
@@ -609,13 +611,12 @@ jobs:
 
           cd kernel
 
-            CONFIG_RELEASE="$(
+          CONFIG_RELEASE="$(
             make -s O="${OUT_DIR}" \
               ARCH="${ARCH}" \
               LLVM=1 \
               LLVM_IAS=1 \
               CROSS_COMPILE="${CROSS_COMPILE}" \
-              LOCALVERSION="-perf-g39bcecd5c63d" \
               kernelrelease
           )"
 
