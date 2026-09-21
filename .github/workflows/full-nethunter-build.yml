@@ -1717,13 +1717,13 @@ jobs:
           cd kernel
 
           BUILT_RELEASE="$(
-            make -s \
-              O="${OUT_DIR}" \
-              ARCH="${ARCH}" \
-              LLVM=1 \
-              LLVM_IAS=1 \
-              CROSS_COMPILE="${CROSS_COMPILE}" \
-              kernelrelease
+          make -s O="${OUT_DIR}" \
+          ARCH="${ARCH}" \
+          LLVM=1 \
+          LLVM_IAS=1 \
+          CROSS_COMPILE="${CROSS_COMPILE}" \
+          LOCALVERSION="" \
+          kernelrelease
           )"
 
           echo "Expected release:"
