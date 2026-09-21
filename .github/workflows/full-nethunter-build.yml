@@ -526,12 +526,13 @@ jobs:
           echo
           echo "===== CALCULATING KERNEL RELEASE ====="
 
-          CONFIG_RELEASE="$(
+            CONFIG_RELEASE="$(
             make -s O="${OUT_DIR}" \
               ARCH="${ARCH}" \
               LLVM=1 \
               LLVM_IAS=1 \
               CROSS_COMPILE="${CROSS_COMPILE}" \
+              LOCALVERSION="" \
               kernelrelease
           )"
 
@@ -643,12 +644,13 @@ jobs:
           echo
           echo "===== KERNEL RELEASE CHECK ====="
 
-          CONFIG_RELEASE="$(
+            CONFIG_RELEASE="$(
             make -s O="${OUT_DIR}" \
               ARCH="${ARCH}" \
               LLVM=1 \
               LLVM_IAS=1 \
               CROSS_COMPILE="${CROSS_COMPILE}" \
+              LOCALVERSION="" \
               kernelrelease
           )"
 
@@ -1645,7 +1647,7 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
-            LOCALVERSION="-perf-g39bcecd5c63d" \
+            LOCALVERSION="" \
             Image \
             modules 2>&1 | tee "${BUILD_LOG}"
             
