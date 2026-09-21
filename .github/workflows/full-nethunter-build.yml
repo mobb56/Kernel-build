@@ -611,6 +611,38 @@ jobs:
 
           cd kernel
 
+          CONFIG="${OUT_DIR}/.config"
+
+          echo "===== RELEASE CONFIGURATION CHECK ====="
+
+          LOCALVERSION_AUTO_STATE="$(
+            scripts/config \
+              --file "${CONFIG}" \
+              --state LOCALVERSION_AUTO
+          )"
+
+          LOCALVERSION_STATE="$(
+            scripts/config \
+              --file "${CONFIG}" \
+              --state LOCALVERSION
+          )"
+
+          echo "LOCALVERSION_AUTO=${LOCALVERSION_AUTO_STATE}"
+          echo "LOCALVERSION=${LOCALVERSION_STATE}"
+
+          if [ "${LOCALVERSION_AUTO_STATE}" != "n" ]; then
+            echo "ERROR: LOCALVERSION_AUTO was changed after the release setup"
+            exit 1
+          fi
+
+          if [ "${LOCALVERSION_STATE}" != "-perf-g39bcecd5c63d" ]; then
+            echo "ERROR: CONFIG_LOCALVERSION changed unexpectedly"
+            exit 1
+          fi
+
+          echo
+          echo "===== KERNEL RELEASE CHECK ====="
+
           CONFIG_RELEASE="$(
             make -s O="${OUT_DIR}" \
               ARCH="${ARCH}" \
@@ -626,7 +658,10 @@ jobs:
           echo "Expected release:"
           echo "${CLEAN_RELEASE}"
 
-          test "${CONFIG_RELEASE}" = "${CLEAN_RELEASE}"
+          if [ "${CONFIG_RELEASE}" != "${CLEAN_RELEASE}" ]; then
+            echo "ERROR: kernel release mismatch"
+            exit 1
+          fi
 
           case "${CONFIG_RELEASE}" in
             *+*|*-dirty*)
