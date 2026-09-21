@@ -487,7 +487,7 @@ jobs:
 
           echo "===== PREPARING KERNEL CONFIGURATION ====="
 
-          make -s O=../out \
+          make -s O="${OUT_DIR}" \
             ARCH="${ARCH}" \
             LLVM=1 \
             LLVM_IAS=1 \
@@ -516,7 +516,7 @@ jobs:
           echo
           echo "===== REGENERATING CONFIGURATION ====="
 
-          make -s O=../out \
+          make -s O="${OUT_DIR}" \
             ARCH="${ARCH}" \
             LLVM=1 \
             LLVM_IAS=1 \
@@ -527,12 +527,11 @@ jobs:
           echo "===== CALCULATING RELEASE WITH EXPLICIT SUFFIX ====="
 
           CONFIG_RELEASE="$(
-            make -s O=../out \
+            make -s O="${OUT_DIR}" \
               ARCH="${ARCH}" \
               LLVM=1 \
               LLVM_IAS=1 \
               CROSS_COMPILE="${CROSS_COMPILE}" \
-              LOCALVERSION="${RELEASE_SUFFIX}" \
               kernelrelease
           )"
 
@@ -557,8 +556,8 @@ jobs:
           echo
           echo "===== VERIFYING CONFIGURATION HEADERS ====="
 
-          test -f ../out/include/generated/autoconf.h
-          test -f ../out/include/config/auto.conf
+          test -f "${OUT_DIR}/include/generated/autoconf.h"
+          test -f "${OUT_DIR}/include/config/auto.conf"
 
           echo "autoconf.h: OK"
           echo "auto.conf: OK"
@@ -616,7 +615,7 @@ jobs:
           cd kernel
 
           CONFIG_RELEASE="$(
-            make -s O=../out \
+            make -s O="${OUT_DIR}" \
               ARCH="${ARCH}" \
               LLVM=1 \
               LLVM_IAS=1 \
