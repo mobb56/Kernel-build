@@ -2669,10 +2669,10 @@ jobs:
           fi
 
           case "${ACTUAL_RELEASE}" in
-            *+*|*-dirty*)
-              echo "ERROR: dirty/custom kernel release detected"
-              exit 1
-              ;;
+          *+|*-dirty)
+          echo "ERROR: dirty/custom kernel release detected"
+          exit 1
+          ;;
           esac
 
           echo
