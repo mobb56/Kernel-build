@@ -480,13 +480,12 @@ jobs:
       - name: Preserve stock kernel release
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
           cd kernel
 
           BASE_VERSION="$(
-            make -s \
-              O="${OUT_DIR}" \
+            make -s O=../out \
               ARCH="${ARCH}" \
               LLVM=1 \
               LLVM_IAS=1 \
@@ -494,37 +493,80 @@ jobs:
               kernelversion
           )"
 
-          RELEASE_SUFFIX="${CLEAN_RELEASE#${BASE_VERSION}}"
+          CLEAN_RELEASE="$(
+            make -s O=../out \
+              ARCH="${ARCH}" \
+              LLVM=1 \
+              LLVM_IAS=1 \
+              CROSS_COMPILE="${CROSS_COMPILE}" \
+              kernelrelease
+          )"
 
-          echo "Base version:    ${BASE_VERSION}"
-          echo "Clean release:   ${CLEAN_RELEASE}"
-          echo "Release suffix:  ${RELEASE_SUFFIX}"
+          echo "BASE_VERSION=${BASE_VERSION}"
+          echo "CLEAN_RELEASE=${CLEAN_RELEASE}"
 
-          scripts/config \
-            --file "${OUT_DIR}/.config" \
+          EXPECTED_RELEASE="4.19.325-cip135-st19-perf-g39bcecd5c63d"
+
+          if [ "${CLEAN_RELEASE}" != "${EXPECTED_RELEASE}" ]; then
+            echo "ERROR: unexpected clean kernel release"
+            echo "Got:      ${CLEAN_RELEASE}"
+            echo "Expected: ${EXPECTED_RELEASE}"
+            exit 1
+          fi
+
+          CONFIG_LOCALVERSION_VALUE="-perf-g39bcecd5c63d"
+
+          scripts/config --file out/.config \
             --disable LOCALVERSION_AUTO
 
-          scripts/config \
-            --file "${OUT_DIR}/.config" \
-            --set-str CONFIG_LOCALVERSION "${RELEASE_SUFFIX}"
+          scripts/config --file out/.config \
+            --set-str LOCALVERSION "${CONFIG_LOCALVERSION_VALUE}"
 
-          make -s \
-            O="${OUT_DIR}" \
+          LOCALVERSION_AUTO_STATE="$(
+            scripts/config --file out/.config \
+              --state LOCALVERSION_AUTO
+          )"
+
+          CONFIG_LOCALVERSION_STATE="$(
+            scripts/config --file out/.config \
+              --state LOCALVERSION
+          )"
+
+          echo "LOCALVERSION_AUTO_STATE=${LOCALVERSION_AUTO_STATE}"
+          echo "CONFIG_LOCALVERSION_STATE=${CONFIG_LOCALVERSION_STATE}"
+
+          test "${LOCALVERSION_AUTO_STATE}" = "n"
+
+          make -s O=out \
             ARCH="${ARCH}" \
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
-            syncconfig
+            olddefconfig
 
-          LOCALVERSION_AUTO_STATE="$(
-            scripts/config \
-              --file "${OUT_DIR}/.config" \
-              --state LOCALVERSION_AUTO
+          CONFIG_RELEASE="$(
+            make -s O=out \
+              ARCH="${ARCH}" \
+              LLVM=1 \
+              LLVM_IAS=1 \
+              CROSS_COMPILE="${CROSS_COMPILE}" \
+              kernelrelease
           )"
 
-          echo "LOCALVERSION_AUTO: ${LOCALVERSION_AUTO_STATE}"
+          echo "Configured release:"
+          echo "${CONFIG_RELEASE}"
 
-          test "${LOCALVERSION_AUTO_STATE}" = "n"
+          echo "Expected release:"
+          echo "${EXPECTED_RELEASE}"
+
+          test "${CONFIG_RELEASE}" = "${EXPECTED_RELEASE}"
+
+          echo "Kernel release preserved successfully."
+
+          {
+            echo "CLEAN_RELEASE=${EXPECTED_RELEASE}"
+            echo "BASE_VERSION=${BASE_VERSION}"
+          } >> "${GITHUB_ENV}"
 
       # ============================================================
       # 13. DISABLE DEBUG INFORMATION
@@ -566,13 +608,12 @@ jobs:
       - name: Verify kernel release before build
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
           cd kernel
 
           CONFIG_RELEASE="$(
-            make -s \
-              O="${OUT_DIR}" \
+            make -s O=../out \
               ARCH="${ARCH}" \
               LLVM=1 \
               LLVM_IAS=1 \
@@ -589,18 +630,13 @@ jobs:
           test "${CONFIG_RELEASE}" = "${CLEAN_RELEASE}"
 
           case "${CONFIG_RELEASE}" in
-            *+*)
-              echo "ERROR: unwanted '+' remains in kernel release."
-              exit 1
-              ;;
-            *-dirty)
-              echo "ERROR: dirty kernel release detected."
+            *+*|*-dirty*)
+              echo "ERROR: dirty kernel release detected"
               exit 1
               ;;
           esac
 
           echo "Kernel release verification passed."
-
 
       # ============================================================
       # 15. VERIFY IMPORTANT CONFIGURATION
