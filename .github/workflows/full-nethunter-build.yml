@@ -2570,15 +2570,17 @@ jobs:
           test -f "${GITHUB_WORKSPACE}/kernel/out/arch/arm64/boot/Image"
 
           check_config() {
-            local symbol="$1"
-            local expected="$2"
-            local actual
+          local symbol="$1"
+          local expected="$2"
+          local actual
 
-            actual="$(
-              scripts/config \
-                --file "${CONFIG}" \
-                --state "${symbol}" 2>/dev/null || true
-            )
+          symbol="${symbol#CONFIG_}"
+
+          actual="$(
+          scripts/config \
+           --file "${CONFIG}" \
+           --state "${symbol}" 2>/dev/null || true
+             )
 
             if [ "${actual}" != "${expected}" ]; then
               echo "ERROR: ${symbol}=${actual}, expected ${expected}"
