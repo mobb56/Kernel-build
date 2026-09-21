@@ -2527,32 +2527,7 @@ jobs:
 
 
 
-      - name: Final safety and hardware configuration audit
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          CONFIG="${GITHUB_WORKSPACE}/out/.config"
-          RELEASE="${CLEAN_RELEASE}"
-
-          echo "===== FINAL SAFETY AUDIT ====="
-          echo "Expected kernel release: ${RELEASE}"
-
-          test -f "${CONFIG}"
-          test -f "${GITHUB_WORKSPACE}/out/arch/arm64/boot/Image"
-
-          check_config() {
-            local symbol="$1"
-            local expected="$2"
-            local actual
-            actual="$(scripts/config --file "${CONFIG}" --state "${symbol}" 2>/dev/null || true)"
-
-            if [ "${actual}" != "${expected}" ]; then
-              echo "ERROR: ${symbol}=${actual}, expected ${expected}"
-              exit 1
-            fi
-
-
+      
       - name: Final safety and hardware configuration audit
         shell: bash
         run: |
@@ -2560,21 +2535,30 @@ jobs:
 
           cd "${GITHUB_WORKSPACE}/kernel"
 
-          CONFIG="${GITHUB_WORKSPACE}/kernel/out/.config"
+          CONFIG="${OUT_DIR}/.config"
           RELEASE="${CLEAN_RELEASE}"
+          IMAGE="${OUT_DIR}/arch/arm64/boot/Image"
 
           echo "===== FINAL SAFETY AUDIT ====="
           echo "Expected kernel release: ${RELEASE}"
+          echo "Kernel directory: $(pwd)"
+          echo "Config: ${CONFIG}"
+          echo "Image: ${IMAGE}"
 
-          test -f "${CONFIG}"
-          test -f "${GITHUB_WORKSPACE}/kernel/out/arch/arm64/boot/Image"
+          test -f "${CONFIG}" || {
+          echo "ERROR: kernel config not found: ${CONFIG}"
+          exit 1
+           }
 
+          test -f "${IMAGE}" || {
+          echo "ERROR: kernel Image not found: ${IMAGE}"
+          exit 1
+             }
+             
           check_config() {
           local symbol="$1"
           local expected="$2"
           local actual
-
-          symbol="${symbol#CONFIG_}"
 
           actual="$(
           scripts/config \
