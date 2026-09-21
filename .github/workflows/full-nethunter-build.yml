@@ -2552,6 +2552,39 @@ jobs:
               exit 1
             fi
 
+
+      - name: Final safety and hardware configuration audit
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "${GITHUB_WORKSPACE}/kernel"
+
+          CONFIG="${GITHUB_WORKSPACE}/kernel/out/.config"
+          RELEASE="${CLEAN_RELEASE}"
+
+          echo "===== FINAL SAFETY AUDIT ====="
+          echo "Expected kernel release: ${RELEASE}"
+
+          test -f "${CONFIG}"
+          test -f "${GITHUB_WORKSPACE}/kernel/out/arch/arm64/boot/Image"
+
+          check_config() {
+            local symbol="$1"
+            local expected="$2"
+            local actual
+
+            actual="$(
+              scripts/config \
+                --file "${CONFIG}" \
+                --state "${symbol}" 2>/dev/null || true
+            )
+
+            if [ "${actual}" != "${expected}" ]; then
+              echo "ERROR: ${symbol}=${actual}, expected ${expected}"
+              exit 1
+            fi
+
             echo "OK: ${symbol}=${expected}"
           }
 
@@ -2632,12 +2665,13 @@ jobs:
           fi
 
           ACTUAL_RELEASE="$(
-            make -s -C "${GITHUB_WORKSPACE}" \
-              O=out \
+            make -s \
+              O="${OUT_DIR}" \
               ARCH="${ARCH}" \
               LLVM=1 \
               LLVM_IAS=1 \
               CROSS_COMPILE="${CROSS_COMPILE}" \
+              LOCALVERSION="" \
               kernelrelease
           )"
 
@@ -2659,14 +2693,15 @@ jobs:
           echo "===== FINAL SAFETY AUDIT PASSED ====="
           echo "No flashing performed."
           echo "No reboot performed."
-          echo "No boot partition was modified by this workflow."
+          echo "No boot partition was modified by this workflow."     
+
 
       - name: Verify final kernel and WLAN module
         shell: bash
         run: |
           set -euo pipefail
 
-          IMAGE="${GITHUB_WORKSPACE}/out/arch/arm64/boot/Image"
+          IMAGE="${GITHUB_WORKSPACE}/kernel/out/arch/arm64/boot/Image"
           WLAN="${GITHUB_WORKSPACE}/module-install/lib/modules/${CLEAN_RELEASE}/kernel/drivers/staging/qcacld-3.0/wlan.ko"
 
           echo "===== FINAL KERNEL VERIFICATION ====="
@@ -2970,8 +3005,8 @@ jobs:
           rm -rf "${FINAL}"
           mkdir -p "${FINAL}"
 
-          IMAGE="${GITHUB_WORKSPACE}/out/arch/arm64/boot/Image"
-          MODULE="${GITHUB_WORKSPACE}/module-stage/vendor/lib/modules/qca_cld3_wlan.ko"
+          IMAGE="${GITHUB_WORKSPACE}/kernel/out/arch/arm64/boot/Image"
+          MODULE="${GITHUB_WORKSPACE}/kernel/module-stage/vendor/lib/modules/qca_cld3_wlan.ko"
 
           test -s "${IMAGE}"
           test -s "${MODULE}"
@@ -2979,7 +3014,7 @@ jobs:
           cp "${IMAGE}" "${FINAL}/Image"
           cp "${MODULE}" "${FINAL}/qca_cld3_wlan.ko"
 
-          cp "${GITHUB_WORKSPACE}/out/.config" \
+          cp "${GITHUB_WORKSPACE}/kernel/out/.config" \
             "${FINAL}/final-kernel.config"
 
           cp "${GITHUB_WORKSPACE}/kernel/nethunter-config/cebu-nethunter.config" \
