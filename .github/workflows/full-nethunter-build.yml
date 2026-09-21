@@ -21,9 +21,7 @@ env:
   CROSS_COMPILE: aarch64-linux-gnu-
   OUT_DIR: out
 
-  # IMPORTANT:
-  # Keep this explicitly empty.
-  LOCALVERSION: ""
+  
 
 jobs:
   build:
@@ -623,7 +621,6 @@ jobs:
               LLVM=1 \
               LLVM_IAS=1 \
               CROSS_COMPILE="${CROSS_COMPILE}" \
-              LOCALVERSION="-perf-g39bcecd5c63d" \
               kernelrelease
           )"
 
@@ -1617,7 +1614,6 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
-            LOCALVERSION="-perf-g39bcecd5c63d" \
             Image \
             modules 2>&1 | tee "${BUILD_LOG}"
             
