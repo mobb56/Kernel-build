@@ -485,12 +485,10 @@ jobs:
           cd kernel
 
           EXPECTED_RELEASE="4.19.325-cip135-st19-perf-g39bcecd5c63d"
-          CONFIG_LOCALVERSION_VALUE="-perf-g39bcecd5c63d"
+          RELEASE_SUFFIX="-perf-g39bcecd5c63d"
 
           echo "===== PREPARING KERNEL CONFIGURATION ====="
 
-          # Generate the configuration headers before asking Kbuild
-          # to calculate the kernel release.
           make -s O=../out \
             ARCH="${ARCH}" \
             LLVM=1 \
@@ -501,24 +499,24 @@ jobs:
           echo "Initial configuration generated."
 
           echo
-          echo "===== SETTING STOCK RELEASE SUFFIX ====="
+          echo "===== DISABLING AUTOMATIC LOCAL VERSION ====="
 
           scripts/config --file out/.config \
             --disable LOCALVERSION_AUTO
 
           scripts/config --file out/.config \
-            --set-str LOCALVERSION "${CONFIG_LOCALVERSION_VALUE}"
+            --set-str LOCALVERSION "${RELEASE_SUFFIX}"
+
+          test "$(scripts/config --file out/.config --state LOCALVERSION_AUTO)" = "n"
 
           echo "LOCALVERSION_AUTO:"
           scripts/config --file out/.config --state LOCALVERSION_AUTO
 
-          echo "LOCALVERSION:"
+          echo "CONFIG_LOCALVERSION:"
           scripts/config --file out/.config --state LOCALVERSION
 
-          test "$(scripts/config --file out/.config --state LOCALVERSION_AUTO)" = "n"
-
           echo
-          echo "===== REGENERATING CONFIGURATION HEADERS ====="
+          echo "===== REGENERATING CONFIGURATION ====="
 
           make -s O=../out \
             ARCH="${ARCH}" \
@@ -528,7 +526,7 @@ jobs:
             olddefconfig
 
           echo
-          echo "===== CALCULATING KERNEL RELEASE ====="
+          echo "===== CALCULATING RELEASE WITH EXPLICIT SUFFIX ====="
 
           CONFIG_RELEASE="$(
             make -s O=../out \
@@ -536,6 +534,7 @@ jobs:
               LLVM=1 \
               LLVM_IAS=1 \
               CROSS_COMPILE="${CROSS_COMPILE}" \
+              LOCALVERSION="${RELEASE_SUFFIX}" \
               kernelrelease
           )"
 
@@ -558,7 +557,7 @@ jobs:
           esac
 
           echo
-          echo "===== VERIFYING GENERATED CONFIGURATION ====="
+          echo "===== VERIFYING CONFIGURATION HEADERS ====="
 
           test -f ../out/include/generated/autoconf.h
           test -f ../out/include/config/auto.conf
@@ -569,11 +568,11 @@ jobs:
           {
             echo "CLEAN_RELEASE=${EXPECTED_RELEASE}"
             echo "BASE_VERSION=4.19.325"
+            echo "RELEASE_SUFFIX=${RELEASE_SUFFIX}"
           } >> "${GITHUB_ENV}"
 
           echo
           echo "Kernel release preserved successfully."
-
       # ============================================================
       # 13. DISABLE DEBUG INFORMATION
       # ============================================================
@@ -1612,16 +1611,16 @@ jobs:
           echo "BUILDING KERNEL + MODULES"
           echo "============================================================"
 
-          make -j2 \
+                    make -j2 \
             O="${OUT_DIR}" \
             ARCH="${ARCH}" \
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
+            LOCALVERSION="-perf-g39bcecd5c63d" \
             Image \
-            modules \
-            2>&1 | tee "${BUILD_LOG}"
-
+            modules 2>&1 | tee "${BUILD_LOG}"
+            
           status="${PIPESTATUS[0]}"
 
           if [ "${status}" -ne 0 ]; then
