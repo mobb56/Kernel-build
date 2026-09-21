@@ -623,6 +623,7 @@ jobs:
               LLVM=1 \
               LLVM_IAS=1 \
               CROSS_COMPILE="${CROSS_COMPILE}" \
+              LOCALVERSION="-perf-g39bcecd5c63d" \
               kernelrelease
           )"
 
@@ -642,7 +643,6 @@ jobs:
           esac
 
           echo "Kernel release verification passed."
-
       # ============================================================
       # 15. VERIFY IMPORTANT CONFIGURATION
       # ============================================================
