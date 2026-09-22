@@ -224,28 +224,7 @@ jobs:
           echo "AnyKernel3 reference cloned successfully."
 
 
-      - name: Check cebu touchscreen after all clones
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          cd "${GITHUB_WORKSPACE}/kernel"
-
-          echo "===== NOVA CHECK AFTER ALL CLONES ====="
-
-          if [ -d "drivers/input/touchscreen/nova_oflash_mmi" ]; then
-            echo "NOVA DIRECTORY EXISTS AFTER ALL CLONES"
-            ls -ld drivers/input/touchscreen/nova_oflash_mmi
-            test -f drivers/input/touchscreen/nova_oflash_mmi/Kconfig
-            git ls-files drivers/input/touchscreen/nova_oflash_mmi | head -30
-          else
-            echo "ERROR: NOVA DIRECTORY MISSING AFTER ALL CLONES"
-            echo "--- Git tracked paths ---"
-            git ls-files | grep 'nova_oflash_mmi' || true
-            exit 1
-          fi
-
-          echo "===== END NOVA CHECK ====="
+      
 
       # ============================================================
       # 7. VERIFY SOURCE TREE
@@ -279,46 +258,12 @@ jobs:
         run: |
           set -euxo pipefail
 
-          cd kernel
-
-          echo "===== PREPARE OUTPUT PATH CHECK ====="
-          echo "PWD:"
-          pwd
-          echo "OUT_DIR=${OUT_DIR}"
-          echo "OUT_DIR absolute path:"
-          realpath "${OUT_DIR}" 2>/dev/null || true
-
-          echo "NOVA directory BEFORE rm:"
-          if [ -d "drivers/input/touchscreen/nova_oflash_mmi" ]; then
-          echo "NOVA EXISTS BEFORE rm"
-          ls -ld drivers/input/touchscreen/nova_oflash_mmi
-          test -f drivers/input/touchscreen/nova_oflash_mmi/Kconfig
-          else
-          echo "NOVA ALREADY MISSING BEFORE rm"
-          fi
-          echo "===== END PATH CHECK ====="
+          cd kernel 
 
           rm -rf "${OUT_DIR}"
           mkdir -p "${OUT_DIR}"
 
           echo "Output directory prepared."
-
-          echo "===== NOVA CHECK AFTER PREPARE OUTPUT ====="
-
-          if [ -d "drivers/input/touchscreen/nova_oflash_mmi" ]; then
-            echo "NOVA DIRECTORY EXISTS AFTER PREPARE OUTPUT"
-            ls -ld drivers/input/touchscreen/nova_oflash_mmi
-            test -f drivers/input/touchscreen/nova_oflash_mmi/Kconfig
-          else
-            echo "ERROR: NOVA DIRECTORY MISSING AFTER PREPARE OUTPUT"
-            echo "--- Git tracked status ---"
-            git ls-files drivers/input/touchscreen/nova_oflash_mmi || true
-            echo "--- Git status ---"
-            git status --short -- drivers/input/touchscreen/nova_oflash_mmi || true
-            exit 1
-          fi
-
-          echo "===== END NOVA CHECK ====="
 
 
       # ============================================================
@@ -333,12 +278,7 @@ jobs:
           cd kernel
 
 
-          echo "===== NOVA BEFORE BASE DEFCONFIG ====="
-          ls -ld drivers/input/touchscreen/nova_oflash_mmi
-          test -f drivers/input/touchscreen/nova_oflash_mmi/Kconfig
-          git ls-files drivers/input/touchscreen/nova_oflash_mmi | head -30
-          echo "===== END NOVA BEFORE ====="
-
+          
           make \
             O="${OUT_DIR}" \
             ARCH="${ARCH}" \
@@ -347,20 +287,7 @@ jobs:
             CROSS_COMPILE="${CROSS_COMPILE}" \
             vendor/bengal-perf_defconfig
 
-            echo "===== NOVA AFTER BASE DEFCONFIG ====="
-            if [ -d "drivers/input/touchscreen/nova_oflash_mmi" ]; then
-            echo "NOVA DIRECTORY STILL EXISTS"
-            ls -ld drivers/input/touchscreen/nova_oflash_mmi
-            test -f drivers/input/touchscreen/nova_oflash_mmi/Kconfig
-             git ls-files drivers/input/touchscreen/nova_oflash_mmi | head -30
-            else
-            echo "NOVA DIRECTORY DISAPPEARED"
-            echo "--- Git status ---"
-           git status --short -- drivers/input/touchscreen/nova_oflash_mmi || true
-           echo "--- Git tracked path ---"
-           git ls-files drivers/input/touchscreen/nova_oflash_mmi || true
-           fi
-           echo "===== END NOVA AFTER ====="
+            
 
           CLEAN_RELEASE="$(
             make -s \
@@ -387,30 +314,7 @@ jobs:
           echo "${CLEAN_RELEASE}"
 
 
-      - name: Check cebu touchscreen after base config
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          cd "${GITHUB_WORKSPACE}/kernel"
-
-          echo "===== CEBU TOUCHSCREEN CHECK AFTER BASE CONFIG ====="
-
-          if [ -d "drivers/input/touchscreen/nova_oflash_mmi" ]; then
-            echo "NOVA DIRECTORY EXISTS"
-            ls -la "drivers/input/touchscreen/nova_oflash_mmi"
-          else
-            echo "ERROR: NOVA DIRECTORY IS MISSING AFTER BASE CONFIG"
-            exit 1
-          fi
-
-          test -f "drivers/input/touchscreen/nova_oflash_mmi/Kconfig"
-          grep -n \
-            -E 'INPUT_NOVA_DRM_PANEL|TOUCHSCREEN_NT36xxx_HOSTDL_SPI' \
-            "drivers/input/touchscreen/nova_oflash_mmi/Kconfig"
-
-          echo "===== END CHECK ====="
-
+      
       # ============================================================
       # 10. CREATE NETHUNTER CONFIGURATION
       #
@@ -651,38 +555,7 @@ jobs:
 
 
 
-      - name: Check cebu touchscreen source after merge
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          cd "${GITHUB_WORKSPACE}/kernel"
-
-          echo "===== CEBU TOUCHSCREEN CHECK AFTER MERGE ====="
-
-          echo "--- Current directory ---"
-          pwd
-
-          echo "--- NOVA directory ---"
-          if [ -d "drivers/input/touchscreen/nova_oflash_mmi" ]; then
-            echo "NOVA DIRECTORY EXISTS"
-            ls -la "drivers/input/touchscreen/nova_oflash_mmi"
-          else
-            echo "ERROR: NOVA DIRECTORY IS MISSING"
-            exit 1
-          fi
-
-          echo "--- NOVA Kconfig ---"
-          test -f "drivers/input/touchscreen/nova_oflash_mmi/Kconfig"
-          sed -n '1,70p' \
-            "drivers/input/touchscreen/nova_oflash_mmi/Kconfig"
-
-          echo "--- NOVA Kbuild ---"
-          test -f "drivers/input/touchscreen/nova_oflash_mmi/Kbuild"
-          cat "drivers/input/touchscreen/nova_oflash_mmi/Kbuild"
-
-          echo "===== END CEBU TOUCHSCREEN CHECK ====="
-
+      
 
 
       - name: Trace NT36xxx Kconfig source
