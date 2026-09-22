@@ -160,6 +160,42 @@ jobs:
 
           echo "Kernel source cloned successfully."
 
+
+      - name: Trace NOVA immediately after kernel clone
+        shell: bash
+        run: |
+          set -uo pipefail
+          cd "${GITHUB_WORKSPACE}/kernel"
+
+          echo "===== NOVA IMMEDIATE POST-CLONE TRACE ====="
+
+          echo "--- NOVA directory ---"
+          if [ -d "drivers/input/touchscreen/nova_oflash_mmi" ]; then
+            echo "YES: NOVA directory exists immediately after kernel clone"
+            ls -la "drivers/input/touchscreen/nova_oflash_mmi"
+          else
+            echo "NO: NOVA directory is already missing immediately after kernel clone"
+          fi
+
+          echo "--- NOVA Kconfig ---"
+          if [ -f "drivers/input/touchscreen/nova_oflash_mmi/Kconfig" ]; then
+            echo "YES: Kconfig exists immediately after kernel clone"
+            sed -n '1,90p' "drivers/input/touchscreen/nova_oflash_mmi/Kconfig"
+          else
+            echo "NO: Kconfig is missing immediately after kernel clone"
+          fi
+
+          echo "--- Git tracking ---"
+          git ls-files -- \
+            "drivers/input/touchscreen/nova_oflash_mmi" \
+            | head -100 || true
+
+          echo "--- Git status ---"
+          git status --short -- \
+            "drivers/input/touchscreen/nova_oflash_mmi" || true
+
+          echo "===== END NOVA IMMEDIATE POST-CLONE TRACE ====="
+
       # ============================================================
       # 5. CLONE NETHUNTER REFERENCE
       # ============================================================
