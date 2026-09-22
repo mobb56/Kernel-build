@@ -2898,8 +2898,7 @@ jobs:
               ("INPUT", "y"),
               ("INPUT_EVDEV", "y"),
               ("INPUT_TOUCHSCREEN", "y"),
-              ("TOUCHSCREEN_PROPERTIES", "y"),
-              ("INPUT_NOVA_DRM_PANEL", "y"),
+              ("TOUCHSCREEN_PROPERTIES", "y") 
               ("INPUT_TOUCHSCREEN_FOCALTECH_0FLASH_MMI", "m"),
               ("INPUT_FOCALTECH_0FLASH_MMI_IC_NAME_FT8006S_AA", "y"),
               ("INPUT_TOUCHSCREEN_FOCALTECH_0FLASH_MMI_DRM_PANEL", "y"),
