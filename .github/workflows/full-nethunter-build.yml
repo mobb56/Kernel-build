@@ -511,7 +511,7 @@ jobs:
       - name: Diagnose NT36xxx Kconfig dependencies
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
 
           cd "${GITHUB_WORKSPACE}/kernel"
 
@@ -519,10 +519,16 @@ jobs:
 
           echo
           echo "--- Kconfig definition ---"
-          sed -n '1,50p' drivers/input/touchscreen/nova_oflash_mmi/Kconfig
+          if [ -f "drivers/input/touchscreen/nova_oflash_mmi/Kconfig" ]; then
+            sed -n '1,80p' \
+              drivers/input/touchscreen/nova_oflash_mmi/Kconfig
+          else
+            echo "ERROR: NT36xxx Kconfig file not found"
+          fi
 
           echo
           echo "--- Relevant current config states ---"
+
           for s in \
             INPUT \
             INPUT_TOUCHSCREEN \
@@ -535,7 +541,9 @@ jobs:
             TOUCHSCREEN_NT36xxx_HOSTDL_SPI
           do
             printf 'CONFIG_%s=' "$s"
-            scripts/config --file "${OUT_DIR}/.config" --state "$s" || true
+            scripts/config \
+              --file "${OUT_DIR}/.config" \
+              --state "$s" 2>&1 || true
           done
 
           echo
