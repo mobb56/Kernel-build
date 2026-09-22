@@ -234,6 +234,23 @@ jobs:
 
           cd kernel
 
+          echo "===== PREPARE OUTPUT PATH CHECK ====="
+          echo "PWD:"
+          pwd
+          echo "OUT_DIR=${OUT_DIR}"
+          echo "OUT_DIR absolute path:"
+          realpath "${OUT_DIR}" 2>/dev/null || true
+
+          echo "NOVA directory BEFORE rm:"
+          if [ -d "drivers/input/touchscreen/nova_oflash_mmi" ]; then
+          echo "NOVA EXISTS BEFORE rm"
+          ls -ld drivers/input/touchscreen/nova_oflash_mmi
+          test -f drivers/input/touchscreen/nova_oflash_mmi/Kconfig
+          else
+          echo "NOVA ALREADY MISSING BEFORE rm"
+          fi
+          echo "===== END PATH CHECK ====="
+
           rm -rf "${OUT_DIR}"
           mkdir -p "${OUT_DIR}"
 
