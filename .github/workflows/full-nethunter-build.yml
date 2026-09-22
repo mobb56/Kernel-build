@@ -158,15 +158,38 @@ jobs:
 
           echo "===== END CEBU TOUCHSCREEN SOURCE CHECK ====="
 
-          echo "===== NOVA FINAL CHECK BEFORE LEAVING CLONE STEP ====="
-          echo "PWD:"
-          pwd
-          echo "NOVA DIRECTORY:"
-          ls -ld "drivers/input/touchscreen/nova_oflash_mmi"
-          echo "NOVA KCONFIG:"
-          ls -l "drivers/input/touchscreen/nova_oflash_mmi/Kconfig"
-          echo "NOVA KBUILD:"
-          ls -l "drivers/input/touchscreen/nova_oflash_mmi/Kbuild"
+                  echo "===== NOVA FINAL CHECK BEFORE LEAVING CLONE STEP ====="
+            echo "PWD:"
+            pwd
+
+            echo "--- touchscreen parent ---"
+            ls -ld drivers/input/touchscreen
+            ls -la drivers/input/touchscreen | grep -E 'nova|oflash' || true
+
+           echo "--- NOVA directory ---"
+           if test -d drivers/input/touchscreen/nova_oflash_mmi; then
+          echo "YES: NOVA directory exists"
+          ls -ld drivers/input/touchscreen/nova_oflash_mmi
+          echo "--- NOVA files ---"
+          ls -la drivers/input/touchscreen/nova_oflash_mmi
+          else
+           echo "NO: NOVA directory is missing"
+          echo "--- search for NOVA again ---"
+          find drivers/input/touchscreen \
+            -maxdepth 3 \
+            \( -iname '*nova*' -o -iname '*oflash*' \) \
+            -print 2>/dev/null || true
+          exit 2
+            fi
+
+            echo "--- NOVA Kconfig ---"
+           test -f drivers/input/touchscreen/nova_oflash_mmi/Kconfig
+           sed -n '1,80p' drivers/input/touchscreen/nova_oflash_mmi/Kconfig
+
+           echo "--- NOVA Kbuild ---"
+          test -f drivers/input/touchscreen/nova_oflash_mmi/Kbuild
+          sed -n '1,80p' drivers/input/touchscreen/nova_oflash_mmi/Kbuild
+
           echo "===== END NOVA FINAL CHECK ====="
 
           cd ..
