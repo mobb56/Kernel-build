@@ -283,6 +283,31 @@ jobs:
           echo "Clean kernel release:"
           echo "${CLEAN_RELEASE}"
 
+
+      - name: Check cebu touchscreen after base config
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd "${GITHUB_WORKSPACE}/kernel"
+
+          echo "===== CEBU TOUCHSCREEN CHECK AFTER BASE CONFIG ====="
+
+          if [ -d "drivers/input/touchscreen/nova_oflash_mmi" ]; then
+            echo "NOVA DIRECTORY EXISTS"
+            ls -la "drivers/input/touchscreen/nova_oflash_mmi"
+          else
+            echo "ERROR: NOVA DIRECTORY IS MISSING AFTER BASE CONFIG"
+            exit 1
+          fi
+
+          test -f "drivers/input/touchscreen/nova_oflash_mmi/Kconfig"
+          grep -n \
+            -E 'INPUT_NOVA_DRM_PANEL|TOUCHSCREEN_NT36xxx_HOSTDL_SPI' \
+            "drivers/input/touchscreen/nova_oflash_mmi/Kconfig"
+
+          echo "===== END CHECK ====="
+
       # ============================================================
       # 10. CREATE NETHUNTER CONFIGURATION
       #
