@@ -2546,25 +2546,25 @@ jobs:
           echo "Image: ${IMAGE}"
 
           test -f "${CONFIG}" || {
-          echo "ERROR: kernel config not found: ${CONFIG}"
-          exit 1
-           }
+            echo "ERROR: kernel config not found: ${CONFIG}"
+            exit 1
+          }
 
           test -f "${IMAGE}" || {
-          echo "ERROR: kernel Image not found: ${IMAGE}"
-          exit 1
-             }
-             
-          check_config() {
-          local symbol="$1"
-          local expected="$2"
-          local actual
+            echo "ERROR: kernel Image not found: ${IMAGE}"
+            exit 1
+          }
 
-          actual="$(
-          scripts/config \
-           --file "${CONFIG}" \
-           --state "${symbol}" 2>/dev/null || true
-             )
+          check_config() {
+            local symbol="$1"
+            local expected="$2"
+            local actual
+
+            actual="$(
+              scripts/config \
+                --file "${CONFIG}" \
+                --state "${symbol}" 2>/dev/null || true
+            )
 
             if [ "${actual}" != "${expected}" ]; then
               echo "ERROR: ${symbol}=${actual}, expected ${expected}"
@@ -2574,8 +2574,6 @@ jobs:
             echo "OK: ${symbol}=${expected}"
           }
 
-          echo
-          echo "----- Touchscreen / fingerprint -----"
           check_config CONFIG_INPUT y
           check_config CONFIG_INPUT_EVDEV y
           check_config CONFIG_INPUT_TOUCHSCREEN y
@@ -2589,8 +2587,6 @@ jobs:
           check_config CONFIG_INPUT_MISC_FPC1020_SAVE_TO_CLASS_DEVICE y
           check_config CONFIG_INPUT_CHIPONE_FPS_MMI m
 
-          echo
-          echo "----- Qualcomm connectivity -----"
           check_config CONFIG_I2C_QCOM_GENI y
           check_config CONFIG_SPI_QCOM_GENI y
           check_config CONFIG_WLAN y
@@ -2603,8 +2599,6 @@ jobs:
           check_config CONFIG_IPA3 y
           check_config CONFIG_IPA_WDI_UNIFIED_API y
 
-          echo
-          echo "----- Bluetooth / HID -----"
           check_config CONFIG_HID y
           check_config CONFIG_HIDRAW y
           check_config CONFIG_UHID y
@@ -2618,8 +2612,6 @@ jobs:
           check_config CONFIG_BT_HCIUART m
           check_config CONFIG_BT_HCIVHCI m
 
-          echo
-          echo "----- USB / NetHunter gadget support -----"
           check_config CONFIG_USB_GADGET y
           check_config CONFIG_USB_CONFIGFS y
           check_config CONFIG_USB_CONFIGFS_UEVENT y
@@ -2634,18 +2626,16 @@ jobs:
           check_config CONFIG_USB_USBNET y
           check_config CONFIG_USB_NET_CDCETHER y
 
-          echo
-          echo "----- NetHunter / packet / sensors -----"
           check_config CONFIG_SENSORS_SSC y
           check_config CONFIG_SENSORS_CLASS m
           check_config CONFIG_PACKET y
 
-          echo
-          echo "----- Release / reproducibility -----"
           check_config CONFIG_LOCALVERSION_AUTO n
           check_config CONFIG_DEBUG_INFO n
 
-          if grep -Eq 'CONFIG_FEATURE_(FRAME_INJECTION|MONITOR_MODE_SUPPORT)' "${CONFIG}"; then
+          if grep -Eq \
+            'CONFIG_FEATURE_(FRAME_INJECTION_SUPPORT|MONITOR_MODE_SUPPORT)' \
+            "${CONFIG}"; then
             echo "ERROR: QCACLD3 FEATURE_* variables leaked into .config"
             exit 1
           fi
@@ -2669,10 +2659,10 @@ jobs:
           fi
 
           case "${ACTUAL_RELEASE}" in
-          *+|*-dirty)
-          echo "ERROR: dirty/custom kernel release detected"
-          exit 1
-          ;;
+            *+|*-dirty)
+              echo "ERROR: dirty/custom kernel release detected"
+              exit 1
+              ;;
           esac
 
           echo
