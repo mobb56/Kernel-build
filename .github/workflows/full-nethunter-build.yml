@@ -200,6 +200,30 @@ jobs:
 
           echo "AnyKernel3 reference cloned successfully."
 
+
+      - name: Check cebu touchscreen after all clones
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd "${GITHUB_WORKSPACE}/kernel"
+
+          echo "===== NOVA CHECK AFTER ALL CLONES ====="
+
+          if [ -d "drivers/input/touchscreen/nova_oflash_mmi" ]; then
+            echo "NOVA DIRECTORY EXISTS AFTER ALL CLONES"
+            ls -ld drivers/input/touchscreen/nova_oflash_mmi
+            test -f drivers/input/touchscreen/nova_oflash_mmi/Kconfig
+            git ls-files drivers/input/touchscreen/nova_oflash_mmi | head -30
+          else
+            echo "ERROR: NOVA DIRECTORY MISSING AFTER ALL CLONES"
+            echo "--- Git tracked paths ---"
+            git ls-files | grep 'nova_oflash_mmi' || true
+            exit 1
+          fi
+
+          echo "===== END NOVA CHECK ====="
+
       # ============================================================
       # 7. VERIFY SOURCE TREE
       # ============================================================
