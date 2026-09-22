@@ -3385,15 +3385,27 @@ jobs:
           rm -rf "${FINAL}"
           mkdir -p "${FINAL}"
 
-          IMAGE="${GITHUB_WORKSPACE}/kernel/out/arch/arm64/boot/Image"
-          MODULE="${GITHUB_WORKSPACE}/kernel/module-stage/vendor/lib/modules/qca_cld3_wlan.ko"
+                IMAGE="${GITHUB_WORKSPACE}/kernel/out/arch/arm64/boot/Image"
+                MODULE_DIR="${GITHUB_WORKSPACE}/kernel/module-stage/vendor/lib/modules"
 
-          test -s "${IMAGE}"
-          test -s "${MODULE}"
+                test -s "${IMAGE}"
 
-          cp "${IMAGE}" "${FINAL}/Image"
-          cp "${MODULE}" "${FINAL}/qca_cld3_wlan.ko"
+                test -s "${MODULE_DIR}/qca_cld3_wlan.ko"
+                 test -s "${MODULE_DIR}/hci_uart.ko"
+                 test -s "${MODULE_DIR}/hci_vhci.ko"
+                test -s "${MODULE_DIR}/hidp.ko"
+                test -s "${MODULE_DIR}/bnep.ko"
 
+                 cp "${IMAGE}" "${FINAL}/Image"
+
+                cp "${MODULE_DIR}/qca_cld3_wlan.ko" "${FINAL}/qca_cld3_wlan.ko"
+                 cp "${MODULE_DIR}/hci_uart.ko" "${FINAL}/hci_uart.ko"
+                 cp "${MODULE_DIR}/hci_vhci.ko" "${FINAL}/hci_vhci.ko"
+                 cp "${MODULE_DIR}/hidp.ko" "${FINAL}/hidp.ko"
+                cp "${MODULE_DIR}/bnep.ko" "${FINAL}/bnep.ko"
+
+            # RFCOMM is intentionally built into the kernel (CONFIG_BT_RFCOMM=y).
+             test ! -e "${MODULE_DIR}/rfcomm.ko"
           cp "${GITHUB_WORKSPACE}/kernel/out/.config" \
             "${FINAL}/final-kernel.config"
 
@@ -3451,6 +3463,30 @@ jobs:
               FLASH-ORDER.txt \
               > SHA256SUMS.txt
           )
+
+
+                    echo
+          echo "===== FINAL MODULE VERIFICATION ====="
+
+              test -s "${FINAL}/Image"
+              test -s "${FINAL}/qca_cld3_wlan.ko"
+              test -s "${FINAL}/hci_uart.ko"
+              test -s "${FINAL}/hci_vhci.ko"
+              test -s "${FINAL}/hidp.ko"
+              test -s "${FINAL}/bnep.ko"
+
+           if [ -e "${FINAL}/rfcomm.ko" ]; then
+           echo "ERROR: rfcomm.ko must not be packaged because RFCOMM is built-in."
+          exit 1
+           fi
+
+            echo "OK: Image"
+            echo "OK: qca_cld3_wlan.ko"
+            echo "OK: hci_uart.ko"
+            echo "OK: hci_vhci.ko"
+             echo "OK: hidp.ko"
+              echo "OK: bnep.ko"
+            echo "OK: rfcomm.ko correctly absent"
 
           echo
           echo "===== FINAL PACKAGE ====="
