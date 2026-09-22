@@ -312,7 +312,7 @@ jobs:
           # Stock cebu touchscreen
           # ------------------------------------------------------------
 
-          CONFIG_TOUCHSCREEN_NT36xxx_HOSTDL_SPI=m
+          
 
           CONFIG_INPUT_NOVA_DRM_PANEL=y
 
@@ -2656,7 +2656,6 @@ jobs:
               ("INPUT_EVDEV", "y"),
               ("INPUT_TOUCHSCREEN", "y"),
               ("TOUCHSCREEN_PROPERTIES", "y"),
-              ("TOUCHSCREEN_NT36xxx_HOSTDL_SPI", "m"),
               ("INPUT_NOVA_DRM_PANEL", "y"),
               ("INPUT_TOUCHSCREEN_FOCALTECH_0FLASH_MMI", "m"),
               ("INPUT_FOCALTECH_0FLASH_MMI_IC_NAME_FT8006S_AA", "y"),
