@@ -2146,6 +2146,28 @@ jobs:
             -print \
             | sort
 
+
+      - name: Verify injection symbols before strip
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+           WLAN="${GITHUB_WORKSPACE}/module-install/lib/modules/${CLEAN_RELEASE}/kernel/drivers/staging/qcacld-3.0/wlan.ko"
+
+            test -f "${WLAN}"
+
+            echo "===== PRE-STRIP WLAN SYMBOL CHECK ====="
+            echo "WLAN: ${WLAN}"
+
+             echo "--- hdd_init_frame_injection ---"
+             "${LLVM_DIR}/bin/llvm-nm" -a "${WLAN}" | grep -E '[[:space:]]hdd_init_frame_injection$'
+
+             echo "--- all injection symbols ---"
+            "${LLVM_DIR}/bin/llvm-nm" -a "${WLAN}" | grep -E \
+          'hdd_(init|deinit)_frame_injection|hdd_frame_inject|wma_.*injection'
+
+            echo "===== PRE-STRIP SYMBOL CHECK PASSED ====="
+
       # ============================================================
       # 30. STRIP MODULE DEBUG INFORMATION
       # ============================================================
