@@ -508,29 +508,40 @@ jobs:
 
 
 
-      - name: Inspect NT36xxx Kconfig block
+      - name: Locate NT36xxx Kconfig source
         shell: bash
         run: |
           set -uo pipefail
 
           cd "${GITHUB_WORKSPACE}/kernel"
 
-          echo "===== NT36xxx KCONFIG BLOCK ====="
+          echo "===== NT36xxx KCONFIG SOURCE LOCATION ====="
 
           echo
-          echo "--- Exact Kconfig definition ---"
-          sed -n '1,35p' \
-            drivers/input/touchscreen/nova_oflash_mmi/Kconfig
+          echo "--- Git tracked files ---"
+          git ls-files | grep -E 'nova_oflash_mmi/.+Kconfig|touchscreen/.+Kconfig' || true
 
           echo
-          echo "--- NT36xxx MMI references ---"
+          echo "--- Files actually present ---"
+          find . \
+            -type f \
+            -path '*nova_oflash_mmi*Kconfig*' \
+            -print 2>/dev/null || true
+
+          echo
+          echo "--- Symbol definition anywhere in source ---"
+          grep -Rns \
+            "config TOUCHSCREEN_NT36xxx_HOSTDL_SPI" \
+            . 2>/dev/null | head -20 || true
+
+          echo
+          echo "--- MMI symbol references ---"
           grep -Rns \
             "TOUCHSCREEN_NT36xxx_HOSTDL_SPI_MMI" \
-            drivers/input/touchscreen/nova_oflash_mmi \
-            2>/dev/null || true
+            . 2>/dev/null | head -50 || true
 
           echo
-          echo "===== END NT36xxx KCONFIG BLOCK ====="
+          echo "===== END NT36xxx KCONFIG SOURCE LOCATION ====="
 
       # ============================================================
       # 12. PRESERVE STOCK KERNEL RELEASE
