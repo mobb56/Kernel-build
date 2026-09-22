@@ -444,6 +444,38 @@ jobs:
 
           echo "NetHunter configuration created."
 
+
+
+      - name: Diagnose NT36xxx touchscreen symbol
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "${GITHUB_WORKSPACE}/kernel"
+
+          echo "===== NT36xxx KCONFIG DIAGNOSTIC ====="
+
+          echo
+          echo "--- Symbol definitions ---"
+          grep -Rns \
+            "config TOUCHSCREEN_NT36xxx_HOSTDL_SPI" \
+            drivers arch vendor 2>/dev/null || true
+
+          echo
+          echo "--- NT36xxx references ---"
+          grep -Rns \
+            "TOUCHSCREEN_NT36xxx_HOSTDL_SPI" \
+            drivers arch vendor 2>/dev/null | head -50 || true
+
+          echo
+          echo "--- Fragment entry ---"
+          grep -n \
+            "CONFIG_TOUCHSCREEN_NT36xxx_HOSTDL_SPI" \
+            kernel/nethunter-config/cebu-nethunter.config || true
+
+          echo
+          echo "===== END NT36xxx DIAGNOSTIC ====="
+
       # ============================================================
       # 11. MERGE NETHUNTER CONFIGURATION
       # ============================================================
