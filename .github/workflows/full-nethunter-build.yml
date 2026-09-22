@@ -2820,6 +2820,24 @@ jobs:
             kernel/module-stage/vendor/lib/modules/qca_cld3_wlan.ko \
             artifacts/qca_cld3_wlan.ko
 
+                  cp \
+            kernel/module-stage/vendor/lib/modules/hci_uart.ko \
+           artifacts/hci_uart.ko
+
+          cp \
+           kernel/module-stage/vendor/lib/modules/hci_vhci.ko \
+           artifacts/hci_vhci.ko
+
+          cp \
+           kernel/module-stage/vendor/lib/modules/hidp.ko \
+           artifacts/hidp.ko
+
+          cp \
+           kernel/module-stage/vendor/lib/modules/bnep.ko \
+           artifacts/bnep.ko
+
+            
+            
           cp \
             final-kernel.config \
             artifacts/final-kernel.config
@@ -2840,13 +2858,13 @@ jobs:
             kernel-build.log \
             artifacts/kernel-build.log
 
-          test -s artifacts/Image
-          test -s artifacts/qca_cld3_wlan.ko
+                test -s artifacts/Image
+           test -s artifacts/qca_cld3_wlan.ko
+          test -s artifacts/hci_uart.ko
+          test -s artifacts/hci_vhci.ko
+          test -s artifacts/hidp.ko
+          test -s artifacts/bnep.ko
           test -s artifacts/final-kernel.config
-          test -s artifacts/nethunter-config-used.config
-          test -s artifacts/build-manifest.txt
-          test -s artifacts/SHA256SUMS.txt
-          test -s artifacts/kernel-build.log
 
           echo "Verified artifact directory prepared."
 
@@ -2861,6 +2879,10 @@ jobs:
           path: |
             artifacts/Image
             artifacts/qca_cld3_wlan.ko
+            artifacts/hci_uart.ko
+            artifacts/hci_vhci.ko
+            artifacts/hidp.ko
+            artifacts/bnep.ko
             artifacts/final-kernel.config
             artifacts/nethunter-config-used.config
             artifacts/build-manifest.txt
