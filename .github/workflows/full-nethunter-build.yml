@@ -169,6 +169,14 @@ jobs:
         run: |
           set -euxo pipefail
 
+          echo "===== KERNEL TREE BEFORE NETHUNTER CLONE ====="
+            pwd
+            git -C kernel status --short || true
+            test -d kernel/drivers/input/touchscreen/nova_oflash_mmi
+            ls -ld kernel/drivers/input/touchscreen/nova_oflash_mmi
+            echo "===== END BEFORE ====="
+            
+
           git clone \
             --depth=1 \
             --branch "${NETHUNTER_BRANCH}" \
@@ -179,6 +187,23 @@ jobs:
           test -d nethunter-reference/kernel
 
           echo "NetHunter reference cloned successfully."
+
+          echo "===== KERNEL TREE AFTER NETHUNTER CLONE ====="
+          pwd
+          if [ -d "kernel/drivers/input/touchscreen/nova_oflash_mmi" ]; then
+          echo "NOVA STILL EXISTS AFTER NETHUNTER CLONE"
+          ls -ld kernel/drivers/input/touchscreen/nova_oflash_mmi
+          test -f kernel/drivers/input/touchscreen/nova_oflash_mmi/Kconfig
+          else
+          echo "NOVA DISAPPEARED DURING NETHUNTER CLONE"
+          echo "--- kernel directory ---"
+          ls -ld kernel
+          echo "--- touchscreen directory ---"
+          ls -la kernel/drivers/input/touchscreen 2>/dev/null || true
+          echo "--- kernel git status ---"
+          git -C kernel status --short || true
+           fi
+          echo "===== END AFTER ====="
 
 
                
