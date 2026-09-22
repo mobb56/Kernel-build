@@ -143,19 +143,32 @@ jobs:
           test -d kernel
           test -f kernel/Makefile
 
-
           echo "===== CEBU TOUCHSCREEN SOURCE CHECK ====="
+
           cd kernel
 
           echo "--- nova_oflash_mmi ---"
-          find drivers/input/touchscreen -maxdepth 2 -iname '*nova*' -o -iname '*oflash*' 2>/dev/null || true
+          find drivers/input/touchscreen -maxdepth 2 \
+            -iname "*nova*" -o -iname "*oflash*"
 
           echo "--- NOVA symbols ---"
           grep -Rns \
-          -E 'INPUT_NOVA_DRM_PANEL|TOUCHSCREEN_NT36xxx_HOSTDL_SPI' \
-          drivers/input/touchscreen 2>/dev/null || true
+            -E 'INPUT_NOVA_DRM_PANEL|TOUCHSCREEN_NT36xxx_HOSTDL_SPI' \
+            drivers/input/touchscreen 2>/dev/null || true
 
           echo "===== END CEBU TOUCHSCREEN SOURCE CHECK ====="
+
+          echo "===== NOVA FINAL CHECK BEFORE LEAVING CLONE STEP ====="
+          echo "PWD:"
+          pwd
+          echo "NOVA DIRECTORY:"
+          ls -ld "drivers/input/touchscreen/nova_oflash_mmi"
+          echo "NOVA KCONFIG:"
+          ls -l "drivers/input/touchscreen/nova_oflash_mmi/Kconfig"
+          echo "NOVA KBUILD:"
+          ls -l "drivers/input/touchscreen/nova_oflash_mmi/Kbuild"
+          echo "===== END NOVA FINAL CHECK ====="
+
           cd ..
 
           echo "Kernel source cloned successfully."
