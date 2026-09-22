@@ -239,6 +239,23 @@ jobs:
 
           echo "Output directory prepared."
 
+          echo "===== NOVA CHECK AFTER PREPARE OUTPUT ====="
+
+          if [ -d "drivers/input/touchscreen/nova_oflash_mmi" ]; then
+            echo "NOVA DIRECTORY EXISTS AFTER PREPARE OUTPUT"
+            ls -ld drivers/input/touchscreen/nova_oflash_mmi
+            test -f drivers/input/touchscreen/nova_oflash_mmi/Kconfig
+          else
+            echo "ERROR: NOVA DIRECTORY MISSING AFTER PREPARE OUTPUT"
+            echo "--- Git tracked status ---"
+            git ls-files drivers/input/touchscreen/nova_oflash_mmi || true
+            echo "--- Git status ---"
+            git status --short -- drivers/input/touchscreen/nova_oflash_mmi || true
+            exit 1
+          fi
+
+          echo "===== END NOVA CHECK ====="
+
 
       # ============================================================
       # 9. GENERATE CLEAN BASE CONFIGURATION
