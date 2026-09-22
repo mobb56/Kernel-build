@@ -508,49 +508,29 @@ jobs:
 
 
 
-      - name: Diagnose NT36xxx Kconfig dependencies
+      - name: Inspect NT36xxx Kconfig block
         shell: bash
         run: |
           set -uo pipefail
 
           cd "${GITHUB_WORKSPACE}/kernel"
 
-          echo "===== NT36xxx KCONFIG DEPENDENCY CHECK ====="
+          echo "===== NT36xxx KCONFIG BLOCK ====="
 
           echo
-          echo "--- Locate symbol definition ---"
+          echo "--- Exact Kconfig definition ---"
+          sed -n '1,35p' \
+            drivers/input/touchscreen/nova_oflash_mmi/Kconfig
+
+          echo
+          echo "--- NT36xxx MMI references ---"
           grep -Rns \
-            "config TOUCHSCREEN_NT36xxx_HOSTDL_SPI" \
-            . 2>/dev/null | head -20 || true
+            "TOUCHSCREEN_NT36xxx_HOSTDL_SPI_MMI" \
+            drivers/input/touchscreen/nova_oflash_mmi \
+            2>/dev/null || true
 
           echo
-          echo "--- Locate all NT36xxx references ---"
-          grep -Rns \
-            "TOUCHSCREEN_NT36xxx_HOSTDL_SPI" \
-            . 2>/dev/null | head -50 || true
-
-          echo
-          echo "--- Relevant current config states ---"
-
-          for s in \
-            INPUT \
-            INPUT_TOUCHSCREEN \
-            TOUCHSCREEN_PROPERTIES \
-            SPI \
-            SPI_MASTER \
-            SPI_QCOM_GENI \
-            I2C \
-            I2C_QCOM_GENI \
-            TOUCHSCREEN_NT36xxx_HOSTDL_SPI
-          do
-            printf 'CONFIG_%s=' "$s"
-            scripts/config \
-              --file "${OUT_DIR}/.config" \
-              --state "$s" 2>&1 || true
-          done
-
-          echo
-          echo "===== END NT36xxx KCONFIG DEPENDENCY CHECK =====" 
+          echo "===== END NT36xxx KCONFIG BLOCK ====="
 
       # ============================================================
       # 12. PRESERVE STOCK KERNEL RELEASE
