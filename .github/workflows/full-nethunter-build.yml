@@ -168,13 +168,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-
-          echo "===== KERNEL TREE BEFORE NETHUNTER CLONE ====="
-            pwd
-            git -C kernel status --short || true
-            test -d kernel/drivers/input/touchscreen/nova_oflash_mmi
-            ls -ld kernel/drivers/input/touchscreen/nova_oflash_mmi
-            echo "===== END BEFORE ====="
+          
             
 
           git clone \
