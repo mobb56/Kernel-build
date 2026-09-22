@@ -471,10 +471,13 @@ jobs:
           echo "--- Fragment entry ---"
           grep -n \
             "CONFIG_TOUCHSCREEN_NT36xxx_HOSTDL_SPI" \
-            kernel/nethunter-config/cebu-nethunter.config || true
+            nethunter-config/cebu-nethunter.config || true
 
           echo
           echo "===== END NT36xxx DIAGNOSTIC ====="
+
+
+      
 
       # ============================================================
       # 11. MERGE NETHUNTER CONFIGURATION
