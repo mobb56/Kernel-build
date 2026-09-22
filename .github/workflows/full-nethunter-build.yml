@@ -506,6 +506,41 @@ jobs:
 
           echo "NetHunter configuration merged."
 
+
+
+      - name: Diagnose NT36xxx Kconfig dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "${GITHUB_WORKSPACE}/kernel"
+
+          echo "===== NT36xxx KCONFIG DEPENDENCY CHECK ====="
+
+          echo
+          echo "--- Kconfig definition ---"
+          sed -n '1,50p' drivers/input/touchscreen/nova_oflash_mmi/Kconfig
+
+          echo
+          echo "--- Relevant current config states ---"
+          for s in \
+            INPUT \
+            INPUT_TOUCHSCREEN \
+            TOUCHSCREEN_PROPERTIES \
+            SPI \
+            SPI_MASTER \
+            SPI_QCOM_GENI \
+            I2C \
+            I2C_QCOM_GENI \
+            TOUCHSCREEN_NT36xxx_HOSTDL_SPI
+          do
+            printf 'CONFIG_%s=' "$s"
+            scripts/config --file "${OUT_DIR}/.config" --state "$s" || true
+          done
+
+          echo
+          echo "===== END NT36xxx KCONFIG DEPENDENCY CHECK ====="
+
       # ============================================================
       # 12. PRESERVE STOCK KERNEL RELEASE
       # ============================================================
