@@ -2526,8 +2526,6 @@ jobs:
           echo "============================================================"
 
 
-
-      
       - name: Final safety and hardware configuration audit
         shell: bash
         run: |
@@ -2536,8 +2534,8 @@ jobs:
           cd "${GITHUB_WORKSPACE}/kernel"
 
           CONFIG="${OUT_DIR}/.config"
-          RELEASE="${CLEAN_RELEASE}"
           IMAGE="${OUT_DIR}/arch/arm64/boot/Image"
+          RELEASE="${CLEAN_RELEASE}"
 
           echo "===== FINAL SAFETY AUDIT ====="
           echo "Expected kernel release: ${RELEASE}"
@@ -2545,122 +2543,142 @@ jobs:
           echo "Config: ${CONFIG}"
           echo "Image: ${IMAGE}"
 
-          test -f "${CONFIG}" || {
-            echo "ERROR: kernel config not found: ${CONFIG}"
-            exit 1
-          }
+          test -f "${CONFIG}"
+          test -f "${IMAGE}"
 
-          test -f "${IMAGE}" || {
-            echo "ERROR: kernel Image not found: ${IMAGE}"
-            exit 1
-          }
+          echo "Config and Image exist."
 
-          check_config() {
-            local symbol="$1"
-            local expected="$2"
-            local actual
+          python3 <<'PY'
+          import subprocess
+          import sys
 
-            actual="$(
-              scripts/config \
-                --file "${CONFIG}" \
-                --state "${symbol}" 2>/dev/null || true
-            )
+          config = "out/.config"
 
-            if [ "${actual}" != "${expected}" ]; then
-              echo "ERROR: ${symbol}=${actual}, expected ${expected}"
-              exit 1
-            fi
+          checks = [
+              ("INPUT", "y"),
+              ("INPUT_EVDEV", "y"),
+              ("INPUT_TOUCHSCREEN", "y"),
+              ("TOUCHSCREEN_PROPERTIES", "y"),
+              ("TOUCHSCREEN_NT36xxx_HOSTDL_SPI", "m"),
+              ("INPUT_NOVA_DRM_PANEL", "y"),
+              ("INPUT_TOUCHSCREEN_FOCALTECH_0FLASH_MMI", "m"),
+              ("INPUT_FOCALTECH_0FLASH_MMI_IC_NAME_FT8006S_AA", "y"),
+              ("INPUT_TOUCHSCREEN_FOCALTECH_0FLASH_MMI_DRM_PANEL", "y"),
+              ("INPUT_MISC_FPC1020", "m"),
+              ("INPUT_MISC_FPC1020_SAVE_TO_CLASS_DEVICE", "y"),
+              ("INPUT_CHIPONE_FPS_MMI", "m"),
 
-            echo "OK: ${symbol}=${expected}"
-          }
+              ("I2C_QCOM_GENI", "y"),
+              ("SPI_QCOM_GENI", "y"),
+              ("WLAN", "y"),
+              ("QCA_CLD_WLAN", "m"),
+              ("CNSS_UTILS", "y"),
+              ("CNSS_GENL", "y"),
+              ("QCOM_QMI_HELPERS", "y"),
+              ("RMNET", "y"),
+              ("RMNET_IPA3", "y"),
+              ("IPA3", "y"),
+              ("IPA_WDI_UNIFIED_API", "y"),
 
-          check_config CONFIG_INPUT y
-          check_config CONFIG_INPUT_EVDEV y
-          check_config CONFIG_INPUT_TOUCHSCREEN y
-          check_config CONFIG_TOUCHSCREEN_PROPERTIES y
-          check_config CONFIG_TOUCHSCREEN_NT36xxx_HOSTDL_SPI m
-          check_config CONFIG_INPUT_NOVA_DRM_PANEL y
-          check_config CONFIG_INPUT_TOUCHSCREEN_FOCALTECH_0FLASH_MMI m
-          check_config CONFIG_INPUT_FOCALTECH_0FLASH_MMI_IC_NAME_FT8006S_AA y
-          check_config CONFIG_INPUT_TOUCHSCREEN_FOCALTECH_0FLASH_MMI_DRM_PANEL y
-          check_config CONFIG_INPUT_MISC_FPC1020 m
-          check_config CONFIG_INPUT_MISC_FPC1020_SAVE_TO_CLASS_DEVICE y
-          check_config CONFIG_INPUT_CHIPONE_FPS_MMI m
+              ("HID", "y"),
+              ("HIDRAW", "y"),
+              ("UHID", "y"),
+              ("BT", "y"),
+              ("BT_BREDR", "y"),
+              ("BT_LE", "y"),
+              ("BT_RFCOMM", "y"),
+              ("BT_RFCOMM_TTY", "y"),
+              ("BT_BNEP", "m"),
+              ("BT_HIDP", "m"),
+              ("BT_HCIUART", "m"),
+              ("BT_HCIVHCI", "m"),
 
-          check_config CONFIG_I2C_QCOM_GENI y
-          check_config CONFIG_SPI_QCOM_GENI y
-          check_config CONFIG_WLAN y
-          check_config CONFIG_QCA_CLD_WLAN m
-          check_config CONFIG_CNSS_UTILS y
-          check_config CONFIG_CNSS_GENL y
-          check_config CONFIG_QCOM_QMI_HELPERS y
-          check_config CONFIG_RMNET y
-          check_config CONFIG_RMNET_IPA3 y
-          check_config CONFIG_IPA3 y
-          check_config CONFIG_IPA_WDI_UNIFIED_API y
+              ("USB_GADGET", "y"),
+              ("USB_CONFIGFS", "y"),
+              ("USB_CONFIGFS_UEVENT", "y"),
+              ("USB_CONFIGFS_ACM", "y"),
+              ("USB_CONFIGFS_NCM", "y"),
+              ("USB_CONFIGFS_RNDIS", "y"),
+              ("USB_CONFIGFS_ECM", "y"),
+              ("USB_CONFIGFS_EEM", "y"),
+              ("USB_CONFIGFS_F_HID", "y"),
+              ("USB_SERIAL", "m"),
+              ("USB_SERIAL_GENERIC", "y"),
+              ("USB_USBNET", "y"),
+              ("USB_NET_CDCETHER", "y"),
 
-          check_config CONFIG_HID y
-          check_config CONFIG_HIDRAW y
-          check_config CONFIG_UHID y
-          check_config CONFIG_BT y
-          check_config CONFIG_BT_BREDR y
-          check_config CONFIG_BT_LE y
-          check_config CONFIG_BT_RFCOMM y
-          check_config CONFIG_BT_RFCOMM_TTY y
-          check_config CONFIG_BT_BNEP m
-          check_config CONFIG_BT_HIDP m
-          check_config CONFIG_BT_HCIUART m
-          check_config CONFIG_BT_HCIVHCI m
+              ("SENSORS_SSC", "y"),
+              ("SENSORS_CLASS", "m"),
+              ("PACKET", "y"),
 
-          check_config CONFIG_USB_GADGET y
-          check_config CONFIG_USB_CONFIGFS y
-          check_config CONFIG_USB_CONFIGFS_UEVENT y
-          check_config CONFIG_USB_CONFIGFS_ACM y
-          check_config CONFIG_USB_CONFIGFS_NCM y
-          check_config CONFIG_USB_CONFIGFS_RNDIS y
-          check_config CONFIG_USB_CONFIGFS_ECM y
-          check_config CONFIG_USB_CONFIGFS_EEM y
-          check_config CONFIG_USB_CONFIGFS_F_HID y
-          check_config CONFIG_USB_SERIAL m
-          check_config CONFIG_USB_SERIAL_GENERIC y
-          check_config CONFIG_USB_USBNET y
-          check_config CONFIG_USB_NET_CDCETHER y
+              ("LOCALVERSION_AUTO", "n"),
+              ("DEBUG_INFO", "n"),
+          ]
 
-          check_config CONFIG_SENSORS_SSC y
-          check_config CONFIG_SENSORS_CLASS m
-          check_config CONFIG_PACKET y
+          for symbol, expected in checks:
+              result = subprocess.run(
+                  [
+                      "scripts/config",
+                      "--file",
+                      config,
+                      "--state",
+                      symbol,
+                  ],
+                  text=True,
+                  capture_output=True,
+              )
 
-          check_config CONFIG_LOCALVERSION_AUTO n
-          check_config CONFIG_DEBUG_INFO n
+              actual = result.stdout.strip()
 
-          if grep -Eq \
-            'CONFIG_FEATURE_(FRAME_INJECTION_SUPPORT|MONITOR_MODE_SUPPORT)' \
-            "${CONFIG}"; then
-            echo "ERROR: QCACLD3 FEATURE_* variables leaked into .config"
-            exit 1
-          fi
+              if actual != expected:
+                  print(
+                      f"ERROR: CONFIG_{symbol}={actual}, "
+                      f"expected {expected}"
+                  )
+                  sys.exit(1)
 
-           make -s \
-          O="${OUT_DIR}" \
-          ARCH="${ARCH}" \
-          LLVM=1 \
-          LLVM_IAS=1 \
-          CROSS_COMPILE="${CROSS_COMPILE}" \
-          LOCALVERSION="" \
-          kernelrelease > /tmp/cebu-kernelrelease.txt
+              print(f"OK: CONFIG_{symbol}={expected}")
+
+          with open(config, "r", encoding="utf-8") as f:
+              text = f.read()
+
+          forbidden = [
+              "CONFIG_FEATURE_FRAME_INJECTION_SUPPORT=",
+              "CONFIG_FEATURE_MONITOR_MODE_SUPPORT=",
+          ]
+
+          for item in forbidden:
+              if item in text:
+                  print(
+                      "ERROR: QCACLD3 FEATURE_* variable leaked into .config"
+                  )
+                  sys.exit(1)
+
+          print("Configuration audit passed.")
+          PY
+
+          make -s \
+            O="${OUT_DIR}" \
+            ARCH="${ARCH}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            LOCALVERSION="" \
+            kernelrelease > /tmp/cebu-kernelrelease.txt
 
           ACTUAL_RELEASE="$(cat /tmp/cebu-kernelrelease.txt)"
 
           echo "Actual kernel release: ${ACTUAL_RELEASE}"
 
-          if [ "${ACTUAL_RELEASE}" != "${RELEASE}" ]; then
-            echo "ERROR: kernel release mismatch"
-            exit 1
-          fi
+          test "${ACTUAL_RELEASE}" = "${RELEASE}"
 
           case "${ACTUAL_RELEASE}" in
-            *+|*-dirty)
-              echo "ERROR: dirty/custom kernel release detected"
+            *+)
+              echo "ERROR: unwanted '+' in kernel release"
+              exit 1
+              ;;
+            *-dirty)
+              echo "ERROR: dirty kernel release"
               exit 1
               ;;
           esac
@@ -2669,9 +2687,13 @@ jobs:
           echo "===== FINAL SAFETY AUDIT PASSED ====="
           echo "No flashing performed."
           echo "No reboot performed."
-          echo "No boot partition was modified by this workflow."     
+          echo "No boot partition was modified by this workflow."
+
+        
 
 
+
+      
       - name: Verify final kernel and WLAN module
         shell: bash
         run: |
