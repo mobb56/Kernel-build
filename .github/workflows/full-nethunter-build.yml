@@ -518,13 +518,16 @@ jobs:
           echo "===== NT36xxx KCONFIG DEPENDENCY CHECK ====="
 
           echo
-          echo "--- Kconfig definition ---"
-          if [ -f "drivers/input/touchscreen/nova_oflash_mmi/Kconfig" ]; then
-            sed -n '1,80p' \
-              drivers/input/touchscreen/nova_oflash_mmi/Kconfig
-          else
-            echo "ERROR: NT36xxx Kconfig file not found"
-          fi
+          echo "--- Locate symbol definition ---"
+          grep -Rns \
+            "config TOUCHSCREEN_NT36xxx_HOSTDL_SPI" \
+            . 2>/dev/null | head -20 || true
+
+          echo
+          echo "--- Locate all NT36xxx references ---"
+          grep -Rns \
+            "TOUCHSCREEN_NT36xxx_HOSTDL_SPI" \
+            . 2>/dev/null | head -50 || true
 
           echo
           echo "--- Relevant current config states ---"
@@ -547,7 +550,7 @@ jobs:
           done
 
           echo
-          echo "===== END NT36xxx KCONFIG DEPENDENCY CHECK ====="
+          echo "===== END NT36xxx KCONFIG DEPENDENCY CHECK =====" 
 
       # ============================================================
       # 12. PRESERVE STOCK KERNEL RELEASE
