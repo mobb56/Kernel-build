@@ -165,6 +165,23 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
+
+          echo "===== WORKSPACE PERSISTENCE CHECK ====="
+          echo "GITHUB_WORKSPACE=${GITHUB_WORKSPACE}"
+          echo "PWD:"
+          pwd
+          echo "TOP LEVEL:"
+          ls -la "${GITHUB_WORKSPACE}"
+          echo "KERNEL PATH:"
+          ls -ld "${GITHUB_WORKSPACE}/kernel" || true
+          echo "KERNEL REALPATH:"
+          realpath "${GITHUB_WORKSPACE}/kernel" || true
+          echo "NOVA DIRECT PATH:"
+          ls -ld "${GITHUB_WORKSPACE}/kernel/drivers/input/touchscreen/nova_oflash_mmi" || true
+          echo "NOVA KCONFIG:"
+          ls -l "${GITHUB_WORKSPACE}/kernel/drivers/input/touchscreen/nova_oflash_mmi/Kconfig" || true
+          echo "===== END WORKSPACE PERSISTENCE CHECK ====="
+
           cd "${GITHUB_WORKSPACE}/kernel"
 
           echo "===== NOVA IMMEDIATE POST-CLONE TRACE ====="
@@ -195,7 +212,6 @@ jobs:
             "drivers/input/touchscreen/nova_oflash_mmi" || true
 
           echo "===== END NOVA IMMEDIATE POST-CLONE TRACE ====="
-
       # ============================================================
       # 5. CLONE NETHUNTER REFERENCE
       # ============================================================
