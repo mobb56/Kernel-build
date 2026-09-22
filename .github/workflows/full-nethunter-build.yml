@@ -208,7 +208,7 @@ jobs:
           done
 
             echo "--- NOVA DIRECTORY CONTENTS ---"
-           ls -lab "$NOVA"
+           ls -lab "$NOVA" || true
 
           echo "--- NOVA FILES RECURSIVE ---"
            find "$NOVA" -maxdepth 2 -type f -print 2>/dev/null || true
