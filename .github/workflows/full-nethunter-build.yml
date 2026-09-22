@@ -508,26 +508,65 @@ jobs:
 
 
 
-      - name: Inspect NT36xxx Kconfig definition
+      - name: Trace NT36xxx Kconfig source
         shell: bash
         run: |
           set -uo pipefail
 
           cd "${GITHUB_WORKSPACE}/kernel"
 
-          echo "===== NT36xxx KCONFIG DEFINITION ====="
+          echo "===== NT36xxx KCONFIG SOURCE TRACE ====="
 
           echo
-          echo "--- Exact tracked Kconfig file ---"
-          git show HEAD:drivers/input/touchscreen/nova_oflash_mmi/Kconfig
+          echo "--- Repository root ---"
+          git rev-parse --show-toplevel || true
 
           echo
-          echo "--- Relevant symbols in current source ---"
-          git grep -n \
-            -E "TOUCHSCREEN_NT36xxx_HOSTDL_SPI(_MMI)?"
+          echo "--- Current HEAD ---"
+          git rev-parse HEAD || true
 
           echo
-          echo "===== END NT36xxx KCONFIG DEFINITION ====="
+          echo "--- Working-tree status for NT36xxx ---"
+          git status --short -- \
+            drivers/input/touchscreen/nova_oflash_mmi \
+            2>&1 || true
+
+          echo
+          echo "--- Git index entry ---"
+          git ls-files --stage \
+            drivers/input/touchscreen/nova_oflash_mmi/Kconfig \
+            2>&1 || true
+
+          echo
+          echo "--- Does the file exist now? ---"
+          if [ -f "drivers/input/touchscreen/nova_oflash_mmi/Kconfig" ]; then
+            echo "YES: working-tree file exists"
+            ls -l drivers/input/touchscreen/nova_oflash_mmi/Kconfig
+          else
+            echo "NO: working-tree file does not exist"
+          fi
+
+          echo
+          echo "--- HEAD contains this path? ---"
+          git cat-file -e \
+            "HEAD:drivers/input/touchscreen/nova_oflash_mmi/Kconfig" \
+            2>&1 || true
+
+          echo
+          echo "--- Locate the actual file ---"
+          find . \
+            -type f \
+            -path '*nova_oflash_mmi/Kconfig' \
+            -print 2>/dev/null || true
+
+          echo
+          echo "--- Recent workflow changes to this path ---"
+          git log --all --oneline -- \
+            drivers/input/touchscreen/nova_oflash_mmi/Kconfig \
+            2>&1 | head -20 || true
+
+          echo
+          echo "===== END NT36xxx KCONFIG SOURCE TRACE ====="
 
       # ============================================================
       # 12. PRESERVE STOCK KERNEL RELEASE
