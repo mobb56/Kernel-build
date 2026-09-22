@@ -207,13 +207,21 @@ jobs:
             printf 'FIND: <%q>\n' "$p"
           done
 
-           echo "--- NOVA Kconfig existence ---"
-           test -f "$NOVA/Kconfig"
-          ls -lab "$NOVA/Kconfig"
+            echo "--- NOVA DIRECTORY CONTENTS ---"
+           ls -lab "$NOVA"
 
-          echo "--- NOVA Kbuild existence ---"
-          test -f "$NOVA/Kbuild"
-          ls -lab "$NOVA/Kbuild"
+          echo "--- NOVA FILES RECURSIVE ---"
+           find "$NOVA" -maxdepth 2 -type f -print 2>/dev/null || true
+
+            echo "--- NOVA Kconfig candidates ---"
+           find "$NOVA" -maxdepth 2 -type f \
+           \( -iname 'Kconfig*' -o -iname '*config*' \) \
+           -print 2>/dev/null || true
+
+           echo "--- NOVA Kbuild candidates ---"
+           find "$NOVA" -maxdepth 2 -type f \
+          \( -iname 'Kbuild' -o -iname 'Makefile' \) \
+          -print 2>/dev/null || true
 
           echo "===== END NOVA PATH FORENSICS ====="
 
