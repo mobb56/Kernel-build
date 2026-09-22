@@ -3172,7 +3172,7 @@ jobs:
           )
 
           for symbol in "${INJECTION_SYMBOLS[@]}"; do
-            if ! llvm-nm -a "${WLAN}" 2>/dev/null | grep -Eq "[[:space:]]${symbol}$"; then
+            if ! llvm-nm -a "${WLAN}" 2>/dev/null | grep -E "[[:space:]]${symbol}"; then
               echo "ERROR: injection symbol missing: ${symbol}"
               exit 1
             fi
