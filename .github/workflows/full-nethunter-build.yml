@@ -180,6 +180,28 @@ jobs:
 
           echo "NetHunter reference cloned successfully."
 
+
+               
+      - name: Check cebu touchscreen after NetHunter clone
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd "${GITHUB_WORKSPACE}/kernel"
+
+          echo "===== NOVA CHECK AFTER NETHUNTER CLONE ====="
+
+          if [ -d "drivers/input/touchscreen/nova_oflash_mmi" ]; then
+            echo "NOVA DIRECTORY EXISTS AFTER NETHUNTER CLONE"
+            ls -ld drivers/input/touchscreen/nova_oflash_mmi
+            test -f drivers/input/touchscreen/nova_oflash_mmi/Kconfig
+          else
+            echo "ERROR: NOVA DIRECTORY MISSING AFTER NETHUNTER CLONE"
+            exit 1
+          fi
+
+          echo "===== END NOVA CHECK ====="
+
       # ============================================================
       # 6. CLONE ANYKERNEL3 REFERENCE
       # ============================================================
