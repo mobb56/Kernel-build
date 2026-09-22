@@ -251,6 +251,13 @@ jobs:
 
           cd kernel
 
+
+          echo "===== NOVA BEFORE BASE DEFCONFIG ====="
+          ls -ld drivers/input/touchscreen/nova_oflash_mmi
+          test -f drivers/input/touchscreen/nova_oflash_mmi/Kconfig
+          git ls-files drivers/input/touchscreen/nova_oflash_mmi | head -30
+          echo "===== END NOVA BEFORE ====="
+
           make \
             O="${OUT_DIR}" \
             ARCH="${ARCH}" \
@@ -258,6 +265,21 @@ jobs:
             LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
             vendor/bengal-perf_defconfig
+
+            echo "===== NOVA AFTER BASE DEFCONFIG ====="
+            if [ -d "drivers/input/touchscreen/nova_oflash_mmi" ]; then
+            echo "NOVA DIRECTORY STILL EXISTS"
+            ls -ld drivers/input/touchscreen/nova_oflash_mmi
+            test -f drivers/input/touchscreen/nova_oflash_mmi/Kconfig
+             git ls-files drivers/input/touchscreen/nova_oflash_mmi | head -30
+            else
+            echo "NOVA DIRECTORY DISAPPEARED"
+            echo "--- Git status ---"
+           git status --short -- drivers/input/touchscreen/nova_oflash_mmi || true
+           echo "--- Git tracked path ---"
+           git ls-files drivers/input/touchscreen/nova_oflash_mmi || true
+           fi
+           echo "===== END NOVA AFTER ====="
 
           CLEAN_RELEASE="$(
             make -s \
