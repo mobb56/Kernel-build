@@ -1696,8 +1696,14 @@ jobs:
           echo "===== NOVA DRM PANEL SOURCE TRACE ====="
 
           echo "--- Kconfig file ---"
-          test -f drivers/input/touchscreen/nova_oflash_mmi/Kconfig
-          sed -n '1,80p' drivers/input/touchscreen/nova_oflash_mmi/Kconfig
+          if [ -f "drivers/input/touchscreen/nova_oflash_mmi/Kconfig" ]; then
+          echo "YES: Kconfig file exists"
+          sed -n '1,90p' drivers/input/touchscreen/nova_oflash_mmi/Kconfig
+          else
+          echo "NO: Kconfig file does not exist at this stage"
+          fi
+          
+          
 
           echo "--- Makefile/Kbuild ---"
           if test -f drivers/input/touchscreen/nova_oflash_mmi/Makefile; then
