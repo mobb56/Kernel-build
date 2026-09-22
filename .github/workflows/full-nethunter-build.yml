@@ -2623,6 +2623,33 @@ jobs:
           echo "============================================================"
 
 
+
+      - name: Trace NOVA DRM panel Kconfig source
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd "${GITHUB_WORKSPACE}/kernel"
+
+          echo "===== NOVA DRM PANEL SOURCE TRACE ====="
+
+          echo "--- Kconfig definitions ---"
+          grep -Rns \
+            -E '(^|[[:space:]])(menu)?config[[:space:]]+INPUT_NOVA_DRM_PANEL([[:space:]]|$)' \
+            drivers arch vendor 2>/dev/null || true
+
+          echo "--- References ---"
+          grep -Rns \
+            'INPUT_NOVA_DRM_PANEL' \
+            drivers arch vendor 2>/dev/null || true
+
+          echo "--- Git tracked files mentioning symbol ---"
+          git grep -n 'INPUT_NOVA_DRM_PANEL' -- \
+            'drivers/**' 'arch/**' 'vendor/**' 2>/dev/null || true
+
+          echo "===== END NOVA DRM PANEL TRACE ====="
+
+
       - name: Final safety and hardware configuration audit
         shell: bash
         run: |
