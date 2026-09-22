@@ -2633,19 +2633,54 @@ jobs:
 
           echo "===== NOVA DRM PANEL SOURCE TRACE ====="
 
-          echo "--- Kconfig definitions ---"
-          grep -Rns \
-            -E '(^|[[:space:]])(menu)?config[[:space:]]+INPUT_NOVA_DRM_PANEL([[:space:]]|$)' \
-            drivers arch vendor 2>/dev/null || true
+          echo "--- Kconfig file ---"
+          test -f drivers/input/touchscreen/nova_oflash_mmi/Kconfig
+          sed -n '1,80p' drivers/input/touchscreen/nova_oflash_mmi/Kconfig
 
-          echo "--- References ---"
-          grep -Rns \
-            'INPUT_NOVA_DRM_PANEL' \
-            drivers arch vendor 2>/dev/null || true
+          echo "--- Makefile/Kbuild ---"
+          if test -f drivers/input/touchscreen/nova_oflash_mmi/Makefile; then
+            cat drivers/input/touchscreen/nova_oflash_mmi/Makefile
+          fi
 
-          echo "--- Git tracked files mentioning symbol ---"
-          git grep -n 'INPUT_NOVA_DRM_PANEL' -- \
-            'drivers/**' 'arch/**' 'vendor/**' 2>/dev/null || true
+          if test -f drivers/input/touchscreen/nova_oflash_mmi/Kbuild; then
+            cat drivers/input/touchscreen/nova_oflash_mmi/Kbuild
+          fi
+
+          echo "--- Parent touchscreen Kconfig references ---"
+          grep -Rns \
+            'nova_oflash_mmi\|INPUT_NOVA_DRM_PANEL' \
+            drivers/input/touchscreen/Kconfig \
+            drivers/input/touchscreen/Makefile \
+            drivers/input/touchscreen 2>/dev/null || true
+
+          echo "--- Symbol state before audit ---"
+          scripts/config --file out/.config --state INPUT_NOVA_DRM_PANEL || true
+
+          echo "--- Relevant dependency states ---"
+          for s in \
+            INPUT \
+            INPUT_TOUCHSCREEN \
+            TOUCHSCREEN_PROPERTIES \
+            SPI \
+            SPI_MASTER \
+            SPI_QCOM_GENI \
+            I2C \
+            I2C_QCOM_GENI \
+            DRM \
+            DRM_PANEL \
+            NOVA_DRM_PANEL
+          do
+            printf '%-45s ' "CONFIG_${s}"
+            scripts/config --file out/.config --state "${s}" 2>/dev/null || true
+          done
+
+          echo "--- Git status for NOVA driver ---"
+          git status --short -- \
+            drivers/input/touchscreen/nova_oflash_mmi || true
+
+          echo "--- Git tracked status ---"
+          git ls-files -- \
+            drivers/input/touchscreen/nova_oflash_mmi || true
 
           echo "===== END NOVA DRM PANEL TRACE ====="
 
