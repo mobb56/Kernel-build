@@ -995,6 +995,18 @@ jobs:
           echo
           echo "QCACLD3 injection source files imported."
 
+
+           echo "=== Verify original QCACLD3 HDD files survived import ==="
+
+          test -f "${KERNEL_QCACLD}/core/hdd/src/wlan_hdd_main.c"
+          test -f "${KERNEL_QCACLD}/core/hdd/src/wlan_hdd_main.h"
+
+          echo "wlan_hdd_main.c and wlan_hdd_main.h are present."
+
+          ls -l \
+            "${KERNEL_QCACLD}/core/hdd/src/wlan_hdd_main.c" \
+            "${KERNEL_QCACLD}/core/hdd/src/wlan_hdd_main.h"
+
       # ============================================================
       # 28. IMPORT REQUIRED QCACLD3 HEADERS
       # ============================================================
