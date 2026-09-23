@@ -487,6 +487,9 @@ jobs:
           CONFIG_INPUT_TOUCHSCREEN_FOCALTECH_0FLASH_MMI=m
           CONFIG_INPUT_FOCALTECH_0FLASH_MMI_IC_NAME_FT8006S_AA=y
           CONFIG_INPUT_TOUCHSCREEN_FOCALTECH_0FLASH_MMI_DRM_PANEL=y
+          CONFIG_TOUCHSCREEN_NT36xxx_HOSTDL_SPI=m
+          CONFIG_TOUCHSCREEN_CHIPONE_TDDI=m
+          CONFIG_TOUCHSCREEN_CHIPONE_TDDI_ESD=y
 
           # ------------------------------------------------------------
           # Stock cebu fingerprint
