@@ -278,26 +278,57 @@ jobs:
       # ============================================================
 
       - name: Verify QCACLD3 source tree
+        working-directory: kernel
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
-          cd kernel
+          echo "=== QCACLD3 source tree ==="
 
           test -d drivers/staging/qcacld-3.0
+          test -f drivers/staging/qcacld-3.0/Kbuild
 
-          test -f \
-            drivers/staging/qcacld-3.0/Kbuild
+          echo "QCACLD3 root:"
+          find drivers/staging/qcacld-3.0 \
+            -maxdepth 3 \
+            -type f \
+            \( -name 'wlan_hdd_main.c' -o -name 'wlan_hdd_main.h' \) \
+            -print
 
-          test -f \
-            drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c
+          HDD_MAIN_C="$(
+            find drivers/staging/qcacld-3.0 \
+              -type f \
+              -name 'wlan_hdd_main.c' \
+              -print -quit
+          )"
 
-          test -f \
-            drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.h
+          HDD_MAIN_H="$(
+            find drivers/staging/qcacld-3.0 \
+              -type f \
+              -name 'wlan_hdd_main.h' \
+              -print -quit
+          )"
 
-          echo
+          if [ -z "${HDD_MAIN_C}" ]; then
+            echo "ERROR: wlan_hdd_main.c was not found anywhere in QCACLD3."
+            exit 1
+          fi
+
+          if [ -z "${HDD_MAIN_H}" ]; then
+            echo "ERROR: wlan_hdd_main.h was not found anywhere in QCACLD3."
+            exit 1
+          fi
+
+          echo "wlan_hdd_main.c: ${HDD_MAIN_C}"
+          echo "wlan_hdd_main.h: ${HDD_MAIN_H}"
+
+          {
+            echo "QCACLD3_ROOT=drivers/staging/qcacld-3.0"
+            echo "WLAN_HDD_MAIN_C=${HDD_MAIN_C}"
+            echo "WLAN_HDD_MAIN_H=${HDD_MAIN_H}"
+          } > ../artifacts/source-audit/qcacld3-paths.txt
+
           echo "QCACLD3 source tree verified."
-
       # ============================================================
       # 10. CLONE NETHUNTER REFERENCE
       # ============================================================
