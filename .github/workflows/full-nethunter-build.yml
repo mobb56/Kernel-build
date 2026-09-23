@@ -213,7 +213,7 @@ jobs:
           echo "Stock cebu configuration is present."
 
 
-            # ============================================================
+      # ============================================================
       # 7. CLONE KERNEL SOURCE
       # ============================================================
 
@@ -919,7 +919,7 @@ jobs:
 
 
 
-                  # ============================================================
+      # ============================================================
       # 27. IMPORT NETHUNTER QCACLD3 FRAME-INJECTION SOURCES
       # ============================================================
 
@@ -1567,7 +1567,7 @@ jobs:
 
 
 
-                   # ============================================================
+      # ============================================================
       # 38. NORMALIZE STOCK AND FINAL CONFIGURATIONS
       # ============================================================
 
@@ -2100,7 +2100,7 @@ jobs:
 
 
 
-                 - name: Verify kernel and NetHunter build outputs
+      - name: Verify kernel and NetHunter build outputs
         working-directory: kernel
         shell: bash
         run: |
@@ -2272,7 +2272,7 @@ jobs:
 
 
        
-                 - name: Package verified kernel artifacts
+      - name: Package verified kernel artifacts
         working-directory: kernel
         shell: bash
         run: |
