@@ -1097,7 +1097,7 @@ jobs:
 
           cd kernel
 
-          MAIN_H="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.h"
+          MAIN_H="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h"
 
           test -f "${MAIN_H}"
 
