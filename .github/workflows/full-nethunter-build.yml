@@ -1102,68 +1102,75 @@ jobs:
 
           echo "=== Inspecting wlan_hdd_main.h ==="
 
-          grep -n \
-            -E 'struct[[:space:]]+hdd_(adapter|context)|hdd_adapter_t|hdd_context_t' \
-            "${MAIN_H}" \
-            | head -80 || true
+          sed -n '1,80p' "${MAIN_H}"
 
           echo
-          echo "=== Searching for a safe injection-context location ==="
+          echo "=== Checking for existing injection context declaration ==="
 
-          grep -n \
-            -E '^typedef struct|^struct hdd_|^#endif|^#define' \
-            "${MAIN_H}" \
-            | head -120 || true
+          python3 - "${MAIN_H}" <<'PY'
+          import pathlib
+          import sys
 
-          echo
-          echo "=== Checking whether injection context already exists ==="
+          path = pathlib.Path(sys.argv[1])
+          text = path.read_text()
 
-          if grep -q 'struct hdd_injection_ctx' "${MAIN_H}"; then
-            echo "Injection context declaration already exists."
-          else
-            echo "Injection context declaration is not present."
+           marker = "struct hdd_injection_ctx;"
 
-            python3 - "${MAIN_H}" <<'PY'
-            import pathlib
-            import sys
+           if marker in text:
+            print("Injection context forward declaration already exists.")
+            else:
+               declaration = """
+            #ifdef FEATURE_FRAME_INJECTION_SUPPORT
+           struct hdd_injection_ctx;
+           #endif
+            """
 
-             path = pathlib.Path(sys.argv[1])
-             text = path.read_text()
+           lines = text.splitlines(True)
 
-                 declaration = """#ifdef FEATURE_FRAME_INJECTION_SUPPORT
-                struct hdd_injection_ctx;
-                #endif
-                 """
-
-               if "struct hdd_injection_ctx;" in text:
-                raise SystemExit(0)
-
-              # Insert before the final include-guard #endif.
-              lines = text.splitlines(True)
+            # Find the final include-guard #endif.
+             insert_at = None
 
             for i in range(len(lines) - 1, -1, -1):
-             if lines[i].strip() == "#endif":
-             lines.insert(i, "\n" + declaration + "\n")
-              path.write_text("".join(lines))
-                print(
-            f"Inserted injection context declaration "
-            f"before final #endif at line {i + 1}."
-             )
+              if lines[i].strip() == "#endif":
+              insert_at = i
             break
-          else:
-             raise SystemExit(
-             "ERROR: Could not find final #endif in wlan_hdd_main.h"
+
+           if insert_at is None:
+               raise SystemExit(
+            "ERROR: Could not find final #endif in wlan_hdd_main.h"
               )
-               PY
-          fi
+
+              lines.insert(insert_at, "\n" + declaration + "\n")
+           path.write_text("".join(lines))
+
+            print(
+             f"Inserted injection context declaration "
+             f"before final #endif at line {insert_at + 1}."
+              )
+             PY
 
           echo
-          echo "=== Verify injection context declaration ==="
+          echo "=== Verifying injection context declaration ==="
 
-          grep -n \
-            -A3 -B2 \
-            'struct hdd_injection_ctx' \
-            "${MAIN_H}"
+          python3 - "${MAIN_H}" <<'PY'
+          import pathlib
+           import sys
+
+             path = pathlib.Path(sys.argv[1])
+            text = path.read_text()
+
+           expected = """#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+           struct hdd_injection_ctx;
+            #endif
+             """
+
+              if expected not in text:
+               raise SystemExit(
+             "ERROR: injection context declaration was not found after integration"
+               )
+
+            print("Injection context declaration verified.")
+              PY
 
           echo
           echo "=== HDD header integration passed ==="
