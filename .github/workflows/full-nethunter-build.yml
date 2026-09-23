@@ -1108,8 +1108,7 @@ jobs:
           )
 
 
-
-      - name: Prevent duplicate injection helper definitions
+      - name: Inspect duplicate injection helpers
         working-directory: kernel
         shell: bash
         run: |
@@ -1121,85 +1120,20 @@ jobs:
           test -f "${FRAME_H}"
           test -f "${SECURITY_H}"
 
-          echo "=== Checking duplicate injection helpers ==="
-
-          grep -n \
-            -E 'hdd_(get_injection_stats|reset_injection_stats)' \
-            "${FRAME_H}" \
-            "${SECURITY_H}"
-
-          python3 -c '
-          import pathlib
-           import re
-           import sys
-
-          paths = [pathlib.Path(x) for x in sys.argv[1:]]
-
-          guard_start = "#ifndef WLAN_HDD_INJECTION_STATS_HELPERS"
-           guard_define = "#define WLAN_HDD_INJECTION_STATS_HELPERS"
-           guard_end = "#endif /* WLAN_HDD_INJECTION_STATS_HELPERS */"
-
-          pattern = re.compile(
-          r"(static inline QDF_STATUS hdd_get_injection_stats"
-          r".*?"
-          r"static inline QDF_STATUS hdd_reset_injection_stats"
-          r".*?"
-          r"\n\})",
-          re.S
-           )
-
-          for path in paths:
-          text = path.read_text()
-
-          if guard_define in text:
-          print(f"{path}: guard already present.")
-           continue
-
-          match = pattern.search(text)
-
-            if not match:
-            print(f"{path}: helper block not found.")
-            continue
-
-          block = match.group(1)
-
-            replacement = (
-            guard_start
-            + "\n"
-            + guard_define
-            + "\n"
-            + block
-            + "\n"
-            + guard_end
-             )
-
-          text = text[:match.start()] + replacement + text[match.end():]
-
-          path.write_text(text)
-
-           print(f"{path}: duplicate helper guard inserted.")
-          ' "${FRAME_H}" "${SECURITY_H}"
+          echo "=== frame_inject.h helpers ==="
+          sed -n '660,700p' "${FRAME_H}"
 
           echo
-          echo "=== Verifying helper guard ==="
-
-          grep -n \
-            -A3 -B2 \
-            "WLAN_HDD_INJECTION_STATS_HELPERS" \
-            "${FRAME_H}" \
-            "${SECURITY_H}"
+          echo "=== inject_security.h helpers ==="
+          sed -n '155,180p' "${SECURITY_H}"
 
           echo
-          echo "=== Verifying both helpers ==="
-
+          echo "=== Helper locations ==="
           grep -n \
-            "hdd_get_injection_stats\|hdd_reset_injection_stats" \
+            'static inline QDF_STATUS hdd_get_injection_stats\|static inline QDF_STATUS hdd_reset_injection_stats' \
             "${FRAME_H}" \
             "${SECURITY_H}"
-
-          echo
-          echo "=== Duplicate injection helper protection passed ==="
-
+            
       # ============================================================
       # 29. ADD INJECTION CONTEXT TO wlan_hdd_main.h
       #
