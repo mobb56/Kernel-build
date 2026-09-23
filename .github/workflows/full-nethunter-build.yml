@@ -2034,7 +2034,7 @@ jobs:
 
 
 
-                  - name: Build kernel
+      - name: Build kernel
         working-directory: kernel
         shell: bash
         run: |
