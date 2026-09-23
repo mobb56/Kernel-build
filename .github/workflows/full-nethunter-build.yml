@@ -1162,58 +1162,62 @@ jobs:
       # ============================================================
 
       - name: Integrate injection API into HDD main
+        working-directory: kernel
         shell: bash
         run: |
-          set -euxo pipefail
-
-          cd kernel
+          set -euo pipefail
 
           MAIN_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+          INJECT_H="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h"
 
           test -f "${MAIN_C}"
+          test -f "${INJECT_H}"
 
-          if grep -Fq \
-            '#include "wlan_hdd_frame_inject.h"' \
-            "${MAIN_C}"; then
+          echo "=== Checking HDD injection header ==="
 
-            echo "Frame-injection header already included."
-
+          if grep -Fq '#include "wlan_hdd_frame_inject.h"' "${MAIN_C}"; then
+            echo "wlan_hdd_frame_inject.h is already included."
           else
+            echo "Adding wlan_hdd_frame_inject.h include."
 
-            python3 - "${MAIN_C}" <<'PY'
-          import pathlib
-          import sys
+            TMP_C="${MAIN_C}.tmp"
 
-          path = pathlib.Path(sys.argv[1])
-          text = path.read_text()
+            awk '
+              BEGIN {
+                inserted = 0
+              }
 
-          include = '#include "wlan_hdd_frame_inject.h"'
+              {
+                if (!inserted && $0 ~ /^#include[[:space:]]+/) {
+                  print "#include \"wlan_hdd_frame_inject.h\""
+                  inserted = 1
+                }
 
-          if include in text:
-              raise SystemExit(0)
+                print
+              }
 
-          anchor = '#include "wlan_hdd_main.h"'
+              END {
+                if (!inserted) {
+                  exit 1
+                }
+              }
+            ' "${MAIN_C}" > "${TMP_C}"
 
-          if anchor not in text:
-              raise SystemExit(
-                  "ERROR: wlan_hdd_main.h include was not found"
-              )
+            test -s "${TMP_C}"
+            mv "${TMP_C}" "${MAIN_C}"
 
-          text = text.replace(
-              anchor,
-              anchor + "\n" + include,
-              1
-          )
-
-          path.write_text(text)
-          PY
-
+            echo "Injection header include inserted."
           fi
 
-          grep -n \
+          echo
+          echo "=== Verifying HDD injection API include ==="
+
+          grep -n -F \
             '#include "wlan_hdd_frame_inject.h"' \
             "${MAIN_C}"
 
+          echo
+          echo "=== HDD injection API integration passed ==="
       # ============================================================
       # 31. INTEGRATE FRAME-INJECTION INITIALIZATION
       # ============================================================
