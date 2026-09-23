@@ -283,6 +283,8 @@ jobs:
         run: |
           set -euo pipefail
 
+          mkdir -p ../artifacts/source-audit
+
           echo "=== QCACLD3 source tree ==="
 
           test -d drivers/staging/qcacld-3.0
