@@ -998,14 +998,42 @@ jobs:
 
            echo "=== Verify original QCACLD3 HDD files survived import ==="
 
-          test -f "${KERNEL_QCACLD}/core/hdd/src/wlan_hdd_main.c"
-          test -f "${KERNEL_QCACLD}/core/hdd/src/wlan_hdd_main.h"
 
-          echo "wlan_hdd_main.c and wlan_hdd_main.h are present."
+            echo "=== QCACLD3 HDD directory state after import ==="
 
-          ls -l \
+          echo "QCACLD3 path:"
+          printf '%s\n' "${KERNEL_QCACLD}"
+
+          echo
+          echo "HDD directory:"
+          ls -ld "${KERNEL_QCACLD}/core/hdd" || true
+
+          echo
+          echo "HDD src directory:"
+          ls -lad "${KERNEL_QCACLD}/core/hdd/src" || true
+
+          echo
+          echo "Original HDD files:"
+          ls -la \
             "${KERNEL_QCACLD}/core/hdd/src/wlan_hdd_main.c" \
-            "${KERNEL_QCACLD}/core/hdd/src/wlan_hdd_main.h"
+            "${KERNEL_QCACLD}/core/hdd/src/wlan_hdd_main.h" \
+            2>&1 || true
+
+          echo
+          echo "Anything named wlan_hdd_main:"
+          find "${KERNEL_QCACLD}/core/hdd" \
+            -type f \
+            \( -name 'wlan_hdd_main.c' -o -name 'wlan_hdd_main.h' \) \
+            -print || true
+
+          echo
+          echo "Git tracked locations:"
+          git ls-files \
+            '*wlan_hdd_main.c' \
+            '*wlan_hdd_main.h' || true
+
+          echo
+          echo "=== End QCACLD3 HDD diagnostic ==="
 
       # ============================================================
       # 28. IMPORT REQUIRED QCACLD3 HEADERS
