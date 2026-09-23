@@ -73,23 +73,40 @@ jobs:
       # ============================================================
       # 3. INSTALL LLVM / CLANG 21
       # ============================================================
-
       - name: Install LLVM 21
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
           wget -O llvm.sh https://apt.llvm.org/llvm.sh
-
           chmod +x llvm.sh
-
           sudo ./llvm.sh 21 all
 
-          clang-21 --version
-          ld.lld-21 --version
-          llvm-ar-21 --version
-          llvm-nm-21 --version
+          mkdir -p llvm-bin
 
+          ln -sf "$(command -v clang-21)" llvm-bin/clang
+          ln -sf "$(command -v ld.lld-21)" llvm-bin/ld.lld
+          ln -sf "$(command -v llvm-ar-21)" llvm-bin/llvm-ar
+          ln -sf "$(command -v llvm-nm-21)" llvm-bin/llvm-nm
+          ln -sf "$(command -v llvm-objcopy-21)" llvm-bin/llvm-objcopy
+          ln -sf "$(command -v llvm-objdump-21)" llvm-bin/llvm-objdump
+          ln -sf "$(command -v llvm-strip-21)" llvm-bin/llvm-strip
+          ln -sf "$(command -v llvm-readelf-21)" llvm-bin/llvm-readelf
+
+          export LLVM_BIN="$GITHUB_WORKSPACE/llvm-bin"
+          echo "${LLVM_BIN}" >> "$GITHUB_PATH"
+          export PATH="${LLVM_BIN}:${PATH}"
+
+          echo "=== LLVM 21 toolchain ==="
+
+          clang --version
+          ld.lld --version
+          llvm-ar --version
+          llvm-nm --version
+          llvm-objcopy --version
+          llvm-objdump --version
+          llvm-strip --version
+          llvm-readelf --version
       # ============================================================
       # 4. PREPARE DETERMINISTIC LLVM TOOLCHAIN
       # ============================================================
