@@ -136,11 +136,18 @@ jobs:
           ln -sf "$(command -v llvm-objcopy-21)" \
             "${LLVM_BIN}/llvm-objcopy"
 
+
+          ln -sf "$(command -v llvm-objdump-21)" \
+            "${LLVM_BIN}/llvm-objdump"
+
           ln -sf "$(command -v llvm-strip-21)" \
             "${LLVM_BIN}/llvm-strip"
 
           ln -sf "$(command -v llvm-readelf-21)" \
             "${LLVM_BIN}/llvm-readelf"
+
+            test -x "${LLVM_BIN}/llvm-objdump"
+           "${LLVM_BIN}/llvm-objdump" --version
 
           echo "LLVM_BIN=${LLVM_BIN}" >> "${GITHUB_ENV}"
           echo "PATH=${LLVM_BIN}:${PATH}" >> "${GITHUB_ENV}"
