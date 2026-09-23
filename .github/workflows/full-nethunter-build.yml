@@ -2324,21 +2324,14 @@ jobs:
           scripts/config --file "${OUT_DIR}/.config" --state CONFIG_PACKET
 
           echo
+          
           echo "=== Required module outputs ==="
 
           find "${OUT_DIR}" -type f -name '*.ko' | sort
 
-          QCA_MODULE="$(
-            find "${OUT_DIR}" \
-              -type f \
-              -name 'qca_cld3_wlan.ko' \
-              -print -quit
-          )"
+          QCA_MODULE="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
 
-          if [ -z "${QCA_MODULE}" ]; then
-            echo "ERROR: qca_cld3_wlan.ko was not built."
-            exit 1
-          fi
+          test -f "${QCA_MODULE}"
 
           echo "QCACLD3 module: ${QCA_MODULE}"
 
@@ -2346,12 +2339,14 @@ jobs:
           echo "=== Module metadata ==="
 
           "${LLVM_BIN}/llvm-readelf" -h "${QCA_MODULE}" >/dev/null
-
+          echo
+          
           if command -v modinfo >/dev/null 2>&1; then
             modinfo -F vermagic "${QCA_MODULE}" || true
           fi
 
           echo
+          
           echo "=== QCACLD3 NetHunter injection symbols ==="
 
           "${LLVM_BIN}/llvm-nm" -a "${QCA_MODULE}" | tee \
@@ -2434,6 +2429,210 @@ jobs:
 
           echo
           echo "=== PART 7 PASSED ==="
+
+
+
+
+
+      # ============================================================
+      # PART 9: FINAL SAFETY AND INTEGRITY GATE
+      # ============================================================
+
+      - name: Final kernel safety and integrity gate
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== Part 9: Final safety and integrity gate ==="
+
+          IMAGE="${OUT_DIR}/arch/arm64/boot/Image"
+          WLAN_MODULE="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
+          CONFIG_FILE="${OUT_DIR}/.config"
+          QCACLD_KBUILD="drivers/staging/qcacld-3.0/Kbuild"
+
+          BOOT_PARTITION_BYTES=100663296
+
+          echo
+          echo "=== Required build outputs ==="
+
+          test -f "${IMAGE}"
+          test -f "${WLAN_MODULE}"
+          test -f "${CONFIG_FILE}"
+          test -f "${QCACLD_KBUILD}"
+
+          echo "Kernel Image:"
+          ls -lh "${IMAGE}"
+
+          echo
+          echo "QCACLD3 WLAN module:"
+          ls -lh "${WLAN_MODULE}"
+
+          echo
+          echo "=== Kernel Image size safety check ==="
+
+          IMAGE_SIZE="$(stat -c '%s' "${IMAGE}")"
+
+          echo "Image size: ${IMAGE_SIZE} bytes"
+          echo "Boot partition: ${BOOT_PARTITION_BYTES} bytes"
+
+          if [ "${IMAGE_SIZE}" -ge "${BOOT_PARTITION_BYTES}" ]; then
+            echo "ERROR: Kernel Image is too large for the boot partition."
+            exit 1
+          fi
+
+          echo "Kernel Image fits within the boot partition."
+
+          echo
+          echo "=== Kernel release ==="
+
+          KERNEL_RELEASE="$(
+            make -s \
+              O="${OUT_DIR}" \
+              ARCH="${ARCH}" \
+              LLVM=1 \
+              LLVM_IAS=1 \
+              CROSS_COMPILE="${CROSS_COMPILE}" \
+              kernelrelease
+          )"
+
+          test -n "${KERNEL_RELEASE}"
+
+          echo "Kernel release: ${KERNEL_RELEASE}"
+
+          echo
+          echo "=== Module ABI safety ==="
+
+          scripts/config \
+            --file "${CONFIG_FILE}" \
+            --state CONFIG_MODVERSIONS
+
+          if ! grep -q '^CONFIG_MODVERSIONS=y$' "${CONFIG_FILE}"; then
+            echo "ERROR: CONFIG_MODVERSIONS is not enabled."
+            exit 1
+          fi
+
+          echo "CONFIG_MODVERSIONS=y confirmed."
+
+          echo
+          echo "=== QCACLD3 module verification ==="
+
+          "${LLVM_BIN}/llvm-readelf" -h "${WLAN_MODULE}" >/dev/null
+
+          echo "QCACLD3 module format verified."
+
+          echo
+          echo "=== NetHunter injection symbols ==="
+
+          "${LLVM_BIN}/llvm-nm" -a "${WLAN_MODULE}" \
+            > ../artifacts/source-audit/part9-wlan-symbols.txt 2>&1 || true
+
+          REQUIRED_SYMBOLS=(
+            "hdd_init_frame_injection"
+            "hdd_deinit_frame_injection"
+            "hdd_frame_inject_netlink"
+            "hdd_frame_inject_ioctl"
+            "hdd_frame_inject_enable"
+            "hdd_frame_inject_disable"
+            "wma_process_injection_queue"
+            "wma_process_injection_queue_work"
+          )
+
+          for symbol in "${REQUIRED_SYMBOLS[@]}"; do
+            if ! grep -Eq "[[:space:]]${symbol}$" \
+              ../artifacts/source-audit/part9-wlan-symbols.txt; then
+              echo "ERROR: Required injection symbol missing: ${symbol}"
+              exit 1
+            fi
+          done
+
+          echo "All required injection symbols are present."
+
+          echo
+          echo "=== QCACLD3 Kbuild feature verification ==="
+
+          grep -Fq \
+            'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y' \
+            "${QCACLD_KBUILD}"
+
+          grep -Fq \
+            'CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y' \
+            "${QCACLD_KBUILD}"
+
+          echo "Frame injection Kbuild flag confirmed."
+          echo "Monitor mode Kbuild flag confirmed."
+
+          echo
+          echo "=== FEATURE symbols must NOT be kernel config symbols ==="
+
+          if grep -Eq \
+            '^CONFIG_FEATURE_(FRAME_INJECTION_SUPPORT|MONITOR_MODE_SUPPORT)=' \
+            "${CONFIG_FILE}"; then
+            echo "ERROR: QCACLD3 FEATURE symbol leaked into .config."
+            exit 1
+          fi
+
+          echo "FEATURE symbols correctly remain outside .config."
+
+          echo
+          echo "=== CAP_NET_RAW compatibility check ==="
+
+          grep -q \
+            'capable(CAP_NET_RAW)' \
+            drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c
+
+          echo "CAP_NET_RAW check confirmed."
+
+          echo
+          echo "=== No-flash / no-reboot safety check ==="
+
+          if grep -RniE \
+            'fastboot[[:space:]]+(flash|boot)|adb[[:space:]]+reboot|reboot[[:space:]]+bootloader|reboot[[:space:]]+recovery|dd[[:space:]]+if=.*of=/dev/block' \
+            .github/workflows \
+            --exclude-dir=.git; then
+            echo "ERROR: Dangerous flash/reboot command detected in workflow."
+            exit 1
+          fi
+
+          echo "No flash or reboot commands detected."
+
+          echo
+          echo "=== AnyKernel3 safety check ==="
+
+          if grep -Rni \
+            'AnyKernel3\|anykernel' \
+            .github/workflows \
+            --exclude-dir=.git; then
+            echo "ERROR: AnyKernel3 reference detected in workflow."
+            exit 1
+          fi
+
+          echo "No AnyKernel3 workflow operation detected."
+
+          echo
+          echo "=== Final Part 9 manifest ==="
+
+          {
+            echo "KERNEL_RELEASE=${KERNEL_RELEASE}"
+            echo "IMAGE=${IMAGE}"
+            echo "IMAGE_SIZE=${IMAGE_SIZE}"
+            echo "BOOT_PARTITION_BYTES=${BOOT_PARTITION_BYTES}"
+            echo "WLAN_MODULE=${WLAN_MODULE}"
+            echo "CONFIG_MODVERSIONS=y"
+            echo "FRAME_INJECTION_KBUILD=y"
+            echo "MONITOR_MODE_KBUILD=y"
+            echo "CAP_NET_RAW=confirmed"
+            echo "FEATURE_SYMBOLS_IN_CONFIG=absent"
+            echo "FLASH_COMMANDS=absent"
+            echo "REBOOT_COMMANDS=absent"
+            echo "ANYKERNEL3=absent"
+          } > ../artifacts/source-audit/part9-final-safety.txt
+
+          cat ../artifacts/source-audit/part9-final-safety.txt
+
+          echo
+          echo "=== PART 9 PASSED ==="
+          echo "Kernel passed the final static safety and integrity gate."
 
 
        
@@ -2552,7 +2751,7 @@ jobs:
           find "${ARTIFACT_DIR}" -type f -printf '%P\n' | sort
 
           echo
-          echo "=== PART 8 PASSED ==="background: 
+          echo "=== PART 10 PASSED ==="background: 
 
 
 
