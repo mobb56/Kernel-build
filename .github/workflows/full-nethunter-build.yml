@@ -2017,43 +2017,55 @@ jobs:
       # ============================================================
 
       - name: Verify source integration before build
+        working-directory: kernel
         shell: bash
         run: |
-          set -euxo pipefail
-
-          cd kernel
+          set -euo pipefail
 
           QCACLD="drivers/staging/qcacld-3.0"
+          MAIN_C="${QCACLD}/core/hdd/src/wlan_hdd_main.c"
 
-          test -s \
-            "${QCACLD}/core/hdd/src/wlan_hdd_frame_inject.c"
+          test -f "${MAIN_C}"
 
-          test -s \
-            "${QCACLD}/core/hdd/src/wlan_hdd_frame_validate.c"
+          echo "=== Verifying injected source files ==="
 
-          test -s \
-            "${QCACLD}/core/hdd/src/wlan_hdd_inject_security.c"
+          test -s "${QCACLD}/core/hdd/src/wlan_hdd_frame_inject.c"
+          test -s "${QCACLD}/core/hdd/src/wlan_hdd_frame_validate.c"
+          test -s "${QCACLD}/core/hdd/src/wlan_hdd_inject_security.c"
+          test -s "${QCACLD}/core/hdd/src/wlan_hdd_frame_inject_debug.c"
+          test -s "${QCACLD}/core/wma/src/wma_frame_inject.c"
 
-          test -s \
-            "${QCACLD}/core/hdd/src/wlan_hdd_frame_inject_debug.c"
+          echo "Injection source files verified."
 
-          test -s \
-            "${QCACLD}/core/wma/src/wma_frame_inject.c"
+          echo
+          echo "=== Verifying HDD injection header ==="
+
+          grep -Fq \
+            '#include "../inc/wlan_hdd_frame_inject.h"' \
+            "${MAIN_C}"
+
+          echo "HDD injection header include verified."
+
+          echo
+          echo "=== Verifying frame-injection initialization ==="
 
           grep -Fq \
             'hdd_init_frame_injection(adapter);' \
-            "${QCACLD}/core/hdd/src/wlan_hdd_main.c"
+            "${MAIN_C}"
+
+          echo "Frame-injection initialization verified."
+
+          echo
+          echo "=== Verifying frame-injection deinitialization ==="
 
           grep -Fq \
             'hdd_deinit_frame_injection(adapter);' \
-            "${QCACLD}/core/hdd/src/wlan_hdd_main.c"
+            "${MAIN_C}"
 
-          grep -Fq \
-            '#include "wlan_hdd_frame_inject.h"' \
-            "${QCACLD}/core/hdd/src/wlan_hdd_main.c"
+          echo "Frame-injection deinitialization verified."
 
           echo
-          echo "QCACLD3 source integration is present."
+          echo "=== Source integration verification passed ==="
 
       # ============================================================
       # 48. VERIFY NO FLASHING COMMANDS EXIST
