@@ -2197,6 +2197,91 @@ jobs:
           } > artifacts/source-audit/pre-build-audit.txt
 
           cat artifacts/source-audit/pre-build-audit.txt
+
+
+
+      - name: Inspect QCACLD3 injection compilation
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== QCACLD3 injection compilation inspection ==="
+
+          echo
+          echo "=== Injection function definitions ==="
+
+          grep -RInE \
+            '(^|[[:space:]])(static[[:space:]]+)?(inline[[:space:]]+)?[^;]*wma_process_injection_queue(_work)?[[:space:]]*\(' \
+            drivers/staging/qcacld-3.0 \
+            || true
+
+          echo
+          echo "=== FEATURE_FRAME_INJECTION_SUPPORT references ==="
+
+          grep -RIn \
+            'FEATURE_FRAME_INJECTION_SUPPORT' \
+            drivers/staging/qcacld-3.0 \
+            | head -100 \
+            || true
+
+          echo
+          echo "=== FEATURE_MONITOR_MODE_SUPPORT references ==="
+
+          grep -RIn \
+            'FEATURE_MONITOR_MODE_SUPPORT' \
+            drivers/staging/qcacld-3.0 \
+            | head -100 \
+            || true
+
+          echo
+          echo "=== QCACLD3 Kbuild feature settings ==="
+
+          grep -nE \
+            'FEATURE_(FRAME_INJECTION_SUPPORT|MONITOR_MODE_SUPPORT)|ccflags-y|subdir-ccflags-y|CFLAGS' \
+            drivers/staging/qcacld-3.0/Kbuild \
+            || true
+
+          echo
+          echo "=== Injection source files ==="
+
+          find drivers/staging/qcacld-3.0 \
+            -type f \
+            \( \
+              -name 'wlan_hdd_frame_inject.c' -o \
+              -name 'wlan_hdd_frame_validate.c' -o \
+              -name 'wlan_hdd_inject_security.c' -o \
+              -name 'wlan_hdd_frame_inject_debug.c' -o \
+              -name 'wma_frame_inject.c' \
+            \) \
+            -print
+
+
+
+                               echo
+          echo "=== QCACLD3 WMA source/object registration ==="
+
+          grep -RInE \
+            'wma_frame_inject(\.o|\.c)|core/wma|wma/.*\.o' \
+            drivers/staging/qcacld-3.0/Kbuild \
+            drivers/staging/qcacld-3.0/core/wma \
+            2>/dev/null \
+            | head -200 \
+            || true
+
+          echo
+          echo "=== QCACLD3 Kbuild files ==="
+
+          find drivers/staging/qcacld-3.0 \
+            -type f \
+            \( -name 'Kbuild' -o -name 'Makefile' \) \
+            -print \
+            | sort
+
+          echo
+          echo "=== Inspection complete ==="
+          
+          
           
 
                          
@@ -2266,65 +2351,7 @@ jobs:
 
 
 
-      - name: Inspect QCACLD3 injection compilation
-        working-directory: kernel
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "=== QCACLD3 injection compilation inspection ==="
-
-          echo
-          echo "=== Injection function definitions ==="
-
-          grep -RInE \
-            '(^|[[:space:]])(static[[:space:]]+)?(inline[[:space:]]+)?[^;]*wma_process_injection_queue(_work)?[[:space:]]*\(' \
-            drivers/staging/qcacld-3.0 \
-            || true
-
-          echo
-          echo "=== FEATURE_FRAME_INJECTION_SUPPORT references ==="
-
-          grep -RIn \
-            'FEATURE_FRAME_INJECTION_SUPPORT' \
-            drivers/staging/qcacld-3.0 \
-            | head -100 \
-            || true
-
-          echo
-          echo "=== FEATURE_MONITOR_MODE_SUPPORT references ==="
-
-          grep -RIn \
-            'FEATURE_MONITOR_MODE_SUPPORT' \
-            drivers/staging/qcacld-3.0 \
-            | head -100 \
-            || true
-
-          echo
-          echo "=== QCACLD3 Kbuild feature settings ==="
-
-          grep -nE \
-            'FEATURE_(FRAME_INJECTION_SUPPORT|MONITOR_MODE_SUPPORT)|ccflags-y|subdir-ccflags-y|CFLAGS' \
-            drivers/staging/qcacld-3.0/Kbuild \
-            || true
-
-          echo
-          echo "=== Injection source files ==="
-
-          find drivers/staging/qcacld-3.0 \
-            -type f \
-            \( \
-              -name 'wlan_hdd_frame_inject.c' -o \
-              -name 'wlan_hdd_frame_validate.c' -o \
-              -name 'wlan_hdd_inject_security.c' -o \
-              -name 'wlan_hdd_frame_inject_debug.c' -o \
-              -name 'wma_frame_inject.c' \
-            \) \
-            -print
-
-          echo
-          echo "=== Inspection complete ==="
-
+      
 
       - name: Verify kernel and NetHunter build outputs
         working-directory: kernel
