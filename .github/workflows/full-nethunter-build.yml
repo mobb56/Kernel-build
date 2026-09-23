@@ -1110,7 +1110,6 @@ jobs:
 
 
 
-
       - name: Remove duplicate injection helper definitions
         working-directory: kernel
         shell: bash
@@ -1131,13 +1130,42 @@ jobs:
             "${SECURITY_H}"
 
           echo
-          echo "=== Removing duplicate helper definitions from frame-inject header ==="
+          echo "=== Removing complete duplicate functions ==="
 
-          python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); s=p.read_text(); names=["hdd_get_injection_stats","hdd_reset_injection_stats"]; \
-          exec("for name in names:\\n    start=s.find(\"static inline QDF_STATUS \"+name)\\n    if start < 0: raise SystemExit(\"ERROR: \"+name+\" not found\")\\n    brace=s.find(\"{\",start)\\n    if brace < 0: raise SystemExit(\"ERROR: opening brace not found for \"+name)\\n    depth=0\\n    end=-1\\n    for i in range(brace,len(s)):\\n        if s[i]==\"{\": depth+=1\\n        elif s[i]==\"}\":\\n            depth-=1\\n            if depth==0:\\n                end=i+1\\n                break\\n    if end < 0: raise SystemExit(\"ERROR: closing brace not found for \"+name)\\n    s=s[:start]+s[end:]"); p.write_text(s)' "${FRAME_H}"
+          awk '
+          BEGIN {
+              skip = 0
+              depth = 0
+          }
+
+          /static inline QDF_STATUS hdd_get_injection_stats[[:space:]]*\(/ ||
+          /static inline QDF_STATUS hdd_reset_injection_stats[[:space:]]*\(/ {
+              skip = 1
+              depth = 0
+          }
+
+          skip {
+              opens = gsub(/\{/, "{")
+              closes = gsub(/\}/, "}")
+              depth += opens - closes
+
+              if (depth <= 0 && opens > 0) {
+                  skip = 0
+                  depth = 0
+              }
+
+              next
+          }
+
+          {
+              print
+          }
+          ' "${FRAME_H}" > "${FRAME_H}.fixed"
+
+          mv "${FRAME_H}.fixed" "${FRAME_H}"
 
           echo
-          echo "=== Verifying duplicates are gone ==="
+          echo "=== Verifying frame-inject header ==="
 
           if grep -q \
             'static inline QDF_STATUS hdd_get_injection_stats' \
@@ -1154,7 +1182,7 @@ jobs:
           fi
 
           echo
-          echo "=== Verifying security header retains both helpers ==="
+          echo "=== Verifying security header retains the helpers ==="
 
           grep -n \
             'static inline QDF_STATUS hdd_get_injection_stats\|static inline QDF_STATUS hdd_reset_injection_stats' \
@@ -1162,6 +1190,7 @@ jobs:
 
           echo
           echo "=== Duplicate injection helper fix passed ==="
+                                                  
       
       # ============================================================
       # 29. ADD INJECTION CONTEXT TO wlan_hdd_main.h
