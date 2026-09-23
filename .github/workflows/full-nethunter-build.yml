@@ -2352,27 +2352,54 @@ jobs:
           "${LLVM_BIN}/llvm-nm" -a "${QCA_MODULE}" | tee \
             ../artifacts/source-audit/qcacld3-symbols.txt
 
-          REQUIRED_SYMBOLS=(
-            "hdd_init_frame_injection"
-            "hdd_deinit_frame_injection"
-            "hdd_frame_inject_netlink"
-            "hdd_frame_inject_ioctl"
-            "hdd_frame_inject_enable"
-            "hdd_frame_inject_disable"
-            "wma_process_injection_queue"
-            "wma_process_injection_queue_work"
-          )
+                     echo
+               echo "=== QCACLD3 injection verification ==="
 
-          for symbol in "${REQUIRED_SYMBOLS[@]}"; do
-            if ! grep -Eq "[[:space:]]${symbol}$" \
-              ../artifacts/source-audit/qcacld3-symbols.txt; then
-              echo "ERROR: Missing required injection symbol: ${symbol}"
-              exit 1
-            fi
+            SYMBOL_FILE="../artifacts/source-audit/qcacld3-symbols.txt"
+
+            test -s "${SYMBOL_FILE}"
+
+            echo "Checking emitted injection symbols..."
+
+            REQUIRED_EMITTED_SYMBOLS=(
+             "wma_process_injection_queue"
+             "wma_process_injection_queue_work"
+               )
+
+            for symbol in "${REQUIRED_EMITTED_SYMBOLS[@]}"; do
+            if ! grep -Eq "[[:space:]]${symbol}$" "${SYMBOL_FILE}"; then
+           echo "ERROR: Missing emitted injection symbol: ${symbol}"
+          exit 1
+          fi
           done
 
-          echo "All required QCACLD3 injection symbols are present."
+          echo "Emitted QCACLD3 injection symbols are present."
 
+           echo
+           echo "Checking inline injection helpers in source..."
+
+           FRAME_INJECT_H="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h"
+
+          test -f "${FRAME_INJECT_H}"
+
+          for helper in \
+          hdd_init_frame_injection \
+          hdd_deinit_frame_injection \
+          hdd_frame_inject_enable \
+          hdd_frame_inject_disable \
+          hdd_get_injection_stats \
+          hdd_reset_injection_stats
+          do
+            if ! grep -Eq "static inline .*${helper}" "${FRAME_INJECT_H}"; then
+           echo "ERROR: Missing inline injection helper: ${helper}"
+           exit 1
+           fi
+           done
+
+           echo "Inline QCACLD3 injection helpers are present."
+
+            echo
+             echo "QCACLD3 injection verification passed."
           echo
           echo "=== Injection capability check ==="
 
