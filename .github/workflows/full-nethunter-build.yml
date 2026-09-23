@@ -2270,17 +2270,29 @@ jobs:
             || true
 
           echo
-          echo "=== QCACLD3 Kbuild files ==="
 
+           echo "=== QCACLD3 Kbuild files ==="
+
+          echo
+          echo "=== WMA_OBJS definition ==="
+
+          grep -n -A35 -B5 \
+            '^WMA_OBJS' \
+            drivers/staging/qcacld-3.0/Kbuild \
+            || true
+
+          echo
           find drivers/staging/qcacld-3.0 \
             -type f \
             \( -name 'Kbuild' -o -name 'Makefile' \) \
             -print \
             | sort
+            
 
           echo
           echo "=== Inspection complete ==="
-          
+
+          exit 1
           
           
 
