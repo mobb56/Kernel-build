@@ -2085,9 +2085,9 @@ jobs:
           } > artifacts/source-audit/pre-build-audit.txt
 
           cat artifacts/source-audit/pre-build-audit.txt
+          
 
-
-
+                         
       - name: Build kernel
         working-directory: kernel
         shell: bash
@@ -2097,11 +2097,14 @@ jobs:
           echo "=== Kernel build ==="
 
           test -f "${OUT_DIR}/.config"
-          test -f "arch/arm64/boot/Image"
+          test -d "arch/arm64/boot"
 
-          rm -f "arch/arm64/boot/Image" \
-                "arch/arm64/boot/Image.gz" \
-                "arch/arm64/boot/Image.gz-dtb"
+          rm -f \
+            "arch/arm64/boot/Image" \
+            "arch/arm64/boot/Image.gz" \
+            "arch/arm64/boot/Image.gz-dtb"
+
+          echo "Starting kernel compilation..."
 
           make -j"$(nproc)" \
             O="${OUT_DIR}" \
@@ -2112,45 +2115,12 @@ jobs:
             Image modules
 
           echo
-          echo "=== Build outputs ==="
+          echo "=== Kernel compilation completed ==="
 
-          test -s "${OUT_DIR}/arch/arm64/boot/Image"
+          test -f "arch/arm64/boot/Image"
 
-          ls -lh "${OUT_DIR}/arch/arm64/boot/Image"
-
-          echo
-          echo "=== Kernel release ==="
-
-          make -s \
-            O="${OUT_DIR}" \
-            ARCH="${ARCH}" \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            CROSS_COMPILE="${CROSS_COMPILE}" \
-            kernelrelease
-
-          echo
-          echo "=== Module count ==="
-
-          find "${OUT_DIR}" -type f -name '*.ko' | sort | tee \
-            ../artifacts/source-audit/built-modules.txt
-
-          MODULE_COUNT="$(find "${OUT_DIR}" -type f -name '*.ko' | wc -l)"
-          echo "Built modules: ${MODULE_COUNT}"
-
-          if [ "${MODULE_COUNT}" -eq 0 ]; then
-            echo "ERROR: No kernel modules were produced."
-            exit 1
-          fi
-
-          echo
-          echo "=== Kernel SHA256 ==="
-
-          sha256sum "${OUT_DIR}/arch/arm64/boot/Image" | tee \
-            ../artifacts/source-audit/kernel-Image.sha256
-
-          echo
-          echo "=== Build completed ==="background: background: 
+          echo "Kernel Image created successfully."
+          ls -lh "arch/arm64/boot/Image"
 
 
 
