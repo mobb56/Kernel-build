@@ -1288,69 +1288,72 @@ jobs:
       # ============================================================
       # 32. INTEGRATE FRAME-INJECTION DEINITIALIZATION
       # ============================================================
-
       - name: Integrate frame-injection deinitialization
+        working-directory: kernel
         shell: bash
         run: |
-          set -euxo pipefail
-
-          cd kernel
+          set -euo pipefail
 
           MAIN_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
 
-          grep -n \
-            "hdd_adapter_feature_update_work_deinit(adapter)" \
-            "${MAIN_C}" \
-            | head -n 5
+          test -f "${MAIN_C}"
 
-          if grep -Fq \
-            "hdd_deinit_frame_injection(adapter);" \
-            "${MAIN_C}"; then
+          echo "=== Checking HDD deinitialization ==="
 
-            echo "Frame-injection deinitialization already integrated."
-
+          if grep -Fq 'hdd_deinit_frame_injection(adapter);' "${MAIN_C}"; then
+            echo "Frame-injection deinitialization already exists."
           else
+            COUNT="$(grep -Fc 'hdd_adapter_feature_update_work_deinit(adapter);' "${MAIN_C}" || true)"
 
-            python3 - "${MAIN_C}" <<'PY'
-          import pathlib
-          import sys
+            echo "hdd_adapter_feature_update_work_deinit occurrences: ${COUNT}"
 
-          path = pathlib.Path(sys.argv[1])
-          text = path.read_text()
+            if [ "${COUNT}" -ne 1 ]; then
+              echo "ERROR: expected exactly one deinitialization anchor."
+              exit 1
+            fi
 
-          anchor = "hdd_adapter_feature_update_work_deinit(adapter);"
-          call = """
-          #ifdef FEATURE_FRAME_INJECTION_SUPPORT
-                  hdd_deinit_frame_injection(adapter);
-          #endif
-          """
+            TMP_C="${MAIN_C}.tmp"
 
-          if call.strip() in text:
-              raise SystemExit(0)
+            awk '
+              BEGIN {
+                inserted = 0
+              }
 
-          count = text.count(anchor)
+              {
+                print
 
-          if count != 1:
-              raise SystemExit(
-                  f"ERROR: expected exactly one deinitialization anchor, found {count}"
-              )
+                if (!inserted &&
+                    $0 ~ /^[[:space:]]*hdd_adapter_feature_update_work_deinit\(adapter\);[[:space:]]*$/) {
+                  print ""
+                  print "#ifdef FEATURE_FRAME_INJECTION_SUPPORT"
+                  print "    hdd_deinit_frame_injection(adapter);"
+                  print "#endif"
+                  inserted = 1
+                }
+              }
 
-          text = text.replace(
-              anchor,
-              anchor + call,
-              1
-          )
+              END {
+                if (!inserted) {
+                  exit 1
+                }
+              }
+            ' "${MAIN_C}" > "${TMP_C}"
 
-          path.write_text(text)
-          PY
+            test -s "${TMP_C}"
+            mv "${TMP_C}" "${MAIN_C}"
 
+            echo "Frame-injection deinitialization inserted."
           fi
 
-          grep -n \
-            -A5 \
-            -B3 \
-            "hdd_deinit_frame_injection" \
+          echo
+          echo "=== Verifying frame-injection deinitialization ==="
+
+          grep -n -A3 -B3 \
+            'hdd_deinit_frame_injection(adapter);' \
             "${MAIN_C}"
+
+          echo
+          echo "=== Frame-injection deinitialization passed ==="
 
       # ============================================================
       # 33. APPLY 4.19 CAP_NET_RAW COMPATIBILITY
