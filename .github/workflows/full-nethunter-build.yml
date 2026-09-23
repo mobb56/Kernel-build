@@ -1091,95 +1091,82 @@ jobs:
       # ============================================================
 
       - name: Integrate injection context into HDD
+        working-directory: kernel
         shell: bash
         run: |
-          set -euxo pipefail
-
-          cd kernel
+          set -euo pipefail
 
           MAIN_H="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h"
 
           test -f "${MAIN_H}"
 
-          if grep -Fq \
-            "struct hdd_injection_ctx *injection_ctx;" \
-            "${MAIN_H}"; then
+          echo "=== Inspecting wlan_hdd_main.h ==="
 
-            echo "Injection context already present."
+          grep -n \
+            -E 'struct[[:space:]]+hdd_(adapter|context)|hdd_adapter_t|hdd_context_t' \
+            "${MAIN_H}" \
+            | head -80 || true
 
+          echo
+          echo "=== Searching for a safe injection-context location ==="
+
+          grep -n \
+            -E '^typedef struct|^struct hdd_|^#endif|^#define' \
+            "${MAIN_H}" \
+            | head -120 || true
+
+          echo
+          echo "=== Checking whether injection context already exists ==="
+
+          if grep -q 'struct hdd_injection_ctx' "${MAIN_H}"; then
+            echo "Injection context declaration already exists."
           else
+            echo "Injection context declaration is not present."
 
             python3 - "${MAIN_H}" <<'PY'
-          import pathlib
-          import sys
+            import pathlib
+            import sys
 
-          path = pathlib.Path(sys.argv[1])
-          text = path.read_text()
+             path = pathlib.Path(sys.argv[1])
+             text = path.read_text()
 
-          marker = "struct hdd_injection_ctx *injection_ctx;"
+                 declaration = """#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+                struct hdd_injection_ctx;
+                #endif
+                 """
 
-          if marker in text:
-              raise SystemExit(0)
+               if "struct hdd_injection_ctx;" in text:
+                raise SystemExit(0)
 
-          declaration = """
-          #ifdef FEATURE_FRAME_INJECTION_SUPPORT
-          struct hdd_injection_ctx;
-          #endif
-          """
+              # Insert before the final include-guard #endif.
+              lines = text.splitlines(True)
 
-          if declaration.strip() not in text:
-              anchor = "struct hdd_adapter;"
-              if anchor not in text:
-                  raise SystemExit(
-                      "ERROR: could not find wlan_hdd_main.h insertion anchor"
-                  )
-
-              text = text.replace(
-                  anchor,
-                  declaration + "\\n" + anchor,
-                  1
+            for i in range(len(lines) - 1, -1, -1):
+             if lines[i].strip() == "#endif":
+             lines.insert(i, "\n" + declaration + "\n")
+              path.write_text("".join(lines))
+                print(
+            f"Inserted injection context declaration "
+            f"before final #endif at line {i + 1}."
+             )
+            break
+          else:
+             raise SystemExit(
+             "ERROR: Could not find final #endif in wlan_hdd_main.h"
               )
-
-          # Find the HDD context structure and add the injection
-          # context pointer inside it.
-          structure_marker = "struct hdd_context"
-
-          start = text.find(structure_marker)
-
-          if start == -1:
-              raise SystemExit(
-                  "ERROR: could not locate struct hdd_context"
-              )
-
-          brace = text.find("{", start)
-
-          if brace == -1:
-              raise SystemExit(
-                  "ERROR: could not locate hdd_context opening brace"
-              )
-
-          insertion = """
-          #ifdef FEATURE_FRAME_INJECTION_SUPPORT
-                  struct hdd_injection_ctx *injection_ctx;
-          #endif
-
-          """
-
-          text = text[:brace + 1] + insertion + text[brace + 1:]
-
-          path.write_text(text)
-          PY
-
+               PY
           fi
 
           echo
-          echo "Checking injection context integration..."
+          echo "=== Verify injection context declaration ==="
 
           grep -n \
-            -A3 \
-            -B3 \
-            "hdd_injection_ctx" \
+            -A3 -B2 \
+            'struct hdd_injection_ctx' \
             "${MAIN_H}"
+
+          echo
+          echo "=== HDD header integration passed ==="
 
       # ============================================================
       # 30. INCLUDE FRAME-INJECTION API IN wlan_hdd_main.c
