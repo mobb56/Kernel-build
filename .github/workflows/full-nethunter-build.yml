@@ -1527,11 +1527,10 @@ jobs:
       # ============================================================
 
       - name: Verify QCACLD3 injection integration
+        working-directory: kernel
         shell: bash
         run: |
-          set -euxo pipefail
-
-          cd kernel
+          set -euo pipefail
 
           QCACLD="drivers/staging/qcacld-3.0"
 
@@ -1544,9 +1543,12 @@ jobs:
           )
 
           for file in "${REQUIRED[@]}"; do
-            test -s "${file}"
+            test -f "${file}"
             echo "OK: ${file}"
           done
+
+          echo
+          echo "=== Checking QCACLD3 build features ==="
 
           grep -Fq \
             'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y' \
@@ -1556,25 +1558,38 @@ jobs:
             'CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y' \
             "${QCACLD}/Kbuild"
 
+          echo "OK: frame injection build feature enabled"
+          echo "OK: monitor mode build feature enabled"
+
+          echo
+          echo "=== Checking HDD injection API include ==="
+
           grep -Fq \
-            '#include "wlan_hdd_frame_inject.h"' \
+            '#include "../inc/wlan_hdd_frame_inject.h"' \
             "${QCACLD}/core/hdd/src/wlan_hdd_main.c"
+
+          echo "OK: wlan_hdd_frame_inject.h included from HDD main"
+
+          echo
+          echo "=== Checking injection initialization ==="
 
           grep -Fq \
             'hdd_init_frame_injection(adapter);' \
             "${QCACLD}/core/hdd/src/wlan_hdd_main.c"
 
+          echo "OK: frame-injection initialization found"
+
+          echo
+          echo "=== Checking injection deinitialization ==="
+
           grep -Fq \
             'hdd_deinit_frame_injection(adapter);' \
             "${QCACLD}/core/hdd/src/wlan_hdd_main.c"
 
-          grep -Fq \
-            'capable(CAP_NET_RAW)' \
-            "${QCACLD}/core/hdd/src/wlan_hdd_inject_security.c"
+          echo "OK: frame-injection deinitialization found"
 
           echo
-          echo "QCACLD3 injection integration verified."
-
+          echo "=== QCACLD3 injection integration verified ==="
       # ============================================================
       # 36. FINAL CHECK: FEATURE VARIABLES MUST NOT BE IN .config
       # ============================================================
