@@ -1108,7 +1108,10 @@ jobs:
           )
 
 
-      - name: Inspect duplicate injection helpers
+
+
+
+      - name: Remove duplicate injection helper definitions
         working-directory: kernel
         shell: bash
         run: |
@@ -1120,20 +1123,97 @@ jobs:
           test -f "${FRAME_H}"
           test -f "${SECURITY_H}"
 
-          echo "=== frame_inject.h helpers ==="
-          sed -n '660,700p' "${FRAME_H}"
+          echo "=== Checking duplicate helpers ==="
 
-          echo
-          echo "=== inject_security.h helpers ==="
-          sed -n '155,180p' "${SECURITY_H}"
-
-          echo
-          echo "=== Helper locations ==="
           grep -n \
             'static inline QDF_STATUS hdd_get_injection_stats\|static inline QDF_STATUS hdd_reset_injection_stats' \
             "${FRAME_H}" \
             "${SECURITY_H}"
-            
+
+          echo
+          echo "=== Removing complete helper functions from frame-inject header ==="
+
+          perl - "${FRAME_H}" <<'PERL'
+          use strict;
+          use warnings;
+
+          my $file = shift;
+
+           open my $in, '<', $file or die "Cannot open $file: $!";
+           local $/;
+            my $text = <$in>;
+            close $in;
+
+            sub remove_function {
+            my ($text, $name) = @_;
+
+            my $start = index($text, "static inline QDF_STATUS $name");
+           die "ERROR: $name not found\n" if $start < 0;
+
+               my $brace = index($text, "{", $start);
+            die "ERROR: opening brace for $name not found\n" if $brace < 0;
+
+             my $depth = 0;
+             my $end = -1;
+
+             for (my $i = $brace; $i < length($text); $i++) {
+              my $c = substr($text, $i, 1);
+
+               if ($c eq "{") {
+                $depth++;
+              } elsif ($c eq "}") {
+            $depth--;
+
+            if ($depth == 0) {
+                $end = $i + 1;
+                last;
+                 }
+              }
+            }
+
+          die "ERROR: closing brace for $name not found\n" if $end < 0;
+
+           substr($text, $start, $end - $start, "");
+
+           return $text;
+           }
+
+             $text = remove_function($text, "hdd_get_injection_stats");
+              $text = remove_function($text, "hdd_reset_injection_stats");
+
+          open my $out, '>', $file or die "Cannot write $file: $!";
+          print $out $text;
+           close $out;
+            PERL
+
+          echo
+          echo "=== Verifying frame-inject header ==="
+
+          if grep -q \
+            'static inline QDF_STATUS hdd_get_injection_stats' \
+            "${FRAME_H}"; then
+            echo "ERROR: hdd_get_injection_stats still exists in frame_inject.h"
+            exit 1
+          fi
+
+          if grep -q \
+            'static inline QDF_STATUS hdd_reset_injection_stats' \
+            "${FRAME_H}"; then
+            echo "ERROR: hdd_reset_injection_stats still exists in frame_inject.h"
+            exit 1
+          fi
+
+          echo
+          echo "=== Verifying security header still owns the helpers ==="
+
+          grep -n \
+            'static inline QDF_STATUS hdd_get_injection_stats\|static inline QDF_STATUS hdd_reset_injection_stats' \
+            "${SECURITY_H}"
+
+          echo
+          echo "=== Duplicate injection helper fix passed ==="
+
+      
       # ============================================================
       # 29. ADD INJECTION CONTEXT TO wlan_hdd_main.h
       #
