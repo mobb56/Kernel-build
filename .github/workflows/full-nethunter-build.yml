@@ -1107,6 +1107,123 @@ jobs:
               -print
           )
 
+
+
+
+
+
+
+      - name: Prevent duplicate injection helper definitions
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FRAME_H="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h"
+          SECURITY_H="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_inject_security.h"
+
+          test -f "${FRAME_H}"
+          test -f "${SECURITY_H}"
+
+          echo "=== Checking duplicate injection helpers ==="
+
+          grep -n \
+            -E 'hdd_(get_injection_stats|reset_injection_stats)' \
+            "${FRAME_H}" \
+            "${SECURITY_H}"
+
+          python3 - "${FRAME_H}" "${SECURITY_H}" <<'PY'
+          import pathlib
+           import sys
+
+           paths = [pathlib.Path(x) for x in sys.argv[1:]]
+
+           start_marker = "static inline QDF_STATUS hdd_get_injection_stats"
+           second_marker = "static inline QDF_STATUS hdd_reset_injection_stats"
+
+            guard_start = "#ifndef WLAN_HDD_INJECTION_STATS_HELPERS"
+             guard_define = "#define WLAN_HDD_INJECTION_STATS_HELPERS"
+             guard_end = "#endif /* WLAN_HDD_INJECTION_STATS_HELPERS */"
+
+           def find_function_end(text, start):
+             brace = text.find("{", start)
+              if brace == -1:
+               raise SystemExit(
+            f"ERROR: could not find opening brace for helper at offset {start}"
+              )
+
+             depth = 0
+           for i in range(brace, len(text)):
+           if text[i] == "{":
+               depth += 1
+           elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+
+           raise SystemExit("ERROR: could not find end of helper function")
+
+            for path in paths:
+            text = path.read_text()
+
+            if guard_define in text:
+            print(f"{path}: guard already present.")
+               continue
+
+             first = text.find(start_marker)
+
+            if first == -1:
+              print(f"{path}: hdd_get_injection_stats not present.")
+               continue
+
+             second = text.find(second_marker, first)
+
+            if second == -1:
+               raise SystemExit(
+            f"ERROR: {path}: hdd_reset_injection_stats not found."
+                )
+
+             end = find_function_end(text, second)
+
+              block = text[first:end]
+
+             replacement = (
+              guard_start
+               + "\n"
+             + guard_define
+               + "\n"
+                + block
+                 + "\n"
+              + guard_end
+               )
+
+            text = text[:first] + replacement + text[end:]
+            path.write_text(text)
+
+           print(f"{path}: duplicate helper guard inserted.")
+
+             PY
+
+          echo
+          echo "=== Verifying helper guard ==="
+
+          grep -n \
+            -A3 -B2 \
+            'WLAN_HDD_INJECTION_STATS_HELPERS' \
+            "${FRAME_H}" \
+            "${SECURITY_H}"
+
+          echo
+          echo "=== Verifying both helpers ==="
+
+          grep -n \
+            'hdd_get_injection_stats\|hdd_reset_injection_stats' \
+            "${FRAME_H}" \
+            "${SECURITY_H}"
+
+          echo
+          echo "=== Duplicate injection helper protection passed ==="
+
       # ============================================================
       # 29. ADD INJECTION CONTEXT TO wlan_hdd_main.h
       #
