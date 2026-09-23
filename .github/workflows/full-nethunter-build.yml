@@ -1569,7 +1569,7 @@ jobs:
               'CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y' \
               >> "${KBUILD_FILE}"
 
-          else
+                                           else
 
             grep -Fq \
               'CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y' \
@@ -1578,11 +1578,29 @@ jobs:
                 'CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y' \
                 >> "${KBUILD_FILE}"
 
-          fi
+             fi
 
           echo
-          echo "Final QCACLD3 feature configuration:"
+          echo "=== Register WMA frame injection object ==="
 
+          if ! grep -Fq \
+            '$(WMA_SRC_DIR)/wma_frame_inject.o' \
+            "${KBUILD_FILE}"; then
+
+            sed -i \
+              '/^WMA_OBJS :=.*wma_main\.o/a\
+             $(WMA_SRC_DIR)/wma_frame_inject.o \\' \
+              "${KBUILD_FILE}"
+          fi
+
+          grep -n -A5 \
+            '^WMA_OBJS :=' \
+            "${KBUILD_FILE}"
+
+          echo "WMA frame injection object registered."
+
+          echo "Final QCACLD3 feature configuration:"
+          
           grep -nE \
             'FEATURE_FRAME_INJECTION_SUPPORT|FEATURE_MONITOR_MODE_SUPPORT' \
             "${KBUILD_FILE}"
@@ -2292,7 +2310,7 @@ jobs:
           echo
           echo "=== Inspection complete ==="
 
-          exit 1
+          
           
           
 
