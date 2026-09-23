@@ -1298,35 +1298,61 @@ jobs:
 
           test -f "${MAIN_C}"
 
-          echo "=== Locating all deinitialization anchors ==="
+          echo "=== Integrating frame-injection deinitialization ==="
 
-          grep -n -F \
-            'hdd_adapter_feature_update_work_deinit(adapter);' \
+          if grep -Fq 'hdd_deinit_frame_injection(adapter);' "${MAIN_C}"; then
+            echo "Frame-injection deinitialization already exists."
+          else
+            TMP_C="${MAIN_C}.tmp"
+
+            awk '
+              BEGIN {
+                in_close = 0
+                inserted = 0
+              }
+
+              /static void __hdd_close_adapter[[:space:]]*\(/ {
+                in_close = 1
+              }
+
+              {
+                print
+
+                if (in_close &&
+                    !inserted &&
+                    $0 ~ /^[[:space:]]*hdd_adapter_feature_update_work_deinit\(adapter\);[[:space:]]*$/) {
+                  print ""
+                  print "#ifdef FEATURE_FRAME_INJECTION_SUPPORT"
+                  print "    hdd_deinit_frame_injection(adapter);"
+                  print "#endif"
+                  inserted = 1
+                  in_close = 0
+                }
+              }
+
+              END {
+                if (!inserted) {
+                  exit 1
+                }
+              }
+            ' "${MAIN_C}" > "${TMP_C}"
+
+            test -s "${TMP_C}"
+            mv "${TMP_C}" "${MAIN_C}"
+
+            echo "Frame-injection deinitialization inserted."
+          fi
+
+          echo
+          echo "=== Verifying correct deinitialization location ==="
+
+          grep -n -A5 -B5 \
+            'hdd_deinit_frame_injection(adapter);' \
             "${MAIN_C}"
 
           echo
-          echo "=== Context around each deinitialization anchor ==="
-
-          while IFS=: read -r LINE _; do
-            echo
-            echo "----- Context around line ${LINE} -----"
-
-            START=$((LINE - 20))
-            END=$((LINE + 20))
-
-            if [ "${START}" -lt 1 ]; then
-              START=1
-            fi
-
-            sed -n "${START},${END}p" "${MAIN_C}"
-          done < <(
-            grep -n -F \
-              'hdd_adapter_feature_update_work_deinit(adapter);' \
-              "${MAIN_C}"
-          )
-
-          echo
-          echo "=== Deinitialization context inspection complete ==="
+          echo "=== Frame-injection deinitialization passed ==="
+          
       # ============================================================
       # 33. APPLY 4.19 CAP_NET_RAW COMPATIBILITY
       #
