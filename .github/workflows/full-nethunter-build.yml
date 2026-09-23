@@ -2113,6 +2113,35 @@ jobs:
 
           echo "=== Kernel build ==="
 
+          LLVM_BIN="${GITHUB_WORKSPACE}/llvm-bin"
+
+          test -d "${LLVM_BIN}"
+          test -x "${LLVM_BIN}/clang"
+          test -x "${LLVM_BIN}/ld.lld"
+          test -x "${LLVM_BIN}/llvm-ar"
+          test -x "${LLVM_BIN}/llvm-nm"
+          test -x "${LLVM_BIN}/llvm-objcopy"
+          test -x "${LLVM_BIN}/llvm-objdump"
+          test -x "${LLVM_BIN}/llvm-strip"
+          test -x "${LLVM_BIN}/llvm-readelf"
+
+          export PATH="${LLVM_BIN}:${PATH}"
+          hash -r
+
+          echo "=== LLVM tools visible to build ==="
+
+          command -v clang
+          command -v ld.lld
+          command -v llvm-ar
+          command -v llvm-nm
+          command -v llvm-objcopy
+          command -v llvm-objdump
+          command -v llvm-strip
+          command -v llvm-readelf
+
+          echo
+          llvm-objdump --version
+
           test -f "${OUT_DIR}/.config"
           test -d "arch/arm64/boot"
 
@@ -2121,6 +2150,7 @@ jobs:
             "arch/arm64/boot/Image.gz" \
             "arch/arm64/boot/Image.gz-dtb"
 
+          echo
           echo "Starting kernel compilation..."
 
           make -j"$(nproc)" \
