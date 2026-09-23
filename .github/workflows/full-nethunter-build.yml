@@ -1197,15 +1197,37 @@ jobs:
           test -f "${MAIN_C}"
           test -f "${INJECT_H}"
 
-          echo "=== Checking HDD injection header ==="
+          echo "=== Normalizing HDD injection header include ==="
 
-          if grep -Fq '#include "../inc/wlan_hdd_frame_inject.h"' "${MAIN_C}"; then
-            echo "Correct injection header include already exists."
-          else
-            sed -i \
-              's|#include "wlan_hdd_frame_inject.h"|#include "../inc/wlan_hdd_frame_inject.h"|' \
-              "${MAIN_C}"
-          fi
+          sed -i \
+            '/wlan_hdd_frame_inject\.h/d' \
+            "${MAIN_C}"
+
+          TMP_C="${MAIN_C}.tmp"
+
+          awk '
+            BEGIN {
+              inserted = 0
+            }
+
+            {
+              if (!inserted && $0 ~ /^#include[[:space:]]+/) {
+                print "#include \"../inc/wlan_hdd_frame_inject.h\""
+                inserted = 1
+              }
+
+              print
+            }
+
+            END {
+              if (!inserted) {
+                exit 1
+              }
+            }
+          ' "${MAIN_C}" > "${TMP_C}"
+
+          test -s "${TMP_C}"
+          mv "${TMP_C}" "${MAIN_C}"
 
           echo
           echo "=== Verifying HDD injection API include ==="
