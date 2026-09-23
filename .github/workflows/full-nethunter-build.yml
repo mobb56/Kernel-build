@@ -2183,7 +2183,7 @@ jobs:
           echo
           echo "Starting kernel compilation..."
 
-          make -j"$(nproc)" \
+            make -j2 \
             O="${OUT_DIR}" \
             ARCH="${ARCH}" \
             LLVM=1 \
