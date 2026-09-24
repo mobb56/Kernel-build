@@ -2352,7 +2352,36 @@ jobs:
             -print | sort || true
           
           
-          
+
+
+
+      - name: Inspect WMA injection include path
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== Reference WMA injection header ==="
+          find ../nethunter-reference/drivers/staging/qcacld-3.0 \
+            -type f \
+            -path '*/core/wma/inc/wma_frame_inject.h' \
+            -print
+
+          echo
+          echo "=== Reference WMA include-path settings ==="
+          grep -RniE \
+            'core/wma/inc|WMA_INC|wma_frame_inject.h' \
+            ../nethunter-reference/drivers/staging/qcacld-3.0/Kbuild \
+            ../nethunter-reference/drivers/staging/qcacld-3.0/core/wma \
+            2>/dev/null | head -80 || true
+
+          echo
+          echo "=== Current kernel WMA include-path settings ==="
+          grep -RniE \
+            'core/wma/inc|WMA_INC|wma_frame_inject.h' \
+            drivers/staging/qcacld-3.0/Kbuild \
+            drivers/staging/qcacld-3.0/core/wma \
+            2>/dev/null | head -80 || true
 
                          
       - name: Build kernel
