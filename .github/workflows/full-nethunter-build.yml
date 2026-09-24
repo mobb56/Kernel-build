@@ -1590,8 +1590,31 @@ jobs:
           EOF
           fi
 
+
+                echo
+              echo "=== Register HDD frame injection object ==="
+
+            if ! grep -Fq \
+           'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
+           "${KBUILD_FILE}"; then
+ 
+                printf '\n# NetHunter HDD frame injection object\n' >> "${KBUILD_FILE}"
+                printf 'ifeq ($(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT), y)\n' >> "${KBUILD_FILE}"
+                 printf 'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o\n' >> "${KBUILD_FILE}"
+                 printf 'endif\n' >> "${KBUILD_FILE}"
+                 fi
+
                echo
-               echo "=== Register WMA frame injection object ==="
+               echo "=== Verify HDD frame injection object ==="
+
+                 grep -n -B2 -A4 \
+               'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
+                "${KBUILD_FILE}"
+
+                echo "HDD frame injection object registered."
+
+                  echo
+                  echo "=== Register WMA frame injection object ==="
 
              # Remove only an unconditional object-registration line, if present.
              sed -i \
