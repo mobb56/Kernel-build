@@ -1590,48 +1590,49 @@ jobs:
           EOF
           fi
 
-          echo
-          echo "=== Register WMA frame injection object ==="
+           echo
+          echo "=== Register WMA frame injection object and feature flag ==="
 
-          # Remove any unconditional registration previously inserted
-          # by this workflow.
+          # Remove the unconditional object registration if present.
           sed -i \
             '/^[[:space:]]*\$(WMA_SRC_DIR)\/wma_frame_inject\.o[[:space:]]*\\$/d' \
             "${KBUILD_FILE}"
 
-          # Remove an old conditional block if this workflow already
-          # inserted one, so it can be recreated cleanly.
+          # Remove an old copy of our conditional registration if present.
           sed -i \
             '/^ifeq ($(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT), y)$/,/^endif$/d' \
             "${KBUILD_FILE}"
 
-          # Match the NetHunter reference structure:
-          # the WMA injection object is compiled only when the
-          # frame-injection feature is enabled.
+          # The WMA injection source contains the real implementations.
+          # Its header provides fallback static-inline implementations
+          # only when FEATURE_FRAME_INJECTION_SUPPORT is not defined.
+          #
+          # Therefore the feature define MUST be present in WMA's
+          # compiler flags before wma_frame_inject.c is compiled.
           sed -i \
             '/^WMA_OBJS :=/a\
           ifeq ($(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT), y)\
+          ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT\
           WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o\
           endif' \
             "${KBUILD_FILE}"
 
           echo
-          echo "=== Verify WMA frame injection registration ==="
+          echo "=== Verify WMA injection registration ==="
 
-          grep -n -B2 -A4 \
+          grep -n -B2 -A5 \
             'wma_frame_inject\.o' \
             "${KBUILD_FILE}"
 
           echo
-          echo "=== Final QCACLD3 feature configuration ==="
+          echo "=== Verify WMA feature compiler define ==="
 
-          grep -n -E \
-            'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT|CONFIG_FEATURE_MONITOR_MODE_SUPPORT|FEATURE_FRAME_INJECTION_SUPPORT|FEATURE_MONITOR_MODE_SUPPORT' \
+          grep -n -B2 -A4 \
+            'DFEATURE_FRAME_INJECTION_SUPPORT' \
             "${KBUILD_FILE}"
 
           echo
-          echo "WMA frame injection object registered conditionally."
-
+          echo "WMA injection object and compiler feature registered."
 
 
 
@@ -1669,7 +1670,7 @@ jobs:
           echo "WMA collision inspection complete."
           
 
-          exit 1
+          
 
 
       - name: Fix WMA injection include path
