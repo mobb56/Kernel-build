@@ -1638,16 +1638,22 @@ jobs:
           echo
           echo "=== Register HDD frame injection object ==="
 
+          # Remove any previous registration.
+          sed -i \
+            '\|HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o|d' \
+            "${KBUILD_FILE}"
+
           HDD_OBJS_LINE="$(
-            grep -nF \
-              'OBJS := $(HDD_OBJS)' \
-              "${KBUILD_FILE}" |
-            head -n1 |
-            cut -d: -f1
+            awk '
+              index($0, "$(HDD_OBJS)") {
+                print NR
+                exit
+              }
+            ' "${KBUILD_FILE}"
           )"
 
           if [ -z "${HDD_OBJS_LINE}" ]; then
-            echo "ERROR: OBJS := \$(HDD_OBJS) was not found."
+            echo "ERROR: HDD OBJS aggregation point was not found."
             grep -nF '$(HDD_OBJS)' "${KBUILD_FILE}" || true
             exit 1
           fi
@@ -1658,30 +1664,24 @@ jobs:
             "${HDD_OBJS_LINE}i HDD_OBJS += \$(HDD_SRC_DIR)/wlan_hdd_frame_inject.o" \
             "${KBUILD_FILE}"
 
-          # ------------------------------------------------------------
-          # Register WMA frame injection object.
-          #
-          # The existing Kbuild uses:
-          #
-          #     OBJS := $(WMA_OBJS)
-          #
-          # We insert the injection object immediately before that
-          # aggregation point.
-          # ------------------------------------------------------------
-
           echo
           echo "=== Register WMA frame injection object ==="
 
+          sed -i \
+            '\|WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o|d' \
+            "${KBUILD_FILE}"
+
           WMA_OBJS_LINE="$(
-            grep -nF \
-              'OBJS := $(WMA_OBJS)' \
-              "${KBUILD_FILE}" |
-            head -n1 |
-            cut -d: -f1
+            awk '
+              index($0, "$(WMA_OBJS)") {
+                print NR
+                exit
+              }
+            ' "${KBUILD_FILE}"
           )"
 
           if [ -z "${WMA_OBJS_LINE}" ]; then
-            echo "ERROR: OBJS := \$(WMA_OBJS) was not found."
+            echo "ERROR: WMA OBJS aggregation point was not found."
             grep -nF '$(WMA_OBJS)' "${KBUILD_FILE}" || true
             exit 1
           fi
@@ -1691,6 +1691,48 @@ jobs:
           sed -i \
             "${WMA_OBJS_LINE}i WMA_OBJS += \$(WMA_SRC_DIR)/wma_frame_inject.o" \
             "${KBUILD_FILE}"
+
+          echo
+          echo "=== Verify injection object registration ==="
+
+          HDD_INJECT_COUNT="$(
+            grep -Fc \
+              'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
+              "${KBUILD_FILE}"
+          )"
+
+          WMA_INJECT_COUNT="$(
+            grep -Fc \
+              'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \
+              "${KBUILD_FILE}"
+          )"
+
+          if [ "${HDD_INJECT_COUNT}" -ne 1 ]; then
+            echo "ERROR: HDD injection object count = ${HDD_INJECT_COUNT}"
+            exit 1
+          fi
+
+          if [ "${WMA_INJECT_COUNT}" -ne 1 ]; then
+            echo "ERROR: WMA injection object count = ${WMA_INJECT_COUNT}"
+            exit 1
+          fi
+
+          echo
+          echo "=== HDD injection placement ==="
+
+          grep -n -B3 -A3 \
+            -F 'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
+            "${KBUILD_FILE}"
+
+          echo
+          echo "=== WMA injection placement ==="
+
+          grep -n -B3 -A3 \
+            -F 'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \
+            "${KBUILD_FILE}"
+
+          echo
+          echo "QCACLD3 injection Kbuild configuration complete."
 
           # ------------------------------------------------------------
           # Verify that each custom object is registered exactly once.
