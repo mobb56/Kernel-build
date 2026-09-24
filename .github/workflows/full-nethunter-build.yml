@@ -3354,44 +3354,58 @@ jobs:
 
 
       
-      - name: Locate all get_task_cred references
-        if: always()
+      - name: Apply 4.19 injection capability compatibility
         working-directory: kernel
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "=== ALL QCACLD3 get_task_cred REFERENCES ==="
+          FILE="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c"
 
-          grep -Rni \
-            --exclude-dir=.git \
-            'get_task_cred' \
-            drivers/staging/qcacld-3.0 \
-            || true
+          test -f "${FILE}"
 
-          echo
-          echo "=== ALL QCACLD3 put_cred REFERENCES ==="
+          echo "=== Removing unavailable get_task_cred() API ==="
 
-          grep -Rni \
-            --exclude-dir=.git \
-            'put_cred' \
-            drivers/staging/qcacld-3.0 \
-            || true
+          # Remove the unused credential declaration.
+          sed -i \
+            '/^[[:space:]]*const struct cred \*cred;[[:space:]]*$/d' \
+            "${FILE}"
 
-          echo
-          echo "=== KERNEL CREDENTIAL EXPORT ==="
+          # Remove the obsolete credential lookup and NULL check.
+          sed -i \
+            '/^[[:space:]]*\/\* Get task credentials \*\/$/,/^[[:space:]]*}[[:space:]]*$/d' \
+            "${FILE}"
 
-          grep -Rni \
-            --include='*.c' \
-            --include='*.h' \
-            'EXPORT_SYMBOL.*get_task_cred' \
-            kernel include \
-            || true
+          # Remove the matching credential release.
+          sed -i \
+            '/^[[:space:]]*put_cred(cred);[[:space:]]*$/d' \
+            "${FILE}"
 
           echo
-          echo "=== COMPLETE ==="
+          echo "=== Verify credential API removal ==="
 
-          exit 1
+          if grep -n \
+            -E 'get_task_cred|put_cred|const struct cred' \
+            "${FILE}"; then
+            echo "ERROR: obsolete credential API references remain."
+            exit 1
+          fi
+
+          echo
+          echo "=== Verify CAP_NET_RAW check remains ==="
+
+          grep -n -F \
+            'has_capability = capable(CAP_NET_RAW);' \
+            "${FILE}"
+
+          echo
+          echo "=== Verify injection capability function ==="
+
+          sed -n '/hdd_check_injection_capability/,/^}/p' \
+            "${FILE}" | head -80
+
+          echo
+          echo "4.19 injection capability compatibility applied."
 
           
 
