@@ -2819,6 +2819,39 @@ jobs:
           echo "HDD injection registration inspection complete."
 
 
+
+
+
+
+      - name: Inspect HDD object list placement
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          KBUILD_FILE="drivers/staging/qcacld-3.0/Kbuild"
+
+          echo "=== HDD object list definitions ==="
+          grep -n -E \
+            'HDD_OBJS|wlan_hdd_frame_inject\.o|wlan_hdd_main\.o' \
+            "${KBUILD_FILE}" || true
+
+          echo
+          echo "=== HDD module construction area ==="
+          grep -n -B5 -A15 \
+            'HDD_OBJS := \$\(HDD_OBJS\)' \
+            "${KBUILD_FILE}" || true
+
+          echo
+          echo "=== HDD injection registration ==="
+          grep -n -B5 -A8 \
+            'wlan_hdd_frame_inject\.o' \
+            "${KBUILD_FILE}" || true
+
+          echo
+          echo "HDD object placement inspection complete."
+
+
           
                          
       - name: Build kernel
