@@ -2481,6 +2481,37 @@ jobs:
             drivers/staging/qcacld-3.0/Kbuild \
             | sed -n '1,140p'
 
+
+
+
+      - name: Locate WMA include flag application
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== Reference WMA_INC references ==="
+          grep -RniF \
+            'WMA_INC' \
+            ../nethunter-reference/drivers/staging/qcacld-3.0 \
+            2>/dev/null | head -120 || true
+
+          echo
+          echo "=== Current WMA_INC references ==="
+          grep -RniF \
+            'WMA_INC' \
+            drivers/staging/qcacld-3.0 \
+            2>/dev/null | head -120 || true
+
+          echo
+          echo "=== Reference WMA include flags in Makefiles ==="
+          grep -RniE \
+            'ccflags-y|subdir-ccflags-y|EXTRA_CFLAGS|CFLAGS_' \
+            ../nethunter-reference/drivers/staging/qcacld-3.0 \
+            --include='Kbuild' \
+            --include='Makefile' \
+            2>/dev/null | grep -E 'WMA|INC' | head -120 || true
+
                          
       - name: Build kernel
         working-directory: kernel
