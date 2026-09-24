@@ -1539,6 +1539,11 @@ jobs:
             "capable(CAP_NET_RAW)" \
             "${SECURITY_C}"
 
+
+
+
+            
+
       # ============================================================
       # 34. ENABLE QCACLD3 MONITOR MODE + FRAME INJECTION IN KBUILD
       #
@@ -1634,6 +1639,49 @@ jobs:
 
           echo
           echo "QCACLD3 injection Kbuild configuration complete."
+
+
+
+
+                        
+
+      - name: Inspect exact HDD Kbuild structure
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          KBUILD_FILE="drivers/staging/qcacld-3.0/Kbuild"
+
+          echo "=== ALL HDD OBJECT REFERENCES ==="
+          grep -n -E \
+            'HDD_OBJS|wlan_hdd_main\.o|wlan_hdd_frame_inject\.o' \
+            "${KBUILD_FILE}" || true
+
+          echo
+          echo "=== HDD MAIN OBJECT CONTEXT ==="
+          grep -n -B8 -A12 \
+            'wlan_hdd_main\.o' \
+            "${KBUILD_FILE}" || true
+
+          echo
+          echo "=== HDD FRAME INJECTION OBJECT CONTEXT ==="
+          grep -n -B8 -A8 \
+            'wlan_hdd_frame_inject\.o' \
+            "${KBUILD_FILE}" || true
+
+          echo
+          echo "=== ALL HDD_OBJS DEFINITIONS ==="
+          grep -n -E \
+            '^[[:space:]]*HDD_OBJS|HDD_OBJS[[:space:]]*[:+?]?=' \
+            "${KBUILD_FILE}" || true
+
+          echo
+          echo "=== DIAGNOSTIC COMPLETE ==="
+
+          exit 1
+
+          
                     
 
       - name: Inspect WMA injection header/source collision
@@ -1668,9 +1716,9 @@ jobs:
 
           echo
           echo "WMA collision inspection complete."
-          
 
-          
+
+
 
 
       - name: Fix WMA injection include path
