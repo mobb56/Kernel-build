@@ -1589,25 +1589,34 @@ jobs:
           sed -i \
             '\|HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o|d' \
             "${KBUILD_FILE}"
-
+            
+          echo
           echo "=== Locate HDD OBJS aggregation point ==="
 
-          if ! grep -Eq \
-            '^[[:space:]]*OBJS[[:space:]]*:=[[:space:]]*\$\(HDD_OBJS\)[[:space:]]*$' \
-            "${KBUILD_FILE}"; then
+          if ! awk '
+            $0 == "OBJS := $(HDD_OBJS)" { found=1 }
+            END { exit(found ? 0 : 1) }
+          ' "${KBUILD_FILE}"; then
             echo "ERROR: HDD OBJS aggregation point was not found."
-            grep -n -E \
-              'OBJS[[:space:]]*:=[[:space:]]*\$\(HDD_OBJS\)' \
-              "${KBUILD_FILE}" || true
+            grep -nF 'OBJS := $(HDD_OBJS)' "${KBUILD_FILE}" || true
             exit 1
           fi
 
+          # Insert immediately before the exact aggregation line.
+          awk '
+            $0 == "OBJS := $(HDD_OBJS)" {
+              print "HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o"
+            }
+            { print }
+          ' "${KBUILD_FILE}" > "${KBUILD_FILE}.tmp"
+
+          mv "${KBUILD_FILE}.tmp" "${KBUILD_FILE}"
+
           # Register the injection object immediately before HDD_OBJS
           # is converted into the module object list.
-          sed -i \
-            '/^[[:space:]]*OBJS[[:space:]]*:=[[:space:]]*\$(HDD_OBJS)[[:space:]]*$/i\
-           HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
-            "${KBUILD_FILE}"
+
+          
+          
 
           echo
           echo "=== Verify HDD placement ==="
