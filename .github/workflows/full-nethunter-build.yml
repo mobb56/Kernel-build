@@ -1590,37 +1590,34 @@ jobs:
           EOF
           fi
 
-             echo
-             echo "=== Register WMA frame injection object ==="
+               echo
+               echo "=== Register WMA frame injection object ==="
 
-            # Remove only an unconditional object-registration line, if present.
-          sed -i \
-           '/^[[:space:]]*\$(WMA_SRC_DIR)\/wma_frame_inject\.o[[:space:]]*\\$/d' \
-           "${KBUILD_FILE}"
+             # Remove only an unconditional object-registration line, if present.
+             sed -i \
+            '/^[[:space:]]*\$(WMA_SRC_DIR)\/wma_frame_inject\.o[[:space:]]*\\$/d' \
+              "${KBUILD_FILE}"
 
-           # Add the injection object as a separate top-level conditional.
-          if ! grep -Fq \
-          'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \
-           "${KBUILD_FILE}"; then
+              # Add the injection object as a separate top-level conditional.
+               if ! grep -Fq \
+              'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \
+               "${KBUILD_FILE}"; then
 
-          cat >> "${KBUILD_FILE}" <<'EOF'
+             printf '\n# NetHunter WMA frame injection object\n' >> "${KBUILD_FILE}"
+             printf 'ifeq ($(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT), y)\n' >> "${KBUILD_FILE}"
+             printf 'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o\n' >> "${KBUILD_FILE}"
+             printf 'endif\n' >> "${KBUILD_FILE}"
+             fi
 
-           # NetHunter WMA frame injection object
-          ifeq ($(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT), y)
-           WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o
-           endif
-           EOF
-            fi
+            echo
+            echo "=== Verify WMA injection object registration ==="
 
-           echo
-           echo "=== Verify WMA injection object registration ==="
-
-          grep -n -B2 -A4 \
+           grep -n -B2 -A4 \
           'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \
           "${KBUILD_FILE}"
 
            echo
-           echo "WMA injection object registered."
+             echo "WMA injection object registered."
 
       - name: Inspect WMA injection header/source collision
         working-directory: kernel
