@@ -1646,6 +1646,7 @@ jobs:
                         
 
       - name: Inspect exact HDD Kbuild structure
+        if: always()
         working-directory: kernel
         shell: bash
         run: |
