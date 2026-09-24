@@ -1580,8 +1580,9 @@ jobs:
               'ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT' \
               >> "${KBUILD_FILE}"
           fi
-
-                          echo
+                                
+                                    
+          echo
           echo "=== Register HDD frame injection object ==="
 
           # Remove any previous registration.
@@ -1589,16 +1590,22 @@ jobs:
             '\|HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o|d' \
             "${KBUILD_FILE}"
 
-          # Insert the injection object immediately before HDD_OBJS
-          # is consumed by the module object list.
-          if ! grep -Fq 'OBJS := $(HDD_OBJS)' "${KBUILD_FILE}"; then
+          echo "=== Locate HDD OBJS aggregation point ==="
+
+          if ! grep -Eq \
+            '^[[:space:]]*OBJS[[:space:]]*:=[[:space:]]*\$\(HDD_OBJS\)[[:space:]]*$' \
+            "${KBUILD_FILE}"; then
             echo "ERROR: HDD OBJS aggregation point was not found."
-            grep -n -F '$(HDD_OBJS)' "${KBUILD_FILE}" || true
+            grep -n -E \
+              'OBJS[[:space:]]*:=[[:space:]]*\$\(HDD_OBJS\)' \
+              "${KBUILD_FILE}" || true
             exit 1
           fi
 
+          # Register the injection object immediately before HDD_OBJS
+          # is converted into the module object list.
           sed -i \
-            '/^[[:space:]]*OBJS[[:space:]]*:=.*$(HDD_OBJS)/i\
+            '/^[[:space:]]*OBJS[[:space:]]*:=[[:space:]]*\$(HDD_OBJS)[[:space:]]*$/i\
            HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
             "${KBUILD_FILE}"
 
@@ -1620,8 +1627,8 @@ jobs:
             -F 'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
             "${KBUILD_FILE}"
 
+          echo
           echo "HDD frame injection object registered correctly."
-
 
                  
           
