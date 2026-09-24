@@ -1108,11 +1108,10 @@ jobs:
           )
 
 
-             mkdir -p drivers/staging/qcacld-3.0/core/wma/inc
+          mkdir -p drivers/staging/qcacld-3.0/core/wma/inc
 
-            cp ../nethunter-reference/drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h \
-           drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h
-
+          cp "${GITHUB_WORKSPACE}/nethunter-reference/drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h" \
+          drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h
 
 
       - name: Remove duplicate injection helper definitions
