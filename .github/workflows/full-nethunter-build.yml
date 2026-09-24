@@ -3348,7 +3348,7 @@ jobs:
           echo
           echo "=== get_task_cred COMPATIBILITY INSPECTION COMPLETE ==="
 
-            exit 1
+          
 
 
 
