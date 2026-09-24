@@ -2388,6 +2388,42 @@ jobs:
             drivers/staging/qcacld-3.0/core/wma \
             2>/dev/null | head -80 || true
 
+
+
+
+
+
+      - name: Inspect WMA compiler include flags
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== WMA include directory ==="
+          grep -RniE \
+            'WMA_INC_DIR|WMA_INC[[:space:]]*=' \
+            drivers/staging/qcacld-3.0/Kbuild \
+            drivers/staging/qcacld-3.0/core/wma \
+            2>/dev/null | head -80 || true
+
+          echo
+          echo "=== WMA compiler include flags ==="
+          grep -RniE \
+            'ccflags-y|subdir-ccflags-y|EXTRA_CFLAGS|cflags-y' \
+            drivers/staging/qcacld-3.0/core/wma \
+            2>/dev/null | head -120 || true
+
+          echo
+          echo "=== Header actually present ==="
+          ls -l \
+            drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h
+
+          echo
+          echo "=== Source directory ==="
+          ls -la \
+            drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c \
+            drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h
+
                          
       - name: Build kernel
         working-directory: kernel
