@@ -867,6 +867,32 @@ jobs:
           echo
           echo "Kconfig dependency resolution completed."
 
+
+
+
+      - name: Set clean kernel release
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CONFIG="${OUT_DIR}/.config"
+
+          echo "=== Set clean kernel release ==="
+
+          scripts/config \
+            --disable LOCALVERSION_AUTO \
+            --set-str LOCALVERSION "-perf"
+
+          echo
+          echo "Final local-version settings:"
+          grep -E '^CONFIG_(LOCALVERSION|LOCALVERSION_AUTO)=' "${CONFIG}"
+
+          grep -Fxq 'CONFIG_LOCALVERSION="-perf"' "${CONFIG}"
+          grep -Fxq '# CONFIG_LOCALVERSION_AUTO is not set' "${CONFIG}"
+
+          echo "Clean kernel release configuration applied."
+
       # ============================================================
       # 24. VERIFY NETHUNTER CONFIGURATION
       # ============================================================
@@ -2401,34 +2427,35 @@ jobs:
       # ============================================================
 
       - name: Verify kernel release configuration
+        working-directory: kernel
         shell: bash
         run: |
-          set -euxo pipefail
-
-          cd kernel
+          set -euo pipefail
 
           CONFIG="${OUT_DIR}/.config"
 
-          echo "Kernel local-version configuration:"
-
-          grep -E \
-            '^CONFIG_(LOCALVERSION|LOCALVERSION_AUTO)=' \
-            "${CONFIG}"
+          echo "=== Kernel local-version configuration ==="
+          grep -E '^CONFIG_(LOCALVERSION|LOCALVERSION_AUTO)=' "${CONFIG}" \
+            || true
+          grep -E '^# CONFIG_LOCALVERSION_AUTO is not set$' "${CONFIG}" \
+            || true
 
           echo
-          echo "Stock configuration values:"
+          echo "=== Stock configuration reference ==="
+          grep -E '^CONFIG_(LOCALVERSION|LOCALVERSION_AUTO)=' \
+            "${GITHUB_WORKSPACE}/cebu-stock.config" \
+            || true
 
-          grep -E \
-            '^CONFIG_(LOCALVERSION|LOCALVERSION_AUTO)=' \
-            "${GITHUB_WORKSPACE}/cebu-stock.config"
+          echo
+          echo "=== Required final configuration ==="
 
-          # The stock config uses:
-          #
-          # CONFIG_LOCALVERSION="-perf"
-          # CONFIG_LOCALVERSION_AUTO=y
-          #
-          # At this stage we deliberately do not alter either value.
-          # The resulting kernel release will be checked later.
+          grep -Fxq 'CONFIG_LOCALVERSION="-perf"' "${CONFIG}"
+          grep -Fxq '# CONFIG_LOCALVERSION_AUTO is not set' "${CONFIG}"
+
+          echo
+          echo "Final kernel local-version configuration is correct."
+          echo "Expected release suffix: -perf"
+          echo "CONFIG_LOCALVERSION_AUTO: disabled"
 
       # ============================================================
       # 43. VERIFY MODVERSIONS
@@ -4008,14 +4035,22 @@ jobs:
             "${ARTIFACT_DIR}/kernel-Image.sha256"
 
           echo
-          echo "=== Generate artifact checksums ==="
+            echo "=== Generate artifact checksums ==="
 
-          (
+              (
             cd "${ARTIFACT_DIR}"
-            find . -type f -print0 \
-              | sort -z \
-              | xargs -0 sha256sum
-          ) > "${ARTIFACT_DIR}/SHA256SUMS"
+          find . \
+            -type f \
+            ! -name 'SHA256SUMS' \
+           -print0 \
+           | sort -z \
+            | xargs -0 sha256sum
+           ) > "${ARTIFACT_DIR}/SHA256SUMS"
+
+             test -s "${ARTIFACT_DIR}/SHA256SUMS"
+
+            echo "=== SHA256SUMS ==="
+           cat "${ARTIFACT_DIR}/SHA256SUMS"
 
           echo
           echo "=== Generate artifact manifest ==="
