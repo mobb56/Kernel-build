@@ -3078,6 +3078,44 @@ jobs:
           echo "HDD Kbuild structure inspection complete."
 
 
+
+
+      - name: Inspect HDD adapter injection context
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MAIN_H="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h"
+
+          echo "=== HDD adapter definition ==="
+
+          grep -n -B10 -A80 \
+            'struct hdd_adapter' \
+            "${MAIN_H}" || true
+
+          echo
+          echo "=== injection_ctx declarations ==="
+
+          grep -Rni \
+            'injection_ctx' \
+            drivers/staging/qcacld-3.0/core/hdd \
+            | head -100 || true
+
+          echo
+          echo "=== Injection context structure ==="
+
+          grep -Rni -B5 -A20 \
+            'struct hdd_injection_ctx' \
+            drivers/staging/qcacld-3.0/core/hdd \
+            | head -100 || true
+
+          echo
+          echo "=== HDD adapter injection-context inspection complete ==="
+
+          exit 1
+
+
           
                          
       - name: Build kernel
