@@ -2512,6 +2512,39 @@ jobs:
             --include='Makefile' \
             2>/dev/null | grep -E 'WMA|INC' | head -120 || true
 
+
+
+
+
+      - name: Inspect QCACLD3 INCS definition
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== Reference INCS definitions ==="
+          grep -nE \
+            '^[[:space:]]*INCS[[:space:]]*[:+]?=' \
+            ../nethunter-reference/drivers/staging/qcacld-3.0/Kbuild \
+            || true
+
+          echo
+          echo "=== Reference INCS usage around WMA ==="
+          sed -n '2275,2330p' \
+            ../nethunter-reference/drivers/staging/qcacld-3.0/Kbuild
+
+          echo
+          echo "=== Current INCS definitions ==="
+          grep -nE \
+            '^[[:space:]]*INCS[[:space:]]*[:+]?=' \
+            drivers/staging/qcacld-3.0/Kbuild \
+            || true
+
+          echo
+          echo "=== Current INCS usage around WMA ==="
+          sed -n '2275,2330p' \
+            drivers/staging/qcacld-3.0/Kbuild
+
                          
       - name: Build kernel
         working-directory: kernel
