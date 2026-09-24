@@ -1580,7 +1580,8 @@ jobs:
               'ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT' \
               >> "${KBUILD_FILE}"
           fi
-          echo
+
+                          echo
           echo "=== Register HDD frame injection object ==="
 
           # Remove any previous registration.
@@ -1588,29 +1589,18 @@ jobs:
             '\|HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o|d' \
             "${KBUILD_FILE}"
 
-          # Verify the real anchor exists.
-          if ! grep -Fq \
-            'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_epio.o' \
-            "${KBUILD_FILE}"; then
-            echo "ERROR: wlan_hdd_epio.o anchor was not found."
-            grep -n -F \
-              'wlan_hdd_epio.o' \
-              "${KBUILD_FILE}" || true
+          # Insert the injection object immediately before HDD_OBJS
+          # is consumed by the module object list.
+          if ! grep -Fq 'OBJS := $(HDD_OBJS)' "${KBUILD_FILE}"; then
+            echo "ERROR: HDD OBJS aggregation point was not found."
+            grep -n -F '$(HDD_OBJS)' "${KBUILD_FILE}" || true
             exit 1
           fi
 
-          # Insert the injection object immediately after the
-          # existing wlan_hdd_epio.o entry.
-          awk '
-            index($0, "HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_epio.o") {
-              print
-              print "HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o"
-              next
-            }
-            { print }
-          ' "${KBUILD_FILE}" > "${KBUILD_FILE}.tmp"
-
-          mv "${KBUILD_FILE}.tmp" "${KBUILD_FILE}"
+          sed -i \
+            '/^[[:space:]]*OBJS[[:space:]]*:=.*$(HDD_OBJS)/i\
+           HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
+            "${KBUILD_FILE}"
 
           echo
           echo "=== Verify HDD placement ==="
@@ -1631,6 +1621,10 @@ jobs:
             "${KBUILD_FILE}"
 
           echo "HDD frame injection object registered correctly."
+
+
+                 
+          
           echo
           echo "=== Register WMA frame injection object ==="
 
