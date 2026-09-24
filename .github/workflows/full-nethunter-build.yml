@@ -2324,11 +2324,17 @@ jobs:
             drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c
 
           echo
-          echo "=== All frame-injection headers in kernel tree ==="
+          echo "=== Frame-injection headers in kernel tree ==="
           find drivers/staging/qcacld-3.0 \
             -type f \
-            \( -name '*frame*inject*.h' -o -name 'wlan_frame_inject.h' \) \
+            \( -name '*frame*inject*.h' -o -name 'wma_frame_inject.h' \) \
             -print | sort
+            
+
+          echo
+          echo "=== Frame-injection includes used by WMA source ==="
+          grep -nE '^#include .*frame_inject.*\.h' \
+            drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c || true
 
           echo
           echo "=== Include directories containing injection headers ==="
@@ -2339,12 +2345,11 @@ jobs:
             grep -E 'frame_inject|inject_security|frame_validate' || true
 
           echo
-          echo "=== Reference header ==="
+           echo "=== Reference WMA frame-injection header ==="
           find ../nethunter-reference/drivers/staging/qcacld-3.0 \
             -type f \
-            -name 'wlan_frame_inject.h' \
+            -name 'wma_frame_inject.h' \
             -print | sort || true
-
           
           
           
