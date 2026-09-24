@@ -2424,6 +2424,37 @@ jobs:
             drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c \
             drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h
 
+
+
+
+
+
+      - name: Inspect WMA include flag usage
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== Reference WMA_INC usage ==="
+          grep -RniF \
+            '$(WMA_INC)' \
+            ../nethunter-reference/drivers/staging/qcacld-3.0 \
+            2>/dev/null | head -80 || true
+
+          echo
+          echo "=== Current WMA_INC usage ==="
+          grep -RniF \
+            '$(WMA_INC)' \
+            drivers/staging/qcacld-3.0 \
+            2>/dev/null | head -80 || true
+
+          echo
+          echo "=== Reference WMA include definitions ==="
+          grep -RniE \
+            'WMA_INC_DIR|WMA_INC[[:space:]]*[:+]?=' \
+            ../nethunter-reference/drivers/staging/qcacld-3.0 \
+            2>/dev/null | head -80 || true
+
                          
       - name: Build kernel
         working-directory: kernel
