@@ -3202,7 +3202,7 @@ jobs:
           echo
           echo "=== Exact HDD adapter member inspection complete ==="
 
-          exit 1
+          
 
       
                          
