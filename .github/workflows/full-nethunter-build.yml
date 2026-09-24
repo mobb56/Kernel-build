@@ -2887,6 +2887,38 @@ jobs:
 
 
 
+      - name: Inspect HDD injection object symbols
+        if: always()
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          OBJ="${OUT_DIR}/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.o"
+          CMD="${OUT_DIR}/drivers/staging/qcacld-3.0/core/hdd/src/.wlan_hdd_frame_inject.o.cmd"
+
+          echo "=== HDD injection object ==="
+          ls -l "${OBJ}" 2>/dev/null || true
+
+          echo
+          echo "=== HDD injection object symbols ==="
+          if [ -f "${OBJ}" ]; then
+            llvm-nm "${OBJ}" | grep -E \
+              'hdd_(init|deinit)_frame_injection' || true
+          fi
+
+          echo
+          echo "=== HDD injection compile command ==="
+          if [ -f "${CMD}" ]; then
+            grep -o -- \
+              '-DFEATURE_FRAME_INJECTION_SUPPORT' \
+              "${CMD}" || true
+          fi
+
+          echo
+          echo "HDD injection symbol inspection complete."
+
+
       
 
       - name: Verify kernel and NetHunter build outputs
