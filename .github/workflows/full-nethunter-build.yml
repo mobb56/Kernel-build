@@ -3348,6 +3348,49 @@ jobs:
           echo
           echo "=== get_task_cred COMPATIBILITY INSPECTION COMPLETE ==="
 
+            exit 1
+
+
+
+
+      
+      - name: Locate all get_task_cred references
+        if: always()
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== ALL QCACLD3 get_task_cred REFERENCES ==="
+
+          grep -Rni \
+            --exclude-dir=.git \
+            'get_task_cred' \
+            drivers/staging/qcacld-3.0 \
+            || true
+
+          echo
+          echo "=== ALL QCACLD3 put_cred REFERENCES ==="
+
+          grep -Rni \
+            --exclude-dir=.git \
+            'put_cred' \
+            drivers/staging/qcacld-3.0 \
+            || true
+
+          echo
+          echo "=== KERNEL CREDENTIAL EXPORT ==="
+
+          grep -Rni \
+            --include='*.c' \
+            --include='*.h' \
+            'EXPORT_SYMBOL.*get_task_cred' \
+            kernel include \
+            || true
+
+          echo
+          echo "=== COMPLETE ==="
+
           exit 1
 
           
