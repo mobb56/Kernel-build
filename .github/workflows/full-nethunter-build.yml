@@ -2762,6 +2762,40 @@ jobs:
             | head -n 100
 
 
+
+
+
+      - name: Inspect HDD injection object registration
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          KBUILD_FILE="drivers/staging/qcacld-3.0/Kbuild"
+          SOURCE="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.c"
+
+          echo "=== HDD injection source ==="
+          test -f "${SOURCE}"
+          grep -n \
+            'hdd_init_frame_injection\|hdd_deinit_frame_injection' \
+            "${SOURCE}"
+
+          echo
+          echo "=== HDD object registration ==="
+          grep -n -E \
+            'HDD_OBJS|wlan_hdd_frame_inject\.o' \
+            "${KBUILD_FILE}" || true
+
+          echo
+          echo "=== HDD feature defines ==="
+          grep -n -E \
+            'FEATURE_FRAME_INJECTION_SUPPORT|DFEATURE_FRAME_INJECTION_SUPPORT' \
+            "${KBUILD_FILE}" || true
+
+          echo
+          echo "HDD injection registration inspection complete."
+
+
           
                          
       - name: Build kernel
