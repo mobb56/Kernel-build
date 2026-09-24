@@ -3496,23 +3496,57 @@ jobs:
             "arch/arm64/boot/Image.gz-dtb"
 
           echo
-          echo "Starting kernel compilation..."
+          echo "=== Verify final kernel release before build ==="
 
-            make -j2 \
+          RELEASE="$(make -s \
             O="${OUT_DIR}" \
-            ARCH="${ARCH}" \
+            ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
-            Image modules
+            LOCALVERSION= \
+            kernelrelease)"
+
+          echo "KERNEL_RELEASE=${RELEASE}"
+
+          test "${RELEASE}" = "4.19.325-cip135-st19-perf"
+
+          echo "Kernel release is correct."
 
           echo
-          echo "=== Kernel compilation completed ==="
+          echo "=== Starting kernel compilation ==="
 
-          test -f "${OUT_DIR}/arch/arm64/boot/Image"
+           make -j2 \
+           O="${OUT_DIR}" \
+           ARCH=arm64 \
+           LLVM=1 \
+           LLVM_IAS=1 \
+           CROSS_COMPILE="${CROSS_COMPILE}" \
+           LOCALVERSION=
 
-          echo "Kernel Image created successfully."
-          ls -lh "${OUT_DIR}/arch/arm64/boot/Image"
+           echo
+           echo "=== Kernel compilation completed ==="
+
+           ACTUAL_RELEASE="$(make -s \
+           O="${OUT_DIR}" \
+           ARCH=arm64 \
+           LLVM=1 \
+           LLVM_IAS=1 \
+           CROSS_COMPILE="${CROSS_COMPILE}" \
+           LOCALVERSION= \
+           kernelrelease)"
+
+           echo "ACTUAL_KERNEL_RELEASE=${ACTUAL_RELEASE}"
+
+           test "${ACTUAL_RELEASE}" = "4.19.325-cip135-st19-perf"
+
+           echo "Actual built kernel release is correct."
+
+           test -f "${OUT_DIR}/arch/arm64/boot/Image"
+
+           echo "Kernel Image created successfully."
+
+           ls -lh "${OUT_DIR}/arch/arm64/boot/Image"
 
 
 
