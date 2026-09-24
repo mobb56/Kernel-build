@@ -3305,7 +3305,7 @@ jobs:
           echo "=== Companion HDD injection inspection complete ==="
 
           # Diagnostic-only run. Remove this after we inspect the output.
-          exit 1
+          
 
           
 
