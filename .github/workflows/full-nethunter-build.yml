@@ -1584,46 +1584,46 @@ jobs:
           echo
           echo "=== Register HDD frame injection object ==="
 
-          # Remove any previous attempt so this remains deterministic.
+          # Remove any previous registration.
           sed -i \
-            '/^[[:space:]]*HDD_OBJS[[:space:]]*+=[[:space:]].*wlan_hdd_frame_inject\.o[[:space:]]*$/d' \
+            '/^[[:space:]]*HDD_OBJS[[:space:]]*+=[[:space:]]*.*wlan_hdd_frame_inject\.o[[:space:]]*$/d' \
             "${KBUILD_FILE}"
 
-          # The actual QCACLD3 HDD object list is built with repeated
-          # HDD_OBJS += ... assignments. Insert the injection object
-          # immediately after the existing final HDD source entry.
-          if ! grep -Fq \
-            'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_epio.o' \
+          # Confirm the real HDD object list contains the epio anchor.
+          if ! grep -Eq \
+            '^[[:space:]]*HDD_OBJS[[:space:]]*\+=[[:space:]]*\$\(HDD_SRC_DIR\)/wlan_hdd_epio\.o[[:space:]]*$' \
             "${KBUILD_FILE}"; then
-            echo "ERROR: Expected HDD anchor wlan_hdd_epio.o was not found."
+            echo "ERROR: wlan_hdd_epio.o anchor was not found in HDD_OBJS."
+            echo "Actual matching lines:"
+            grep -n -E 'HDD_OBJS.*wlan_hdd_(epio|gpio)\.o' "${KBUILD_FILE}" || true
             exit 1
           fi
 
+          # Insert immediately after the real epio entry.
           sed -i \
-            '/^[[:space:]]*HDD_OBJS[[:space:]]*+=[[:space:]]*\$(HDD_SRC_DIR)\/wlan_hdd_epio\.o[[:space:]]*$/a\
-           HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
+            '/^[[:space:]]*HDD_OBJS[[:space:]]*\+=[[:space:]]*\$\(HDD_SRC_DIR\)\/wlan_hdd_epio\.o[[:space:]]*$/a\
+          HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
             "${KBUILD_FILE}"
 
           echo
           echo "=== Verify HDD placement ==="
 
           HDD_INJECT_COUNT="$(
-            grep -Fc \
-              'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
+            grep -Ec \
+              '^[[:space:]]*HDD_OBJS[[:space:]]*\+=[[:space:]]*\$\(HDD_SRC_DIR\)/wlan_hdd_frame_inject\.o[[:space:]]*$' \
               "${KBUILD_FILE}"
           )"
 
           if [ "${HDD_INJECT_COUNT}" -ne 1 ]; then
-            echo "ERROR: Expected exactly one HDD frame-injection object registration; found ${HDD_INJECT_COUNT}."
+            echo "ERROR: Expected exactly one HDD frame-injection registration; found ${HDD_INJECT_COUNT}."
             exit 1
           fi
 
           grep -n -B3 -A3 \
-            'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
+            'wlan_hdd_frame_inject\.o' \
             "${KBUILD_FILE}"
 
           echo "HDD frame injection object registered correctly."
-
           echo
           echo "=== Register WMA frame injection object ==="
 
