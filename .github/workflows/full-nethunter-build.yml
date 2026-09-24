@@ -1610,6 +1610,53 @@ jobs:
             'FEATURE_FRAME_INJECTION_SUPPORT|FEATURE_MONITOR_MODE_SUPPORT' \
             "${KBUILD_FILE}"
 
+
+
+
+
+
+
+      - name: Fix WMA injection include path
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          KBUILD_FILE="drivers/staging/qcacld-3.0/Kbuild"
+
+          test -f "${KBUILD_FILE}"
+
+          echo "=== Fix WMA injection include path ==="
+
+          grep -n -A4 \
+            '^WMA_INC[[:space:]]*:=' \
+            "${KBUILD_FILE}"
+
+          if ! grep -Fq 'ccflags-y += $(WMA_INC)' "${KBUILD_FILE}"; then
+            sed -i \
+              '/^WMA_INC[[:space:]]*:=[[:space:]]*/,/^[[:space:]]*$/{
+                /^WMA_INC[[:space:]]*:=[[:space:]]*/{
+                  :a
+                  n
+                  /^[[:space:]]*$/!ba
+                  i\
+             ccflags-y += $(WMA_INC)
+                }
+              }' \
+              "${KBUILD_FILE}"
+          fi
+
+          echo
+          echo "=== Verify WMA include flags ==="
+
+          grep -n -A5 \
+            '^WMA_INC[[:space:]]*:=' \
+            "${KBUILD_FILE}"
+
+          grep -Fq 'ccflags-y += $(WMA_INC)' "${KBUILD_FILE}"
+
+          echo "WMA injection include path fixed."
+
       # ============================================================
       # 35. VERIFY INJECTION SOURCES AND INTEGRATION
       # ============================================================
