@@ -3078,96 +3078,70 @@ jobs:
           echo "HDD Kbuild structure inspection complete."
 
 
-
-
-      - name: Locate HDD adapter structure and reference injection context
+      - name: Inspect exact HDD adapter member location
         working-directory: kernel
         shell: bash
         run: |
           set -euo pipefail
 
-          HDD_ROOT="drivers/staging/qcacld-3.0/core/hdd"
-          REF_ROOT="../nethunter-reference/drivers/staging/qcacld-3.0/core/hdd"
+          CURRENT="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h"
+          REFERENCE="../nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h"
 
-          echo "=== CURRENT: hdd_adapter definitions ==="
+          echo "=== CURRENT hdd_adapter ==="
 
-          grep -RniE \
-            'struct[[:space:]]+hdd_adapter[[:space:]]*\{' \
-            "${HDD_ROOT}" \
-            --include='*.h' \
-            --include='*.c' \
-            > /tmp/current_adapter_defs.txt || true
-
-          cat /tmp/current_adapter_defs.txt
-
-          echo
-          echo "=== CURRENT: hdd_adapter typedefs ==="
-
-          grep -RniE \
-            'typedef[[:space:]]+struct.*hdd_adapter|hdd_adapter_t' \
-            "${HDD_ROOT}" \
-            --include='*.h' \
-            --include='*.c' \
-            > /tmp/current_adapter_typedefs.txt || true
-
-          cat /tmp/current_adapter_typedefs.txt
-
-          echo
-          echo "=== CURRENT: injection_ctx in headers ==="
-
-          grep -Rni \
-            -F 'injection_ctx' \
-            "${HDD_ROOT}" \
-            --include='*.h' \
-            > /tmp/current_injection_headers.txt || true
-
-          cat /tmp/current_injection_headers.txt
-
-          echo
-          echo "=== REFERENCE: injection_ctx in hdd_main.h ==="
-
-          grep -n \
-            -F 'injection_ctx' \
-            "${REF_ROOT}/inc/wlan_hdd_main.h" \
-            || true
-
-          echo
-          echo "=== REFERENCE: surrounding injection context ==="
-
-          REF_LINES="$(
+          CURRENT_LINE="$(
             grep -n \
-              -F 'injection_ctx' \
-              "${REF_ROOT}/inc/wlan_hdd_main.h" \
-              | head -n3 \
+              -m1 \
+              '^struct hdd_adapter[[:space:]]*{' \
+              "${CURRENT}" \
               | cut -d: -f1
           )"
 
-          for line in ${REF_LINES}; do
-            start=$((line - 12))
-            [ "${start}" -lt 1 ] && start=1
-            end=$((line + 12))
+          if [ -z "${CURRENT_LINE}" ]; then
+            echo "ERROR: Current struct hdd_adapter definition not found."
+            exit 1
+          fi
 
-            echo "--- Reference lines ${start}-${end} ---"
-            sed -n "${start},${end}p" \
-              "${REF_ROOT}/inc/wlan_hdd_main.h"
-          done
+          echo "Current hdd_adapter starts at line ${CURRENT_LINE}"
 
-          echo
-          echo "=== CURRENT: hdd_adapter candidates with injection_ctx ==="
+          CURRENT_START=$((CURRENT_LINE + 1))
+          CURRENT_END=$((CURRENT_LINE + 180))
 
-          grep -RniE \
-            'hdd_adapter.*\{|injection_ctx' \
-            "${HDD_ROOT}/inc" \
-            --include='*.h' \
-            > /tmp/current_candidates.txt || true
-
-          sed -n '1,200p' /tmp/current_candidates.txt
+          sed -n \
+            "${CURRENT_START},${CURRENT_END}p" \
+            "${CURRENT}"
 
           echo
-          echo "=== HDD adapter/reference inspection complete ==="
+          echo "=== REFERENCE injection_ctx placement ==="
+
+          REF_LINE="$(
+            grep -n \
+              -m1 \
+              -F 'struct hdd_injection_ctx *injection_ctx;' \
+              "${REFERENCE}" \
+              | cut -d: -f1
+          )"
+
+          if [ -z "${REF_LINE}" ]; then
+            echo "ERROR: Reference injection_ctx member not found."
+            exit 1
+          fi
+
+          echo "Reference injection_ctx is at line ${REF_LINE}"
+
+          REF_START=$((REF_LINE - 20))
+          REF_END=$((REF_LINE + 20))
+
+          sed -n \
+            "${REF_START},${REF_END}p" \
+            "${REFERENCE}"
+
+          echo
+          echo "=== Exact HDD adapter member inspection complete ==="
 
           exit 1
-          
+
+      
                          
       - name: Build kernel
         working-directory: kernel
