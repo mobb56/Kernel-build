@@ -1545,7 +1545,6 @@ jobs:
       # These are Kbuild variables.
       # They MUST NOT become CONFIG_* entries in .config.
       # ============================================================
-
       - name: Enable QCACLD3 injection Kbuild features
         working-directory: kernel
         shell: bash
@@ -1553,116 +1552,70 @@ jobs:
           set -euo pipefail
 
           KBUILD_FILE="drivers/staging/qcacld-3.0/Kbuild"
-
           test -f "${KBUILD_FILE}"
 
           echo "=== Enable QCACLD3 injection Kbuild features ==="
 
-          # ------------------------------------------------------------
-          # QCACLD3 feature variables
-          # These are Kbuild variables, NOT kernel .config symbols.
-          # ------------------------------------------------------------
-
-          if ! grep -Fq \
-            'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y' \
-            "${KBUILD_FILE}"; then
-
-            cat >> "${KBUILD_FILE}" <<'EOF'
-
-             # NetHunter frame injection support
-             CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y
-             CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y
-            EOF
+          if ! grep -Fq 'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y' "${KBUILD_FILE}"; then
+            printf '%s\n' \
+              '# NetHunter frame injection support' \
+              'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y' \
+              'CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y' \
+              >> "${KBUILD_FILE}"
           fi
 
-          # ------------------------------------------------------------
-          # Compiler feature defines
-          # ------------------------------------------------------------
-
-          if ! grep -Fq \
-            'ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT' \
-            "${KBUILD_FILE}"; then
-
+          if ! grep -Fq 'ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT' "${KBUILD_FILE}"; then
             printf '%s\n' \
               'ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT' \
               >> "${KBUILD_FILE}"
           fi
 
-          if ! grep -Fq \
-            'ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT' \
-            "${KBUILD_FILE}"; then
-
+          if ! grep -Fq 'ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT' "${KBUILD_FILE}"; then
             printf '%s\n' \
               'ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT' \
               >> "${KBUILD_FILE}"
           fi
 
-          # ------------------------------------------------------------
-          # HDD frame-injection object
-          #
-          # IMPORTANT:
-          # HDD_OBJS is aggregated later in this Kbuild file.
-          # Therefore the injection object must be inserted BEFORE:
-          #
-          #     HDD_OBJS := $(HDD_OBJS)
-          # ------------------------------------------------------------
-
           echo
           echo "=== Register HDD frame injection object ==="
 
-          if ! grep -Fq \
-            'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
-            "${KBUILD_FILE}"; then
-
+          if ! grep -Fq 'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' "${KBUILD_FILE}"; then
             sed -i \
               '/^HDD_OBJS := $(HDD_OBJS)$/i\
-              ifeq ($(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT), y)\
-              HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o\
-            endif' \
+           ifeq ($(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT), y)\
+           HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o\
+           endif' \
               "${KBUILD_FILE}"
           fi
-
-          # ------------------------------------------------------------
-          # WMA frame-injection object
-          #
-          # Put it before the WMA object aggregation as well.
-          # ------------------------------------------------------------
 
           echo
           echo "=== Register WMA frame injection object ==="
 
-          if ! grep -Fq \
-            'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \
-            "${KBUILD_FILE}"; then
-
+          if ! grep -Fq 'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' "${KBUILD_FILE}"; then
             sed -i \
               '/^WMA_OBJS := $(WMA_OBJS)$/i\
-             ifeq ($(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT), y)\
-             WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o\
+           ifeq ($(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT), y)\
+          WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o\
           endif' \
               "${KBUILD_FILE}"
           fi
 
-          # ------------------------------------------------------------
-          # Verification
-          # ------------------------------------------------------------
-
           echo
-          echo "=== Verify QCACLD3 feature configuration ==="
+          echo "=== Verify injection configuration ==="
 
           grep -n -E \
             'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT|CONFIG_FEATURE_MONITOR_MODE_SUPPORT|DFEATURE_FRAME_INJECTION_SUPPORT|DFEATURE_MONITOR_MODE_SUPPORT' \
             "${KBUILD_FILE}"
 
           echo
-          echo "=== Verify HDD object placement ==="
+          echo "=== Verify HDD placement ==="
 
           grep -n -B3 -A5 \
             '^HDD_OBJS := $(HDD_OBJS)$' \
             "${KBUILD_FILE}"
 
           echo
-          echo "=== Verify WMA object placement ==="
+          echo "=== Verify WMA placement ==="
 
           grep -n -B3 -A5 \
             '^WMA_OBJS := $(WMA_OBJS)$' \
@@ -1681,8 +1634,7 @@ jobs:
 
           echo
           echo "QCACLD3 injection Kbuild configuration complete."
-
-          
+                    
 
       - name: Inspect WMA injection header/source collision
         working-directory: kernel
