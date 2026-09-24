@@ -3202,6 +3202,58 @@ jobs:
           echo
           echo "=== Exact HDD adapter member inspection complete ==="
 
+
+
+
+      - name: Inspect companion HDD injection objects
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          KBUILD="drivers/staging/qcacld-3.0/Kbuild"
+
+          echo "=== Injection source files ==="
+          for SRC in \
+            wlan_hdd_frame_inject.c \
+            wlan_hdd_frame_validate.c \
+            wlan_hdd_inject_security.c \
+            wlan_hdd_frame_inject_debug.c
+          do
+            find drivers/staging/qcacld-3.0/core/hdd \
+              -type f -name "${SRC}" -print
+          done
+
+          echo
+          echo "=== Current HDD injection object registration ==="
+          grep -n -E \
+            'wlan_hdd_(frame_inject|frame_validate|inject_security|frame_inject_debug)\.o' \
+            "${KBUILD}" || true
+
+          echo
+          echo "=== Reference HDD injection object registration ==="
+          grep -n -B5 -A12 -E \
+            'wlan_hdd_(frame_inject|frame_validate|inject_security|frame_inject_debug)\.o' \
+            ../nethunter-reference/drivers/staging/qcacld-3.0/Kbuild || true
+
+          echo
+          echo "=== Reference FEATURE_FRAME_INJECTION_SUPPORT blocks ==="
+          grep -n -B3 -A15 \
+            'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT' \
+            ../nethunter-reference/drivers/staging/qcacld-3.0/Kbuild || true
+
+          echo
+          echo "=== Expected function definitions ==="
+          grep -RnsE \
+            '(^|[[:space:]])(hdd_sanitize_frame_content|hdd_validate_80211_frame|hdd_check_frame_size_limits|hdd_validate_injection_permissions|hdd_injection_is_globally_enabled|hdd_deinit_injection_security_ctx|hdd_init_injection_security_ctx|hdd_injection_remove_debugfs_entries|hdd_injection_create_debugfs_entries)[[:space:]]*\(' \
+            drivers/staging/qcacld-3.0/core/hdd || true
+
+          echo
+          echo "=== Companion HDD injection inspection complete ==="
+
+          # Diagnostic-only run. Remove this after we inspect the output.
+          exit 1
+
           
 
       
