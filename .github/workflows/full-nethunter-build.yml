@@ -1183,7 +1183,6 @@ jobs:
       # Do this only if the current kernel source does not already
       # contain the integration.
       # ============================================================
-
       - name: Integrate injection context into HDD
         working-directory: kernel
         shell: bash
@@ -1196,14 +1195,7 @@ jobs:
 
           echo "=== Integrating injection context into struct hdd_adapter ==="
 
-          echo
-          echo "=== Current anchor ==="
-          grep -n -A6 -B4 \
-            -F 'qdf_atomic_t net_device_hold_ref_count;' \
-            "${MAIN_H}" || true
-
-          # Remove any previous injection_ctx member inserted by an
-          # earlier workflow attempt.
+          # Remove any previous injection_ctx member from this header.
           sed -i \
             '/^[[:space:]]*#ifdef FEATURE_FRAME_INJECTION_SUPPORT[[:space:]]*$/{
               N
@@ -1213,46 +1205,114 @@ jobs:
             }' \
             "${MAIN_H}"
 
-          # Insert the member at the same location used by the
-          # NetHunter reference tree.
-          if ! grep -Fq \
-            'qdf_atomic_t net_device_hold_ref_count;' \
-            "${MAIN_H}"; then
-            echo "ERROR: hdd_adapter anchor was not found."
+          echo
+          echo "=== Locate hdd_adapter structure ==="
+
+          START_LINE="$(
+            grep -n -m1 \
+              -E '^[[:space:]]*struct hdd_adapter[[:space:]]*\{' \
+              "${MAIN_H}" |
+            cut -d: -f1
+          )"
+
+          if [ -z "${START_LINE}" ]; then
+            echo "ERROR: struct hdd_adapter definition was not found."
             exit 1
           fi
 
-          sed -i \
-            '/^[[:space:]]*qdf_atomic_t net_device_hold_ref_count;[[:space:]]*$/a\
-            #ifdef FEATURE_FRAME_INJECTION_SUPPORT\
-          	struct hdd_injection_ctx *injection_ctx;\
-          #endif' \
-            "${MAIN_H}"
+          echo "struct hdd_adapter starts at line ${START_LINE}"
+
+          # Find the closing brace of the struct by walking forward
+          # from the actual struct definition.
+          END_LINE="$(
+            awk -v start="${START_LINE}" '
+              NR < start { next }
+
+              {
+                line = $0
+
+                # Remove simple C comments before counting braces.
+                gsub(/\/\*.*\*\//, "", line)
+
+                opens = gsub(/\{/, "{", line)
+                closes = gsub(/\}/, "}", line)
+
+                depth += opens
+                depth -= closes
+
+                if (NR > start && depth == 0 && line ~ /^[[:space:]]*};[[:space:]]*$/) {
+                  print NR
+                  exit
+                }
+              }
+            ' "${MAIN_H}"
+          )"
+
+          if [ -z "${END_LINE}" ]; then
+            echo "ERROR: Could not locate end of struct hdd_adapter."
+            exit 1
+          fi
+
+          echo "struct hdd_adapter ends at line ${END_LINE}"
+
+          echo
+          echo "=== Structure ending before modification ==="
+          sed -n "$((END_LINE - 12)),$((END_LINE + 3))p" "${MAIN_H}"
+
+          # Insert immediately before the actual closing brace.
+          sed -i "${END_LINE}i\\
+           #ifdef FEATURE_FRAME_INJECTION_SUPPORT\\
+                	  struct hdd_injection_ctx *injection_ctx;\\
+           #endif" "${MAIN_H}"
 
           echo
           echo "=== Verify injection context member ==="
 
-          INJECTION_MEMBER_COUNT="$(
+          COUNT="$(
             grep -Fc \
               'struct hdd_injection_ctx *injection_ctx;' \
               "${MAIN_H}"
           )"
 
-          if [ "${INJECTION_MEMBER_COUNT}" -ne 1 ]; then
-            echo "ERROR: Expected exactly one injection_ctx member; found ${INJECTION_MEMBER_COUNT}."
-            grep -n -B5 -A8 \
+          if [ "${COUNT}" -ne 1 ]; then
+            echo "ERROR: Expected exactly one injection_ctx member; found ${COUNT}."
+            grep -n -B5 -A5 \
               -F 'injection_ctx' \
               "${MAIN_H}" || true
             exit 1
           fi
 
           echo
-          grep -n -B5 -A8 \
-            -F 'struct hdd_injection_ctx *injection_ctx;' \
-            "${MAIN_H}"
+          echo "=== Final struct ending ==="
+
+          # Recalculate the end after insertion.
+          NEW_END_LINE="$(
+            awk -v start="${START_LINE}" '
+              NR < start { next }
+
+              {
+                line = $0
+                gsub(/\/\*.*\*\//, "", line)
+
+                opens = gsub(/\{/, "{", line)
+                closes = gsub(/\}/, "}", line)
+
+                depth += opens
+                depth -= closes
+
+                if (NR > start && depth == 0 && line ~ /^[[:space:]]*};[[:space:]]*$/) {
+                  print NR
+                  exit
+                }
+              }
+            ' "${MAIN_H}"
+          )"
+
+          sed -n "$((NEW_END_LINE - 8)),$((NEW_END_LINE + 2))p" "${MAIN_H}"
 
           echo
           echo "HDD adapter injection context integrated correctly."
+                 
 
       # ============================================================
       # 30. INCLUDE FRAME-INJECTION API IN wlan_hdd_main.c
