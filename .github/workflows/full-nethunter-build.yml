@@ -2310,6 +2310,41 @@ jobs:
           echo
           echo "=== Inspection complete ==="
 
+
+
+
+      - name: Inspect WMA injection header
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== WMA frame injection source ==="
+          sed -n '1,45p' \
+            drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c
+
+          echo
+          echo "=== All frame-injection headers in kernel tree ==="
+          find drivers/staging/qcacld-3.0 \
+            -type f \
+            \( -name '*frame*inject*.h' -o -name 'wlan_frame_inject.h' \) \
+            -print | sort
+
+          echo
+          echo "=== Include directories containing injection headers ==="
+          find drivers/staging/qcacld-3.0 \
+            -type f \
+            -name '*.h' \
+            -print | \
+            grep -E 'frame_inject|inject_security|frame_validate' || true
+
+          echo
+          echo "=== Reference header ==="
+          find ../nethunter-reference/drivers/staging/qcacld-3.0 \
+            -type f \
+            -name 'wlan_frame_inject.h' \
+            -print | sort || true
+
           
           
           
