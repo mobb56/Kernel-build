@@ -2846,6 +2846,40 @@ jobs:
           echo "HDD object placement inspection complete."
 
 
+
+
+
+      - name: Inspect exact HDD Kbuild structure
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          KBUILD_FILE="drivers/staging/qcacld-3.0/Kbuild"
+
+          echo "=== ALL HDD_OBJS DEFINITIONS ==="
+          grep -n -E \
+            'HDD_OBJS|wlan_hdd_main\.o|wlan_hdd_frame_inject\.o' \
+            "${KBUILD_FILE}" || true
+
+          echo
+          echo "=== HDD SECTION AROUND MAIN OBJECTS ==="
+
+          grep -n -B5 -A10 \
+            'wlan_hdd_main\.o' \
+            "${KBUILD_FILE}" || true
+
+          echo
+          echo "=== HDD FRAME INJECTION REFERENCES ==="
+
+          grep -n -B5 -A5 \
+            'wlan_hdd_frame_inject\.o' \
+            "${KBUILD_FILE}" || true
+
+          echo
+          echo "HDD Kbuild structure inspection complete."
+
+
           
                          
       - name: Build kernel
