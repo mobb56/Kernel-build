@@ -2545,6 +2545,47 @@ jobs:
           sed -n '2275,2330p' \
             drivers/staging/qcacld-3.0/Kbuild
 
+
+
+
+
+
+      - name: Trace WMA include propagation
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== Reference WMA_INC across repository ==="
+          grep -RniF \
+            'WMA_INC' \
+            ../nethunter-reference \
+            --exclude-dir=.git \
+            2>/dev/null | head -160 || true
+
+          echo
+          echo "=== Current WMA_INC across repository ==="
+          grep -RniF \
+            'WMA_INC' \
+            . \
+            --exclude-dir=.git \
+            --exclude-dir=out \
+            2>/dev/null | head -160 || true
+
+          echo
+          echo "=== Reference wma_frame_inject.h locations ==="
+          find ../nethunter-reference \
+            -type f \
+            -name 'wma_frame_inject.h' \
+            -print
+
+          echo
+          echo "=== Current wma_frame_inject.h locations ==="
+          find . \
+            -type f \
+            -name 'wma_frame_inject.h' \
+            -print
+
                          
       - name: Build kernel
         working-directory: kernel
