@@ -1547,73 +1547,129 @@ jobs:
       # ============================================================
 
       - name: Enable QCACLD3 injection Kbuild features
+        working-directory: kernel
         shell: bash
         run: |
-          set -euxo pipefail
-
-          cd kernel
+          set -euo pipefail
 
           KBUILD_FILE="drivers/staging/qcacld-3.0/Kbuild"
 
           test -f "${KBUILD_FILE}"
 
-          echo "Current QCACLD3 feature configuration:"
-          grep -nE \
-            'FEATURE_FRAME_INJECTION_SUPPORT|FEATURE_MONITOR_MODE_SUPPORT' \
-            "${KBUILD_FILE}" \
-            || true
+          echo "=== Enable QCACLD3 injection Kbuild features ==="
 
           if ! grep -Fq \
             'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y' \
             "${KBUILD_FILE}"; then
 
-            printf '%s\n' \
-              '' \
-              '# NetHunter QCACLD3 features' \
-              'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y' \
-              'CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y' \
-              >> "${KBUILD_FILE}"
+            cat >> "${KBUILD_FILE}" <<'EOF'
 
-                                           else
+          # NetHunter frame injection support
+          CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y
+          CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y
+          EOF
+          fi
 
-            grep -Fq \
-              'CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y' \
-              "${KBUILD_FILE}" ||
-              printf '%s\n' \
-                'CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y' \
-                >> "${KBUILD_FILE}"
+          if ! grep -Fq \
+            'ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT' \
+            "${KBUILD_FILE}"; then
 
-             fi
+            cat >> "${KBUILD_FILE}" <<'EOF'
+
+          ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT
+          EOF
+          fi
+
+          if ! grep -Fq \
+            'ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT' \
+            "${KBUILD_FILE}"; then
+
+            cat >> "${KBUILD_FILE}" <<'EOF'
+
+          ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT
+          EOF
+          fi
 
           echo
           echo "=== Register WMA frame injection object ==="
 
-          if ! grep -Fq \
-            '$(WMA_SRC_DIR)/wma_frame_inject.o' \
-            "${KBUILD_FILE}"; then
-
-            sed -i \
-              '/^WMA_OBJS :=.*wma_main\.o/a\
-             $(WMA_SRC_DIR)/wma_frame_inject.o \\' \
-              "${KBUILD_FILE}"
-          fi
-
-          grep -n -A5 \
-            '^WMA_OBJS :=' \
+          # Remove any unconditional registration previously inserted
+          # by this workflow.
+          sed -i \
+            '/^[[:space:]]*\$(WMA_SRC_DIR)\/wma_frame_inject\.o[[:space:]]*\\$/d' \
             "${KBUILD_FILE}"
 
-          echo "WMA frame injection object registered."
+          # Remove an old conditional block if this workflow already
+          # inserted one, so it can be recreated cleanly.
+          sed -i \
+            '/^ifeq ($(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT), y)$/,/^endif$/d' \
+            "${KBUILD_FILE}"
 
-          echo "Final QCACLD3 feature configuration:"
+          # Match the NetHunter reference structure:
+          # the WMA injection object is compiled only when the
+          # frame-injection feature is enabled.
+          sed -i \
+            '/^WMA_OBJS :=/a\
+          ifeq ($(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT), y)\
+          WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o\
+          endif' \
+            "${KBUILD_FILE}"
+
+          echo
+          echo "=== Verify WMA frame injection registration ==="
+
+          grep -n -B2 -A4 \
+            'wma_frame_inject\.o' \
+            "${KBUILD_FILE}"
+
+          echo
+          echo "=== Final QCACLD3 feature configuration ==="
+
+          grep -n -E \
+            'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT|CONFIG_FEATURE_MONITOR_MODE_SUPPORT|FEATURE_FRAME_INJECTION_SUPPORT|FEATURE_MONITOR_MODE_SUPPORT' \
+            "${KBUILD_FILE}"
+
+          echo
+          echo "WMA frame injection object registered conditionally."
+
+
+
+
+      - name: Inspect WMA injection header/source collision
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          HEADER="drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h"
+          SOURCE="drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c"
+
+          test -f "${HEADER}"
+          test -f "${SOURCE}"
+
+          echo "=== WMA HEADER DUPLICATE DEFINITIONS ==="
+
+          grep -n -E \
+            'static inline.*wma_(init_injection_queue|deinit_injection_queue|queue_injection_frame|get_injection_queue_stats|reset_injection_queue_stats|get_injection_queue_size|is_injection_queue_empty|flush_injection_queue|send_injection_frame_to_fw|handle_injection_fw_response)' \
+            "${HEADER}" || true
+
+          echo
+          echo "=== WMA SOURCE DEFINITIONS ==="
+
+          grep -n -E \
+            '^(QDF_STATUS|uint32_t|bool|void).*wma_(init_injection_queue|deinit_injection_queue|queue_injection_frame|get_injection_queue_stats|reset_injection_queue_stats|get_injection_queue_size|is_injection_queue_empty|flush_injection_queue|send_injection_frame_to_fw|handle_injection_fw_response|translate_fw_injection_error)' \
+            "${SOURCE}" || true
+
+          echo
+          echo "=== WMA HEADER RANGE ==="
+
+          sed -n '320,395p' "${HEADER}"
+
+          echo
+          echo "WMA collision inspection complete."
           
-          grep -nE \
-            'FEATURE_FRAME_INJECTION_SUPPORT|FEATURE_MONITOR_MODE_SUPPORT' \
-            "${KBUILD_FILE}"
 
-
-
-
-
+          exit 1
 
 
       - name: Fix WMA injection include path
