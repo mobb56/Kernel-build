@@ -1584,14 +1584,45 @@ jobs:
           echo
           echo "=== Register HDD frame injection object ==="
 
-          if ! grep -Fq 'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' "${KBUILD_FILE}"; then
-            sed -i \
-              '/^HDD_OBJS := $(HDD_OBJS)$/i\
-           ifeq ($(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT), y)\
-           HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o\
-           endif' \
-              "${KBUILD_FILE}"
+          # Remove any previous attempt so this remains deterministic.
+          sed -i \
+            '/^[[:space:]]*HDD_OBJS[[:space:]]*+=[[:space:]].*wlan_hdd_frame_inject\.o[[:space:]]*$/d' \
+            "${KBUILD_FILE}"
+
+          # The actual QCACLD3 HDD object list is built with repeated
+          # HDD_OBJS += ... assignments. Insert the injection object
+          # immediately after the existing final HDD source entry.
+          if ! grep -Fq \
+            'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_epio.o' \
+            "${KBUILD_FILE}"; then
+            echo "ERROR: Expected HDD anchor wlan_hdd_epio.o was not found."
+            exit 1
           fi
+
+          sed -i \
+            '/^[[:space:]]*HDD_OBJS[[:space:]]*+=[[:space:]]*\$(HDD_SRC_DIR)\/wlan_hdd_epio\.o[[:space:]]*$/a\
+           HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
+            "${KBUILD_FILE}"
+
+          echo
+          echo "=== Verify HDD placement ==="
+
+          HDD_INJECT_COUNT="$(
+            grep -Fc \
+              'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
+              "${KBUILD_FILE}"
+          )"
+
+          if [ "${HDD_INJECT_COUNT}" -ne 1 ]; then
+            echo "ERROR: Expected exactly one HDD frame-injection object registration; found ${HDD_INJECT_COUNT}."
+            exit 1
+          fi
+
+          grep -n -B3 -A3 \
+            'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
+            "${KBUILD_FILE}"
+
+          echo "HDD frame injection object registered correctly."
 
           echo
           echo "=== Register WMA frame injection object ==="
@@ -1680,8 +1711,8 @@ jobs:
           echo
           echo "=== DIAGNOSTIC COMPLETE ==="
 
+          
           exit 1
-
           
                     
 
