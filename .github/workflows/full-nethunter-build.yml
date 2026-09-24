@@ -3080,43 +3080,93 @@ jobs:
 
 
 
-      - name: Locate exact HDD adapter structure
+      - name: Locate HDD adapter structure and reference injection context
         working-directory: kernel
         shell: bash
         run: |
           set -euo pipefail
 
           HDD_ROOT="drivers/staging/qcacld-3.0/core/hdd"
+          REF_ROOT="../nethunter-reference/drivers/staging/qcacld-3.0/core/hdd"
 
-          echo "=== Exact hdd_adapter structure definitions ==="
+          echo "=== CURRENT: hdd_adapter definitions ==="
 
-          grep -Rni \
-            -F 'struct hdd_adapter {' \
-            "${HDD_ROOT}" || true
+          grep -RniE \
+            'struct[[:space:]]+hdd_adapter[[:space:]]*\{' \
+            "${HDD_ROOT}" \
+            --include='*.h' \
+            --include='*.c' \
+            > /tmp/current_adapter_defs.txt || true
+
+          cat /tmp/current_adapter_defs.txt
 
           echo
-          echo "=== Exact injection context declarations ==="
+          echo "=== CURRENT: hdd_adapter typedefs ==="
+
+          grep -RniE \
+            'typedef[[:space:]]+struct.*hdd_adapter|hdd_adapter_t' \
+            "${HDD_ROOT}" \
+            --include='*.h' \
+            --include='*.c' \
+            > /tmp/current_adapter_typedefs.txt || true
+
+          cat /tmp/current_adapter_typedefs.txt
+
+          echo
+          echo "=== CURRENT: injection_ctx in headers ==="
 
           grep -Rni \
             -F 'injection_ctx' \
             "${HDD_ROOT}" \
             --include='*.h' \
-            --include='*.c' || true
+            > /tmp/current_injection_headers.txt || true
+
+          cat /tmp/current_injection_headers.txt
 
           echo
-          echo "=== Exact hdd_injection_ctx definitions ==="
+          echo "=== REFERENCE: injection_ctx in hdd_main.h ==="
 
-          grep -Rni \
-            -F 'struct hdd_injection_ctx' \
-            "${HDD_ROOT}" \
+          grep -n \
+            -F 'injection_ctx' \
+            "${REF_ROOT}/inc/wlan_hdd_main.h" \
+            || true
+
+          echo
+          echo "=== REFERENCE: surrounding injection context ==="
+
+          REF_LINES="$(
+            grep -n \
+              -F 'injection_ctx' \
+              "${REF_ROOT}/inc/wlan_hdd_main.h" \
+              | head -n3 \
+              | cut -d: -f1
+          )"
+
+          for line in ${REF_LINES}; do
+            start=$((line - 12))
+            [ "${start}" -lt 1 ] && start=1
+            end=$((line + 12))
+
+            echo "--- Reference lines ${start}-${end} ---"
+            sed -n "${start},${end}p" \
+              "${REF_ROOT}/inc/wlan_hdd_main.h"
+          done
+
+          echo
+          echo "=== CURRENT: hdd_adapter candidates with injection_ctx ==="
+
+          grep -RniE \
+            'hdd_adapter.*\{|injection_ctx' \
+            "${HDD_ROOT}/inc" \
             --include='*.h' \
-            --include='*.c' || true
+            > /tmp/current_candidates.txt || true
+
+          sed -n '1,200p' /tmp/current_candidates.txt
 
           echo
-          echo "=== Search complete ==="
+          echo "=== HDD adapter/reference inspection complete ==="
 
           exit 1
-
           
                          
       - name: Build kernel
