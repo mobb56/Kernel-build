@@ -1194,62 +1194,65 @@ jobs:
 
           test -f "${MAIN_H}"
 
-          echo "=== Inspecting wlan_hdd_main.h ==="
-
-          sed -n '110,180p' "${MAIN_H}"
+          echo "=== Integrating injection context into struct hdd_adapter ==="
 
           echo
-          echo "=== Checking for existing injection context declaration ==="
+          echo "=== Current anchor ==="
+          grep -n -A6 -B4 \
+            -F 'qdf_atomic_t net_device_hold_ref_count;' \
+            "${MAIN_H}" || true
 
-          if grep -Fq 'struct hdd_injection_ctx;' "${MAIN_H}"; then
-            echo "Injection context forward declaration already exists."
-          else
-            echo "Injection context forward declaration is not present."
-
-            TMP_H="${MAIN_H}.tmp"
-
-            awk '
-              {
-                lines[NR] = $0
+          # Remove any previous injection_ctx member inserted by an
+          # earlier workflow attempt.
+          sed -i \
+            '/^[[:space:]]*#ifdef FEATURE_FRAME_INJECTION_SUPPORT[[:space:]]*$/{
+              N
+              /^[[:space:]]*#ifdef FEATURE_FRAME_INJECTION_SUPPORT[[:space:]]*\n[[:space:]]*struct hdd_injection_ctx \*injection_ctx;[[:space:]]*$/{
+                d
               }
-              END {
-                inserted = 0
+            }' \
+            "${MAIN_H}"
 
-                for (i = 1; i <= NR; i++) {
-                  if (!inserted && lines[i] ~ /^[[:space:]]*#endif[[:space:]]*$/) {
-                    print ""
-                    print "#ifdef FEATURE_FRAME_INJECTION_SUPPORT"
-                    print "struct hdd_injection_ctx;"
-                    print "#endif"
-                    print ""
-                    inserted = 1
-                  }
-
-                  print lines[i]
-                }
-
-                if (!inserted) {
-                  exit 1
-                }
-              }
-            ' "${MAIN_H}" > "${TMP_H}"
-
-            test -s "${TMP_H}"
-
-            mv "${TMP_H}" "${MAIN_H}"
-
-            echo "Injection context forward declaration inserted."
+          # Insert the member at the same location used by the
+          # NetHunter reference tree.
+          if ! grep -Fq \
+            'qdf_atomic_t net_device_hold_ref_count;' \
+            "${MAIN_H}"; then
+            echo "ERROR: hdd_adapter anchor was not found."
+            exit 1
           fi
 
-          echo
-          echo "=== Verifying injection context declaration ==="
-
-          grep -F -A2 -B1 \
-            'struct hdd_injection_ctx;' \
+          sed -i \
+            '/^[[:space:]]*qdf_atomic_t net_device_hold_ref_count;[[:space:]]*$/a\
+            #ifdef FEATURE_FRAME_INJECTION_SUPPORT\
+          	struct hdd_injection_ctx *injection_ctx;\
+          #endif' \
             "${MAIN_H}"
 
           echo
-          echo "=== HDD header integration passed ==="
+          echo "=== Verify injection context member ==="
+
+          INJECTION_MEMBER_COUNT="$(
+            grep -Fc \
+              'struct hdd_injection_ctx *injection_ctx;' \
+              "${MAIN_H}"
+          )"
+
+          if [ "${INJECTION_MEMBER_COUNT}" -ne 1 ]; then
+            echo "ERROR: Expected exactly one injection_ctx member; found ${INJECTION_MEMBER_COUNT}."
+            grep -n -B5 -A8 \
+              -F 'injection_ctx' \
+              "${MAIN_H}" || true
+            exit 1
+          fi
+
+          echo
+          grep -n -B5 -A8 \
+            -F 'struct hdd_injection_ctx *injection_ctx;' \
+            "${MAIN_H}"
+
+          echo
+          echo "HDD adapter injection context integrated correctly."
 
       # ============================================================
       # 30. INCLUDE FRAME-INJECTION API IN wlan_hdd_main.c
