@@ -2672,6 +2672,63 @@ jobs:
             -name 'wma_frame_inject.h' \
             -print
 
+
+
+      - name: Inspect WMA source and header definitions
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SOURCE="drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c"
+          HEADER="drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h"
+          REF_SOURCE="../nethunter-reference/drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c"
+          REF_HEADER="../nethunter-reference/drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h"
+
+          test -f "${SOURCE}"
+          test -f "${HEADER}"
+          test -f "${REF_SOURCE}"
+          test -f "${REF_HEADER}"
+
+          echo "=== CURRENT WMA SOURCE: first 80 lines ==="
+          sed -n '1,80p' "${SOURCE}"
+
+          echo
+          echo "=== CURRENT WMA HEADER: first 80 lines ==="
+          sed -n '1,80p' "${HEADER}"
+
+          echo
+          echo "=== CURRENT WMA HEADER: injection helper definitions ==="
+          grep -n -E \
+            'static inline|wma_send_injection_frame_to_fw|wma_handle_injection_fw_response|wma_init_injection_queue|wma_deinit_injection_queue|wma_queue_injection_frame|wma_get_injection_queue_stats|wma_flush_injection_queue|wma_translate_fw_injection_error' \
+            "${HEADER}" || true
+
+          echo
+          echo "=== CURRENT WMA SOURCE: injection function definitions ==="
+          grep -n -E \
+            '^[A-Za-z_].*\bwma_(send_injection_frame_to_fw|handle_injection_fw_response|init_injection_queue|deinit_injection_queue|queue_injection_frame|get_injection_queue_stats|reset_injection_queue_stats|flush_injection_queue|translate_fw_injection_error|handle_firmware_injection_error|sync_firmware_injection_state|retry_injection_frame)\b' \
+            "${SOURCE}" || true
+
+          echo
+          echo "=== REFERENCE WMA SOURCE: first 80 lines ==="
+          sed -n '1,80p' "${REF_SOURCE}"
+
+          echo
+          echo "=== REFERENCE WMA HEADER: injection helper definitions ==="
+          grep -n -E \
+            'static inline|wma_send_injection_frame_to_fw|wma_handle_injection_fw_response|wma_init_injection_queue|wma_deinit_injection_queue|wma_queue_injection_frame|wma_get_injection_queue_stats|wma_flush_injection_queue|wma_translate_fw_injection_error' \
+            "${REF_HEADER}" || true
+
+          echo
+          echo "=== SOURCE/HEADER DIFF ==="
+          diff -u "${REF_SOURCE}" "${SOURCE}" || true
+
+          echo
+          echo "=== HEADER DIFF ==="
+          diff -u "${REF_HEADER}" "${HEADER}" || true
+
+
+          
                          
       - name: Build kernel
         working-directory: kernel
