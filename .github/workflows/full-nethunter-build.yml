@@ -3993,6 +3993,16 @@ jobs:
             ../artifacts/source-audit/built-modules.txt \
             "${ARTIFACT_DIR}/built-modules.txt"
 
+             echo "=== Generate kernel Image checksum ==="
+
+             test -f "${OUT_DIR}/arch/arm64/boot/Image"
+
+             sha256sum \
+              "${OUT_DIR}/arch/arm64/boot/Image" \
+              > ../artifacts/source-audit/kernel-Image.sha256
+
+            cat ../artifacts/source-audit/kernel-Image.sha256
+
           cp -f \
             ../artifacts/source-audit/kernel-Image.sha256 \
             "${ARTIFACT_DIR}/kernel-Image.sha256"
