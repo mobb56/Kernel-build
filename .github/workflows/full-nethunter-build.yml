@@ -2455,6 +2455,32 @@ jobs:
             ../nethunter-reference/drivers/staging/qcacld-3.0 \
             2>/dev/null | head -80 || true
 
+
+
+
+
+      - name: Inspect WMA Kbuild context
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== Reference WMA Kbuild context ==="
+          sed -n '1935,1970p' \
+            ../nethunter-reference/drivers/staging/qcacld-3.0/Kbuild
+
+          echo
+          echo "=== Current WMA Kbuild context ==="
+          sed -n '1935,1970p' \
+            drivers/staging/qcacld-3.0/Kbuild
+
+          echo
+          echo "=== Include flag variables near WMA ==="
+          grep -nE \
+            '(^|[[:space:]])(WMA_|ccflags-y|subdir-ccflags-y|EXTRA_CFLAGS|CFLAGS)' \
+            drivers/staging/qcacld-3.0/Kbuild \
+            | sed -n '1,140p'
+
                          
       - name: Build kernel
         working-directory: kernel
