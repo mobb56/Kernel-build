@@ -887,22 +887,23 @@ jobs:
             --disable LOCALVERSION_AUTO \
             --set-str LOCALVERSION "-perf"
 
-          echo "Final local-version settings:"
-          grep -E '^CONFIG_(LOCALVERSION|LOCALVERSION_AUTO)=' "${CONFIG}" \
-            || true
-          grep -E '^# CONFIG_LOCALVERSION_AUTO is not set$' "${CONFIG}" \
-            || true
+          echo
+          echo "=== Final local-version settings ==="
+
+          grep -E '^CONFIG_LOCALVERSION=' "${CONFIG}"
+          grep -E '^# CONFIG_LOCALVERSION_AUTO is not set$' "${CONFIG}"
 
           echo
-          echo "=== Required final configuration ==="
+          echo "=== Verify no automatic git suffix can be added ==="
 
-          grep -Fxq 'CONFIG_LOCALVERSION="-perf"' "${CONFIG}"
-          grep -Fxq '# CONFIG_LOCALVERSION_AUTO is not set' "${CONFIG}"
+          if grep -Fxq 'CONFIG_LOCALVERSION_AUTO=y' "${CONFIG}"; then
+            echo "ERROR: CONFIG_LOCALVERSION_AUTO is still enabled."
+            exit 1
+          fi
 
           echo
-          echo "Final kernel local-version configuration is correct."
+          echo "Clean kernel release configuration confirmed."
           echo "Expected release suffix: -perf"
-          echo "CONFIG_LOCALVERSION_AUTO: disabled"
 
       # ============================================================
       # 24. VERIFY NETHUNTER CONFIGURATION
