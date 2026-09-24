@@ -878,20 +878,31 @@ jobs:
 
           CONFIG="${OUT_DIR}/.config"
 
+          test -s "${CONFIG}"
+
           echo "=== Set clean kernel release ==="
 
           scripts/config \
+            --file "${CONFIG}" \
             --disable LOCALVERSION_AUTO \
             --set-str LOCALVERSION "-perf"
 
-          echo
           echo "Final local-version settings:"
-          grep -E '^CONFIG_(LOCALVERSION|LOCALVERSION_AUTO)=' "${CONFIG}"
+          grep -E '^CONFIG_(LOCALVERSION|LOCALVERSION_AUTO)=' "${CONFIG}" \
+            || true
+          grep -E '^# CONFIG_LOCALVERSION_AUTO is not set$' "${CONFIG}" \
+            || true
+
+          echo
+          echo "=== Required final configuration ==="
 
           grep -Fxq 'CONFIG_LOCALVERSION="-perf"' "${CONFIG}"
           grep -Fxq '# CONFIG_LOCALVERSION_AUTO is not set' "${CONFIG}"
 
-          echo "Clean kernel release configuration applied."
+          echo
+          echo "Final kernel local-version configuration is correct."
+          echo "Expected release suffix: -perf"
+          echo "CONFIG_LOCALVERSION_AUTO: disabled"
 
       # ============================================================
       # 24. VERIFY NETHUNTER CONFIGURATION
