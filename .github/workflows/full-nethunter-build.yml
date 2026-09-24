@@ -3305,7 +3305,50 @@ jobs:
           echo "=== Companion HDD injection inspection complete ==="
 
           # Diagnostic-only run. Remove this after we inspect the output.
-          
+
+
+
+
+
+
+      - name: Inspect get_task_cred compatibility
+        if: always()
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== CURRENT get_task_cred REFERENCES ==="
+          grep -Rni \
+            --exclude-dir=.git \
+            -E 'get_task_cred|put_cred|struct cred' \
+            drivers/staging/qcacld-3.0/core/hdd \
+            drivers/staging/qcacld-3.0/core/wma \
+            | head -200 || true
+
+          echo
+          echo "=== CURRENT INJECTION SECURITY SOURCE ==="
+          sed -n '1,240p' \
+            drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c
+
+          echo
+          echo "=== REFERENCE INJECTION SECURITY SOURCE ==="
+          sed -n '1,240p' \
+            ../nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c
+
+          echo
+          echo "=== KERNEL CREDENTIAL API ==="
+          grep -Rni \
+            --include='*.h' \
+            --include='*.c' \
+            -E 'get_task_cred|task_cred' \
+            include kernel \
+            | head -100 || true
+
+          echo
+          echo "=== get_task_cred COMPATIBILITY INSPECTION COMPLETE ==="
+
+          exit 1
 
           
 
