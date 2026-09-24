@@ -1550,6 +1550,8 @@ jobs:
       # These are Kbuild variables.
       # They MUST NOT become CONFIG_* entries in .config.
       # ============================================================
+                      
+                         
       - name: Enable QCACLD3 injection Kbuild features
         working-directory: kernel
         shell: bash
@@ -1557,69 +1559,145 @@ jobs:
           set -euo pipefail
 
           KBUILD_FILE="drivers/staging/qcacld-3.0/Kbuild"
+
           test -f "${KBUILD_FILE}"
 
           echo "=== Enable QCACLD3 injection Kbuild features ==="
 
-          if ! grep -Fq 'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y' "${KBUILD_FILE}"; then
-            printf '%s\n' \
-              '# NetHunter frame injection support' \
-              'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y' \
-              'CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y' \
-              >> "${KBUILD_FILE}"
-          fi
+          # ------------------------------------------------------------
+          # Remove previous custom registrations from earlier workflow
+          # attempts. Do not touch the original QCACLD3 object lists.
+          # ------------------------------------------------------------
 
-          if ! grep -Fq 'ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT' "${KBUILD_FILE}"; then
-            printf '%s\n' \
-              'ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT' \
-              >> "${KBUILD_FILE}"
-          fi
-
-          if ! grep -Fq 'ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT' "${KBUILD_FILE}"; then
-            printf '%s\n' \
-              'ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT' \
-              >> "${KBUILD_FILE}"
-          fi
-                                
-                                    
-          echo
-          echo "=== Register HDD frame injection object ==="
-
-          # Remove any previous registration.
           sed -i \
             '\|HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o|d' \
             "${KBUILD_FILE}"
-            
-          echo
-          echo "=== Locate HDD OBJS aggregation point ==="
 
-          if ! awk '
-            $0 == "OBJS := $(HDD_OBJS)" { found=1 }
-            END { exit(found ? 0 : 1) }
-          ' "${KBUILD_FILE}"; then
-            echo "ERROR: HDD OBJS aggregation point was not found."
-            grep -nF 'OBJS := $(HDD_OBJS)' "${KBUILD_FILE}" || true
+          sed -i \
+            '\|WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o|d' \
+            "${KBUILD_FILE}"
+
+          sed -i \
+            '\|CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y|d' \
+            "${KBUILD_FILE}"
+
+          sed -i \
+            '\|CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y|d' \
+            "${KBUILD_FILE}"
+
+          sed -i \
+            '\|ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT|d' \
+            "${KBUILD_FILE}"
+
+          sed -i \
+            '\|ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT|d' \
+            "${KBUILD_FILE}"
+
+          # ------------------------------------------------------------
+          # Add the QCACLD3 feature variables and compiler defines near
+          # the beginning of the Kbuild file.
+          # ------------------------------------------------------------
+
+          sed -i '1i\
+          CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y\
+          CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y\
+          ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT\
+          ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT\
+          ' "${KBUILD_FILE}"
+
+          echo
+          echo "=== Verify QCACLD3 feature definitions ==="
+
+          grep -nF \
+            'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y' \
+            "${KBUILD_FILE}"
+
+          grep -nF \
+            'CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y' \
+            "${KBUILD_FILE}"
+
+          grep -nF \
+            'ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT' \
+            "${KBUILD_FILE}"
+
+          grep -nF \
+            'ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT' \
+            "${KBUILD_FILE}"
+
+          # ------------------------------------------------------------
+          # Register HDD frame injection object.
+          #
+          # The existing Kbuild uses:
+          #
+          #     OBJS := $(HDD_OBJS)
+          #
+          # We insert the injection object immediately before that
+          # aggregation point.
+          # ------------------------------------------------------------
+
+          echo
+          echo "=== Register HDD frame injection object ==="
+
+          HDD_OBJS_LINE="$(
+            grep -nF \
+              'OBJS := $(HDD_OBJS)' \
+              "${KBUILD_FILE}" |
+            head -n1 |
+            cut -d: -f1
+          )"
+
+          if [ -z "${HDD_OBJS_LINE}" ]; then
+            echo "ERROR: OBJS := \$(HDD_OBJS) was not found."
+            grep -nF '$(HDD_OBJS)' "${KBUILD_FILE}" || true
             exit 1
           fi
 
-          # Insert immediately before the exact aggregation line.
-          awk '
-            $0 == "OBJS := $(HDD_OBJS)" {
-              print "HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o"
-            }
-            { print }
-          ' "${KBUILD_FILE}" > "${KBUILD_FILE}.tmp"
+          echo "HDD OBJS aggregation line: ${HDD_OBJS_LINE}"
 
-          mv "${KBUILD_FILE}.tmp" "${KBUILD_FILE}"
+          sed -i \
+            "${HDD_OBJS_LINE}i HDD_OBJS += \$(HDD_SRC_DIR)/wlan_hdd_frame_inject.o" \
+            "${KBUILD_FILE}"
 
-          # Register the injection object immediately before HDD_OBJS
-          # is converted into the module object list.
-
-          
-          
+          # ------------------------------------------------------------
+          # Register WMA frame injection object.
+          #
+          # The existing Kbuild uses:
+          #
+          #     OBJS := $(WMA_OBJS)
+          #
+          # We insert the injection object immediately before that
+          # aggregation point.
+          # ------------------------------------------------------------
 
           echo
-          echo "=== Verify HDD placement ==="
+          echo "=== Register WMA frame injection object ==="
+
+          WMA_OBJS_LINE="$(
+            grep -nF \
+              'OBJS := $(WMA_OBJS)' \
+              "${KBUILD_FILE}" |
+            head -n1 |
+            cut -d: -f1
+          )"
+
+          if [ -z "${WMA_OBJS_LINE}" ]; then
+            echo "ERROR: OBJS := \$(WMA_OBJS) was not found."
+            grep -nF '$(WMA_OBJS)' "${KBUILD_FILE}" || true
+            exit 1
+          fi
+
+          echo "WMA OBJS aggregation line: ${WMA_OBJS_LINE}"
+
+          sed -i \
+            "${WMA_OBJS_LINE}i WMA_OBJS += \$(WMA_SRC_DIR)/wma_frame_inject.o" \
+            "${KBUILD_FILE}"
+
+          # ------------------------------------------------------------
+          # Verify that each custom object is registered exactly once.
+          # ------------------------------------------------------------
+
+          echo
+          echo "=== Verify injection object registration ==="
 
           HDD_INJECT_COUNT="$(
             grep -Fc \
@@ -1627,68 +1705,49 @@ jobs:
               "${KBUILD_FILE}"
           )"
 
+          WMA_INJECT_COUNT="$(
+            grep -Fc \
+              'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \
+              "${KBUILD_FILE}"
+          )"
+
           if [ "${HDD_INJECT_COUNT}" -ne 1 ]; then
-            echo "ERROR: Expected exactly one HDD frame-injection registration; found ${HDD_INJECT_COUNT}."
+            echo "ERROR: Expected exactly one HDD injection object registration; found ${HDD_INJECT_COUNT}."
             exit 1
           fi
+
+          if [ "${WMA_INJECT_COUNT}" -ne 1 ]; then
+            echo "ERROR: Expected exactly one WMA injection object registration; found ${WMA_INJECT_COUNT}."
+            exit 1
+          fi
+
+          echo
+          echo "=== HDD injection placement ==="
 
           grep -n -B3 -A3 \
             -F 'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
             "${KBUILD_FILE}"
 
           echo
-          echo "HDD frame injection object registered correctly."
+          echo "=== WMA injection placement ==="
 
-                 
-          
-          echo
-          echo "=== Register WMA frame injection object ==="
+          grep -n -B3 -A3 \
+            -F 'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \
+            "${KBUILD_FILE}"
 
-          if ! grep -Fq 'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' "${KBUILD_FILE}"; then
-            sed -i \
-              '/^WMA_OBJS := $(WMA_OBJS)$/i\
-           ifeq ($(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT), y)\
-          WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o\
-          endif' \
-              "${KBUILD_FILE}"
-          fi
+          # ------------------------------------------------------------
+          # Final verification.
+          # ------------------------------------------------------------
 
           echo
-          echo "=== Verify injection configuration ==="
+          echo "=== Final QCACLD3 injection Kbuild configuration ==="
 
           grep -n -E \
-            'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT|CONFIG_FEATURE_MONITOR_MODE_SUPPORT|DFEATURE_FRAME_INJECTION_SUPPORT|DFEATURE_MONITOR_MODE_SUPPORT' \
-            "${KBUILD_FILE}"
-
-          echo
-          echo "=== Verify HDD placement ==="
-
-          grep -n -B3 -A5 \
-            '^HDD_OBJS := $(HDD_OBJS)$' \
-            "${KBUILD_FILE}"
-
-          echo
-          echo "=== Verify WMA placement ==="
-
-          grep -n -B3 -A5 \
-            '^WMA_OBJS := $(WMA_OBJS)$' \
-            "${KBUILD_FILE}"
-
-          echo
-          echo "=== Verify injection objects ==="
-
-          grep -n \
-            'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
-            "${KBUILD_FILE}"
-
-          grep -n \
-            'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \
+            'CONFIG_FEATURE_(FRAME_INJECTION|MONITOR_MODE)_SUPPORT|wlan_hdd_frame_inject\.o|wma_frame_inject\.o|FEATURE_(FRAME_INJECTION|MONITOR_MODE)_SUPPORT' \
             "${KBUILD_FILE}"
 
           echo
           echo "QCACLD3 injection Kbuild configuration complete."
-
-
 
 
                         
@@ -1729,7 +1788,7 @@ jobs:
           echo "=== DIAGNOSTIC COMPLETE ==="
 
           
-          exit 1
+          
           
                     
 
