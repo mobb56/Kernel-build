@@ -1669,29 +1669,30 @@ jobs:
           set -euo pipefail
 
           KBUILD_FILE="drivers/staging/qcacld-3.0/Kbuild"
-          HDD_INC="-I\$(srctree)/\$(WLAN_ROOT)/core/hdd/inc"
+          HDD_INC='ccflags-y += -I$(srctree)/$(WLAN_ROOT)/core/hdd/inc'
 
           test -f "${KBUILD_FILE}"
           test -f "drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h"
 
           echo "=== Add HDD injection include path to WMA ==="
 
-          if ! grep -Fq -- "${HDD_INC}" "${KBUILD_FILE}"; then
-            sed -i \
-              '/^ccflags-y += \$(WMA_INC)$/a\
-           ccflags-y += -I$(srctree)/$(WLAN_ROOT)/core/hdd/inc' \
-              "${KBUILD_FILE}"
+          if ! grep -Fqx "${HDD_INC}" "${KBUILD_FILE}"; then
+            LINE="$(grep -n -F 'ccflags-y += $(WMA_INC)' "${KBUILD_FILE}" | head -n1 | cut -d: -f1)"
+
+            test -n "${LINE}"
+
+            sed -i "${LINE}a\\
+          ${HDD_INC}" "${KBUILD_FILE}"
           fi
 
+          echo
           echo "=== Verify HDD injection include path ==="
 
           grep -n -A3 \
-            'ccflags-y += \$(WMA_INC)' \
+            -F 'ccflags-y += $(WMA_INC)' \
             "${KBUILD_FILE}"
 
-          grep -Fq \
-            'ccflags-y += -I$(srctree)/$(WLAN_ROOT)/core/hdd/inc' \
-            "${KBUILD_FILE}"
+          grep -Fqx "${HDD_INC}" "${KBUILD_FILE}"
 
           echo "WMA HDD injection include path fixed."
 
