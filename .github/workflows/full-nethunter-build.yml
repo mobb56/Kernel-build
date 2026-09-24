@@ -3971,6 +3971,24 @@ jobs:
             ../artifacts/source-audit/qcacld3-symbols.txt \
             "${ARTIFACT_DIR}/qcacld3-symbols.txt"
 
+
+
+            echo "=== Generate built module manifest ==="
+
+          find "${OUT_DIR}" \
+          -type f \
+          -name '*.ko' \
+          -print \
+          | sort \
+          > ../artifacts/source-audit/built-modules.txt
+
+          test -s ../artifacts/source-audit/built-modules.txt
+
+           echo "Built module manifest:"
+           cat ../artifacts/source-audit/built-modules.txt
+
+            
+
           cp -f \
             ../artifacts/source-audit/built-modules.txt \
             "${ARTIFACT_DIR}/built-modules.txt"
