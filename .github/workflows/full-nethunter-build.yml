@@ -3775,6 +3775,10 @@ jobs:
           echo
           echo "=== Verify final kernel release before build ==="
 
+          : > .scmversion
+          test -f .scmversion
+          echo "SCM version suffix disabled."
+
           RELEASE="$(make -s \
             O="${OUT_DIR}" \
             ARCH=arm64 \
