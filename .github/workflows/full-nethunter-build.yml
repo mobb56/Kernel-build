@@ -3702,15 +3702,25 @@ jobs:
 
           LLVM_BIN="${GITHUB_WORKSPACE}/llvm-bin"
 
-          test -d "${LLVM_BIN}"
-          test -x "${LLVM_BIN}/clang"
-          test -x "${LLVM_BIN}/ld.lld"
-          test -x "${LLVM_BIN}/llvm-ar"
-          test -x "${LLVM_BIN}/llvm-nm"
-          test -x "${LLVM_BIN}/llvm-objcopy"
-          test -x "${LLVM_BIN}/llvm-objdump"
-          test -x "${LLVM_BIN}/llvm-strip"
-          test -x "${LLVM_BIN}/llvm-readelf"
+             echo "=== Checking LLVM toolchain ==="
+
+            for tool in \
+            clang \
+            ld.lld \
+            llvm-ar \
+            llvm-nm \
+            llvm-objcopy \
+            llvm-objdump \
+            llvm-strip \
+            llvm-readelf
+           do
+            if [ ! -x "${LLVM_BIN}/${tool}" ]; then
+            echo "ERROR: Missing or non-executable: ${LLVM_BIN}/${tool}"
+          exit 1
+          fi
+
+          echo "OK: ${tool}"
+          done
 
           export PATH="${LLVM_BIN}:${PATH}"
           hash -r
