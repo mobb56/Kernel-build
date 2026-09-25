@@ -3700,7 +3700,7 @@ jobs:
 
           echo "=== Kernel build ==="
 
-          LLVM_BIN="${GITHUB_WORKSPACE}/llvm-bin"
+          LLVM_BIN="${LLVM_DIR}/bin"
 
              echo "=== Checking LLVM toolchain ==="
 
