@@ -2732,8 +2732,7 @@ jobs:
             ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
-            CROSS_COMPILE="${CROSS_COMPILE}" \
-            LOCALVERSION= \
+            CROSS_COMPILE="${CROSS_COMPILE}" 
             kernelrelease)"
 
           echo "KERNEL_RELEASE=${RELEASE}"
