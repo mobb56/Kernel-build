@@ -4407,7 +4407,6 @@ jobs:
             "USB_CONFIGFS_EEM=y"
             "USB_CONFIGFS_F_HID=y"
             "USB_CONFIGFS_F_FS=y"
-            "USB_CONFIGFS_F_MASS_STORAGE=y"
             "USB_SERIAL=y"
             "USB_SERIAL_GENERIC=y"
             "USB_USBNET=m"
