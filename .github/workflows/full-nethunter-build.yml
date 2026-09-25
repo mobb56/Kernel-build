@@ -733,40 +733,29 @@ jobs:
               if [ "${TYPE}" = "ADDED" ]; then
            EXPECTED=""
 
-            while IFS='=' read -r ALLOWED_SYMBOL ALLOWED_VALUE; do
-           if [ "${ALLOWED_SYMBOL}" = "${SYMBOL}" ]; then
-           EXPECTED="${ALLOWED_VALUE}"
-           break
-           fi
-           done < "${ALLOWED_CHANGES}"
+            awk -F'|' \
+             -v allowed="${ALLOWED_CHANGES}" \
+             -v differences="${DIFFERENCES}" '
+           BEGIN {
+           while ((getline line < allowed) > 0) {
+           split(line, parts, "=")
+           allowed_value[parts[1]] = substr(line, length(parts[1]) + 2)
+            }
+           close(allowed)
+            }
+           {
+            type   = $1
+            symbol = $2
+            stock  = $3
+             final  = $4
 
-              if [ -n "${EXPECTED}" ] && [ "${FINAL_VALUE}" = "${EXPECTED}" ]; then
-          echo "ALLOWED: ${SYMBOL}: <absent-from-stock> -> ${FINAL_VALUE}"
-            else
-             echo "ADDED|${SYMBOL}|<absent-from-stock>|${FINAL_VALUE}" \
-          >> "${DIFFERENCES}"
-            fi
-
-          continue
-           fi
-
-            EXPECTED=""
-
-            while IFS='=' read -r ALLOWED_SYMBOL ALLOWED_VALUE; do
-              if [ "${ALLOWED_SYMBOL}" = "${SYMBOL}" ]; then
-                EXPECTED="${ALLOWED_VALUE}"
-                break
-              fi
-            done < "${ALLOWED_CHANGES}"
-
-            if [ -n "${EXPECTED}" ] && [ "${FINAL_VALUE}" = "${EXPECTED}" ]; then
-              echo "ALLOWED: ${SYMBOL}: ${STOCK_VALUE} -> ${FINAL_VALUE}"
-            else
-              echo "${TYPE}|${SYMBOL}|${STOCK_VALUE}|${FINAL_VALUE}" \
-                >> "${DIFFERENCES}"
-            fi
-
-          done < "${TMP_DIR}/all-differences"
+             if (symbol in allowed_value && final == allowed_value[symbol]) {
+           print "ALLOWED: " symbol ": " stock " -> " final
+           } else {
+            print type "|" symbol "|" stock "|" final >> differences
+           }
+           }
+              '. "${TMP_DIR}/all-differences"
           echo
           echo "============================================================"
           echo " UNEXPECTED STOCK CONFIGURATION DIFFERENCES"
