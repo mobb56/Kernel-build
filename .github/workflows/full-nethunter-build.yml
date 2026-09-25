@@ -127,58 +127,39 @@ jobs:
       # 4. PREPARE DETERMINISTIC LLVM TOOLCHAIN
       # ============================================================
 
+         
       - name: Prepare Android LLVM toolchain
         shell: bash
         run: |
           set -euo pipefail
 
           ANDROID_LLVM_DIR="${GITHUB_WORKSPACE}/android-llvm"
-          LLVM_BIN="${GITHUB_WORKSPACE}/llvm-bin"
 
           test -x "${ANDROID_LLVM_DIR}/bin/clang"
           test -x "${ANDROID_LLVM_DIR}/bin/ld.lld"
           test -x "${ANDROID_LLVM_DIR}/bin/llvm-ar"
           test -x "${ANDROID_LLVM_DIR}/bin/llvm-nm"
           test -x "${ANDROID_LLVM_DIR}/bin/llvm-objcopy"
-          test -x "${ANDROID_LLVM_DIR}/bin/llvm-objdump"
           test -x "${ANDROID_LLVM_DIR}/bin/llvm-strip"
           test -x "${ANDROID_LLVM_DIR}/bin/llvm-readelf"
+          test -x "${ANDROID_LLVM_DIR}/bin/llvm-objdump"
 
-          rm -rf "${LLVM_BIN}"
-          mkdir -p "${LLVM_BIN}"
+          echo "=== Android LLVM toolchain selected ==="
 
-          ln -sf "${ANDROID_LLVM_DIR}/bin/clang" \
-            "${LLVM_BIN}/clang"
-
-          ln -sf "${ANDROID_LLVM_DIR}/bin/ld.lld" \
-            "${LLVM_BIN}/ld.lld"
-
-          ln -sf "${ANDROID_LLVM_DIR}/bin/llvm-ar" \
-            "${LLVM_BIN}/llvm-ar"
-
-          ln -sf "${ANDROID_LLVM_DIR}/bin/llvm-nm" \
-            "${LLVM_BIN}/llvm-nm"
-
-          ln -sf "${ANDROID_LLVM_DIR}/bin/llvm-objcopy" \
-            "${LLVM_BIN}/llvm-objcopy"
-
-          ln -sf "${ANDROID_LLVM_DIR}/bin/llvm-objdump" \
-            "${LLVM_BIN}/llvm-objdump"
-
-          ln -sf "${ANDROID_LLVM_DIR}/bin/llvm-strip" \
-            "${LLVM_BIN}/llvm-strip"
-
-          ln -sf "${ANDROID_LLVM_DIR}/bin/llvm-readelf" \
-            "${LLVM_BIN}/llvm-readelf"
-
-          echo "LLVM_BIN=${LLVM_BIN}" >> "${GITHUB_ENV}"
-          echo "PATH=${LLVM_BIN}:${PATH}" >> "${GITHUB_ENV}"
+          echo "LLVM_DIR=${ANDROID_LLVM_DIR}" >> "${GITHUB_ENV}"
+          echo "PATH=${ANDROID_LLVM_DIR}/bin:${PATH}" >> "${GITHUB_ENV}"
 
           echo
-          echo "=== Android LLVM toolchain selected ==="
-          "${LLVM_BIN}/clang" --version
-          "${LLVM_BIN}/ld.lld" --version
+          echo "=== Verify Android Clang directly ==="
 
+          "${ANDROID_LLVM_DIR}/bin/clang" --version
+          "${ANDROID_LLVM_DIR}/bin/ld.lld" --version
+
+          "${ANDROID_LLVM_DIR}/bin/clang" --version \
+            | grep -q -F 'clang version 21.0.0'
+
+          echo
+          echo "Android LLVM toolchain prepared successfully."
       # ============================================================
       # 5. VERIFY THAT CLANG 21 IS ACTUALLY SELECTED
       # ============================================================
