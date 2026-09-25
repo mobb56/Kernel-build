@@ -3781,7 +3781,6 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
-            LOCALVERSION= \
             kernelrelease)"
 
           echo "KERNEL_RELEASE=${RELEASE}"
@@ -3799,7 +3798,7 @@ jobs:
            LLVM=1 \
            LLVM_IAS=1 \
            CROSS_COMPILE="${CROSS_COMPILE}" \
-           LOCALVERSION=
+           
 
            echo
            echo "=== Kernel compilation completed ==="
@@ -3810,7 +3809,6 @@ jobs:
            LLVM=1 \
            LLVM_IAS=1 \
            CROSS_COMPILE="${CROSS_COMPILE}" \
-           LOCALVERSION= \
            kernelrelease)"
 
            echo "ACTUAL_KERNEL_RELEASE=${ACTUAL_RELEASE}"
