@@ -4020,6 +4020,261 @@ jobs:
           echo "Kernel passed the final static safety and integrity gate."
 
 
+
+      - name: Final static compatibility audit
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CONFIG="${OUT_DIR}/.config"
+          IMAGE="${OUT_DIR}/arch/arm64/boot/Image"
+
+          echo "========================================"
+          echo " FINAL STATIC COMPATIBILITY AUDIT"
+          echo "========================================"
+
+          test -s "${CONFIG}"
+          test -s "${IMAGE}"
+
+          echo
+          echo "=== Kernel release ==="
+          RELEASE="$(make -s \
+            O="${OUT_DIR}" \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            LOCALVERSION= \
+            kernelrelease)"
+
+          echo "KERNEL_RELEASE=${RELEASE}"
+          test "${RELEASE}" = "4.19.325-cip135-st19-perf"
+
+          echo
+          echo "=== Stock hardware-critical configuration ==="
+
+          REQUIRED_STOCK=(
+            "INPUT_TOUCHSCREEN=y"
+            "TOUCHSCREEN_NT36xxx_HOSTDL_SPI_MMI=m"
+            "INPUT_TOUCHSCREEN_FOCALTECH_0FLASH_MMI=m"
+            "INPUT_TOUCHSCREEN_FOCALTECH_0FLASH_MMI_DRM_PANEL=y"
+            "TOUCHSCREEN_CHIPONE_TDDI=m"
+            "TOUCHSCREEN_CHIPONE_TDDI_ESD=y"
+            "INPUT_MISC_FPC1020=m"
+            "INPUT_CHIPONE_FPS_MMI=m"
+            "I2C_QCOM_GENI=y"
+            "SPI_QCOM_GENI=y"
+            "RMNET=y"
+            "WLAN=y"
+            "QCA_CLD_WLAN=m"
+            "IPA3=y"
+            "IPA_WDI_UNIFIED_API=y"
+            "RMNET_IPA3=y"
+            "QCOM_QMI_HELPERS=y"
+            "CNSS_UTILS=y"
+            "CNSS_GENL=y"
+            "USB_GADGET=y"
+            "USB_CONFIGFS=y"
+            "USB_CONFIGFS_UEVENT=y"
+            "USB_CONFIGFS_ACM=y"
+            "USB_CONFIGFS_NCM=y"
+            "HIDRAW=y"
+            "UHID=y"
+            "MODVERSIONS=y"
+            "HZ_300=y"
+            "CLANG_VERSION=210000"
+            "AS_VERSION=210000"
+            "LLD_VERSION=210000"
+          )
+
+          for item in "${REQUIRED_STOCK[@]}"; do
+            symbol="${item%%=*}"
+            expected="${item#*=}"
+
+            actual="$(
+              scripts/config \
+                --file "${CONFIG}" \
+                --state "${symbol}" 2>/dev/null || true
+            )"
+
+            echo "${symbol}: ${actual}"
+
+            test "${actual}" = "${expected}"
+          done
+
+          echo
+          echo "=== NetHunter configuration ==="
+
+          REQUIRED_NETHUNTER=(
+            "BT=y"
+            "BT_BREDR=y"
+            "BT_LE=y"
+            "BT_RFCOMM=y"
+            "BT_RFCOMM_TTY=y"
+            "BT_BNEP=m"
+            "BT_HIDP=m"
+            "BT_HCIUART=m"
+            "BT_HCIUART_H4=y"
+            "BT_HCIVHCI=m"
+            "USB_CONFIGFS_RNDIS=y"
+            "USB_CONFIGFS_ECM=y"
+            "USB_CONFIGFS_EEM=y"
+            "USB_CONFIGFS_F_HID=y"
+            "USB_CONFIGFS_F_FS=y"
+            "USB_CONFIGFS_F_MASS_STORAGE=y"
+            "USB_SERIAL=y"
+            "USB_SERIAL_GENERIC=y"
+            "USB_USBNET=m"
+            "USB_NET_CDCETHER=m"
+            "USB_NET_CDC_NCM=m"
+            "PACKET=y"
+            "SENSORS_SSC=y"
+            "SENSORS_CLASS=m"
+            "QCA_CLD_WLAN=m"
+          )
+
+          for item in "${REQUIRED_NETHUNTER[@]}"; do
+            symbol="${item%%=*}"
+            expected="${item#*=}"
+
+            actual="$(
+              scripts/config \
+                --file "${CONFIG}" \
+                --state "${symbol}" 2>/dev/null || true
+            )"
+
+            echo "${symbol}: ${actual}"
+
+            test "${actual}" = "${expected}"
+          done
+
+          echo
+          echo "=== Forbidden QCACLD3 feature symbols in kernel .config ==="
+
+          if grep -Eq \
+            '^(CONFIG_FEATURE_FRAME_INJECTION_SUPPORT|CONFIG_FEATURE_MONITOR_MODE_SUPPORT)=' \
+            "${CONFIG}"; then
+            echo "ERROR: QCACLD3 feature variables leaked into kernel .config."
+            exit 1
+          fi
+
+          echo "No forbidden CONFIG_FEATURE_* entries found."
+
+          echo
+          echo "=== Clean release configuration ==="
+
+          grep -Fxq 'CONFIG_LOCALVERSION="-perf"' "${CONFIG}"
+          grep -Fxq '# CONFIG_LOCALVERSION_AUTO is not set' "${CONFIG}"
+
+          echo "LOCALVERSION=-perf"
+          echo "LOCALVERSION_AUTO disabled."
+
+          echo
+          echo "=== Kernel Image size ==="
+
+          IMAGE_SIZE="$(stat -c '%s' "${IMAGE}")"
+          BOOT_PARTITION_SIZE=100663296
+
+          echo "Image bytes: ${IMAGE_SIZE}"
+          echo "Boot partition bytes: ${BOOT_PARTITION_SIZE}"
+
+          test "${IMAGE_SIZE}" -lt "${BOOT_PARTITION_SIZE}"
+
+          echo "Kernel Image fits within the stock boot partition."
+
+          echo
+          echo "=== Compiled module ABI audit ==="
+
+          EXPECTED_VERMAGIC="4.19.325-cip135-st19-perf SMP preempt mod_unload modversions aarch64"
+
+          MODULE_COUNT=0
+
+          while IFS= read -r module; do
+            MODULE_COUNT=$((MODULE_COUNT + 1))
+
+            vermagic="$(
+              modinfo -F vermagic "${module}" 2>/dev/null || true
+            )"
+
+            echo "$(basename "${module}"): ${vermagic}"
+
+            test "${vermagic}" = "${EXPECTED_VERMAGIC}"
+          done < <(
+            find "${OUT_DIR}" \
+              -type f \
+              -name '*.ko' \
+              -print \
+              | sort
+          )
+
+          test "${MODULE_COUNT}" -gt 0
+
+          echo
+          echo "Verified module count: ${MODULE_COUNT}"
+          echo "All compiled modules have the expected ABI."
+
+          echo
+          echo "=== QCACLD3 NetHunter injection symbols ==="
+
+          WLAN_MODULE="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
+
+          test -s "${WLAN_MODULE}"
+
+          REQUIRED_SYMBOLS=(
+            "wma_process_injection_queue_work"
+            "hdd_init_frame_injection"
+            "hdd_deinit_frame_injection"
+            "hdd_frame_inject_netlink"
+            "hdd_frame_inject_ioctl"
+            "hdd_frame_inject_enable"
+            "hdd_frame_inject_disable"
+            "wma_process_injection_queue"
+          )
+
+          for symbol in "${REQUIRED_SYMBOLS[@]}"; do
+            echo "Checking ${symbol}"
+
+            if ! llvm-nm -a "${WLAN_MODULE}" 2>/dev/null \
+                | grep -Eq "[[:space:]]${symbol}$"; then
+              echo "ERROR: Missing QCACLD3 injection symbol: ${symbol}"
+              exit 1
+            fi
+          done
+
+          echo
+          echo "All required QCACLD3 injection symbols are present."
+
+          echo
+          echo "=== Flashing safety audit ==="
+
+          if find . -maxdepth 3 \
+              -type f \
+              \( -name 'boot.img' -o -name 'vendor_boot.img' \) \
+              -print \
+              | grep -q .; then
+            echo "ERROR: Unexpected flashable boot image found."
+            exit 1
+          fi
+
+          if find . -maxdepth 4 \
+              -type d \
+              -iname '*AnyKernel*' \
+              -print \
+              | grep -q .; then
+            echo "ERROR: AnyKernel3 content found."
+            exit 1
+          fi
+
+          echo "No flashable boot image generated."
+          echo "No AnyKernel3 content found."
+
+          echo
+          echo "========================================"
+          echo " FINAL STATIC AUDIT PASSED"
+          echo "========================================"
+
+
        
       - name: Package verified kernel artifacts
         working-directory: kernel
