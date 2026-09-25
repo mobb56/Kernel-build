@@ -920,6 +920,11 @@ jobs:
           grep -Fxq 'CONFIG_LOCALVERSION="-perf"' "${CONFIG}"
           grep -Fxq '# CONFIG_LOCALVERSION_AUTO is not set' "${CONFIG}"
 
+
+          : > .scmversion
+          test -f .scmversion
+          echo "SCM version suffix disabled."
+
           echo
           echo "=== Verify expected kernel release ==="
 
