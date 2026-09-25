@@ -4359,7 +4359,7 @@ jobs:
           )
 
             for item in "${REQUIRED_STOCK[@]}"; do
-           symbol="${item%%=*}"
+           symbol="CONFIG_${item%%=*}"
            expected="${item#*=}"
 
           actual="$(grep -E "^${symbol}=" "${CONFIG}" | head -n 1 || true)"
