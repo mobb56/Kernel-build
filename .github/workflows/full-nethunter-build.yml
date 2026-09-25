@@ -2697,6 +2697,22 @@ jobs:
 
           test -s "${CONFIG}"
 
+          echo "=== Enforce final kernel release configuration ==="
+
+            scripts/config \
+          --file "${CONFIG}" \
+          --disable LOCALVERSION_AUTO \
+          --set-str LOCALVERSION "-perf-g39bcecd5c63d"
+
+           echo
+           echo "=== Final local-version settings ==="
+
+           grep -E '^CONFIG_LOCALVERSION=' "${CONFIG}"
+           grep -E '^# CONFIG_LOCALVERSION_AUTO is not set$' "${CONFIG}"
+
+          test "$(scripts/config --file "${CONFIG}" --state LOCALVERSION)" = '-perf-g39bcecd5c63d'
+          test "$(scripts/config --file "${CONFIG}" --state LOCALVERSION_AUTO)" = 'n'
+
           echo "=== Kernel local-version configuration ==="
 
           grep -Fxq 'CONFIG_LOCALVERSION="-perf-g39bcecd5c63d"' "${CONFIG}"
