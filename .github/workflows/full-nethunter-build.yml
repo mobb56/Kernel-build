@@ -917,8 +917,8 @@ jobs:
           grep -E '^CONFIG_LOCALVERSION=' "${CONFIG}"
           grep -E '^# CONFIG_LOCALVERSION_AUTO is not set$' "${CONFIG}"
 
-          test "$(scripts/config --file "${CONFIG}" --state LOCALVERSION)" = '-perf-g39bcecd5c63d'
-          test "$(scripts/config --file "${CONFIG}" --state LOCALVERSION_AUTO)" = 'n'
+          grep -Fxq 'CONFIG_LOCALVERSION="-perf"' "${CONFIG}"
+          grep -Fxq '# CONFIG_LOCALVERSION_AUTO is not set' "${CONFIG}"
 
           echo
           echo "=== Verify expected kernel release ==="
