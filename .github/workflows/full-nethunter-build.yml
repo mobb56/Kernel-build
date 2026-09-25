@@ -2705,7 +2705,13 @@ jobs:
           echo
           echo "=== Verify exact kernel release ==="
 
-          RELEASE="$(make -s \
+          : > .scmversion
+           test -f .scmversion
+           echo "SCM version suffix disabled."
+
+        
+
+            RELEASE="$(make -s \
             O="${OUT_DIR}" \
             ARCH=arm64 \
             LLVM=1 \
