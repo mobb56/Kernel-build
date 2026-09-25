@@ -134,6 +134,7 @@ jobs:
           set -euo pipefail
 
           ANDROID_LLVM_DIR="${GITHUB_WORKSPACE}/android-llvm"
+          LLVM_BIN="${ANDROID_LLVM_DIR}/bin"
 
           test -x "${ANDROID_LLVM_DIR}/bin/clang"
           test -x "${ANDROID_LLVM_DIR}/bin/ld.lld"
@@ -147,7 +148,8 @@ jobs:
           echo "=== Android LLVM toolchain selected ==="
 
           echo "LLVM_DIR=${ANDROID_LLVM_DIR}" >> "${GITHUB_ENV}"
-          echo "PATH=${ANDROID_LLVM_DIR}/bin:${PATH}" >> "${GITHUB_ENV}"
+          echo "LLVM_BIN=${LLVM_BIN}" >> "${GITHUB_ENV}"
+          echo "PATH=${LLVM_BIN}:${PATH}" >> "${GITHUB_ENV}"
 
           echo
           echo "=== Verify Android Clang directly ==="
