@@ -3795,6 +3795,14 @@ jobs:
           : > .scmversion
           test -f .scmversion
 
+              make -s \
+               O="${OUT_DIR}" \
+               ARCH=arm64 \
+               LLVM=1 \
+               LLVM_IAS=1 \
+               CROSS_COMPILE="${CROSS_COMPILE}" \
+               olddefconfig
+
           echo "CONFIG_LOCALVERSION:"
           grep '^CONFIG_LOCALVERSION=' "${CONFIG}"
 
