@@ -3790,7 +3790,7 @@ jobs:
               scripts/config \
             --file "${CONFIG}" \
             --disable LOCALVERSION_AUTO \
-            --set-str LOCALVERSION "-perf-g39bcecd5c63d"
+            --set-str LOCALVERSION "-perf"
 
             : > .scmversion
             test -f .scmversion
@@ -3809,7 +3809,7 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
            CROSS_COMPILE="${CROSS_COMPILE}" \
-           LOCALVERSION="-perf-g39bcecd5c63d" \
+           LOCALVERSION="-g39bcecd5c63d" \
            kernelrelease)"
 
            echo "KERNEL_RELEASE=${RELEASE}"
@@ -3827,7 +3827,7 @@ jobs:
               LLVM=1 \
               LLVM_IAS=1 \
               CROSS_COMPILE="${CROSS_COMPILE}" \
-              LOCALVERSION="-perf-g39bcecd5c63d"
+              LOCALVERSION="-g39bcecd5c63d"
            
 
            echo
@@ -3839,7 +3839,7 @@ jobs:
               LLVM=1 \
              LLVM_IAS=1 \
              CROSS_COMPILE="${CROSS_COMPILE}" \
-             LOCALVERSION="-perf-g39bcecd5c63d" \
+             LOCALVERSION="-g39bcecd5c63d" \
              kernelrelease)"
 
            echo "ACTUAL_KERNEL_RELEASE=${ACTUAL_RELEASE}"
