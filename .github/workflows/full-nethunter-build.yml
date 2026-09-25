@@ -3526,6 +3526,14 @@ jobs:
 
            echo
 
+            echo "=== Disable SCM version suffix ==="
+
+           : > .scmversion
+
+           test -f .scmversion
+
+          echo "SCM version suffix disabled."
+
           echo
           echo "=== Verify final kernel release before build ==="
 
