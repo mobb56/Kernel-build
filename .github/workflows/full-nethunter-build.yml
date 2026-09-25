@@ -3783,76 +3783,64 @@ jobs:
         
 
           echo
-          echo "=== Force stock-compatible kernel release ==="
+          echo "=== Set stock-compatible kernel release ==="
 
-          CONFIG="${OUT_DIR}/.config"
+             CONFIG="${OUT_DIR}/.config"
 
-          scripts/config \
-          --file "${CONFIG}" \
-          --disable LOCALVERSION_AUTO \
-          --set-str LOCALVERSION "-perf-g39bcecd5c63d"
+              scripts/config \
+            --file "${CONFIG}" \
+            --disable LOCALVERSION_AUTO \
+            --set-str LOCALVERSION "-perf-g39bcecd5c63d"
 
-          : > .scmversion
-          test -f .scmversion
+            : > .scmversion
+            test -f .scmversion
 
-              make -s \
-               O="${OUT_DIR}" \
-               ARCH=arm64 \
-               LLVM=1 \
-               LLVM_IAS=1 \
-               CROSS_COMPILE="${CROSS_COMPILE}" \
-               olddefconfig
+            echo "CONFIG_LOCALVERSION:"
+            grep '^CONFIG_LOCALVERSION=' "${CONFIG}"
 
-          echo "CONFIG_LOCALVERSION:"
-          grep '^CONFIG_LOCALVERSION=' "${CONFIG}"
+            echo "CONFIG_LOCALVERSION_AUTO:"
+            grep '^# CONFIG_LOCALVERSION_AUTO is not set$' "${CONFIG}"
 
-          echo "CONFIG_LOCALVERSION_AUTO:"
-          grep '^# CONFIG_LOCALVERSION_AUTO is not set$' "${CONFIG}"
+            echo "=== Verify kernel release with explicit LOCALVERSION ==="
 
-          echo "=== Verify final kernel release before build ==="
-
-          RELEASE="$(make -s \
-          O="${OUT_DIR}" \
+            RELEASE="$(make -s \
+            O="${OUT_DIR}" \
            ARCH=arm64 \
-           LLVM=1 \
-           LLVM_IAS=1 \
+            LLVM=1 \
+            LLVM_IAS=1 \
            CROSS_COMPILE="${CROSS_COMPILE}" \
-           LOCALVERSION= \
+           LOCALVERSION="-perf-g39bcecd5c63d" \
            kernelrelease)"
 
-          echo "KERNEL_RELEASE=${RELEASE}"
+           echo "KERNEL_RELEASE=${RELEASE}"
 
-          test "${RELEASE}" = "4.19.325-cip135-st19-perf-g39bcecd5c63d"
+           test "${RELEASE}" = "4.19.325-cip135-st19-perf-g39bcecd5c63d"
 
-          echo "Stock-compatible kernel release confirmed."
-
-          echo "KERNEL_RELEASE=${RELEASE}"
-
-          test "${RELEASE}" = "4.19.325-cip135-st19-perf-g39bcecd5c63d"
-
-          echo "Kernel release is correct."
+           echo "Stock-compatible kernel release confirmed."
 
           echo
           echo "=== Starting kernel compilation ==="
 
-           make -j2 \
-           O="${OUT_DIR}" \
-           ARCH=arm64 \
-           LLVM=1 \
-           LLVM_IAS=1 \
-           CROSS_COMPILE="${CROSS_COMPILE}" \
+              make -j2 \
+              O="${OUT_DIR}" \
+              ARCH=arm64 \
+              LLVM=1 \
+              LLVM_IAS=1 \
+              CROSS_COMPILE="${CROSS_COMPILE}" \
+              LOCALVERSION="-perf-g39bcecd5c63d"
            
 
            echo
            echo "=== Kernel compilation completed ==="
 
-           ACTUAL_RELEASE="$(make -s \
-           O="${OUT_DIR}" \
-           ARCH=arm64 \
-           LLVM=1 \
-           LLVM_IAS=1 \
-           CROSS_COMPILE="${CROSS_COMPILE}" \
-           kernelrelease)"
+              ACTUAL_RELEASE="$(make -s \
+              O="${OUT_DIR}" \
+              ARCH=arm64 \
+              LLVM=1 \
+             LLVM_IAS=1 \
+             CROSS_COMPILE="${CROSS_COMPILE}" \
+             LOCALVERSION="-perf-g39bcecd5c63d" \
+             kernelrelease)"
 
            echo "ACTUAL_KERNEL_RELEASE=${ACTUAL_RELEASE}"
 
