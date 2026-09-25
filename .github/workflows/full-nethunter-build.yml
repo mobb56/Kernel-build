@@ -4312,11 +4312,11 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
-            LOCALVERSION= \
+            LOCALVERSION="-perf-g39bcecd5c63d" \
             kernelrelease)"
 
           echo "KERNEL_RELEASE=${RELEASE}"
-          test "${RELEASE}" = "4.19.325-cip135-st19-perf"
+          test "${RELEASE}" = "4.19.325-cip135-st19-perf-g39bcecd5c63d"
 
           echo
           echo "=== Stock hardware-critical configuration ==="
@@ -4355,20 +4355,35 @@ jobs:
             "LLD_VERSION=210000"
           )
 
-          for item in "${REQUIRED_STOCK[@]}"; do
-            symbol="${item%%=*}"
-            expected="${item#*=}"
+            for item in "${REQUIRED_STOCK[@]}"; do
+           symbol="${item%%=*}"
+           expected="${item#*=}"
 
-            actual="$(
-              scripts/config \
-                --file "${CONFIG}" \
-                --state "${symbol}" 2>/dev/null || true
-            )"
+          actual="$(grep -E "^${symbol}=" "${CONFIG}" | head -n 1 || true)"
 
-            echo "${symbol}: ${actual}"
+           if [ -z "${actual}" ]; then
+            actual="$(grep -E "^# ${symbol} is not set$" "${CONFIG}" | head -n 1 || true)"
+          fi
 
-            test "${actual}" = "${expected}"
-          done
+           case "${actual}" in
+              "${symbol}=${expected}")
+            echo "OK: ${symbol}=${expected}"
+            ;;
+            "# ${symbol} is not set")
+            if [ "${expected}" = "n" ]; then
+                echo "OK: ${symbol}=n"
+            else
+                echo "ERROR: ${symbol}: expected ${expected}, found n"
+                exit 1
+            fi
+            ;;
+            *)
+            echo "ERROR: ${symbol}: expected ${expected}, found:"
+            echo "  ${actual:-<missing>}"
+            exit 1
+            ;;
+              esac
+           done
 
           echo
           echo "=== NetHunter configuration ==="
@@ -4400,22 +4415,35 @@ jobs:
             "SENSORS_CLASS=m"
             "QCA_CLD_WLAN=m"
           )
+             for item in "${REQUIRED_NETHUNTER[@]}"; do
+           symbol="${item%%=*}"
+           expected="${item#*=}"
 
-          for item in "${REQUIRED_NETHUNTER[@]}"; do
-            symbol="${item%%=*}"
-            expected="${item#*=}"
+           actual="$(grep -E "^${symbol}=" "${CONFIG}" | head -n 1 || true)"
 
-            actual="$(
-              scripts/config \
-                --file "${CONFIG}" \
-                --state "${symbol}" 2>/dev/null || true
-            )"
+           if [ -z "${actual}" ]; then
+           actual="$(grep -E "^# ${symbol} is not set$" "${CONFIG}" | head -n 1 || true)"
+          fi
 
-            echo "${symbol}: ${actual}"
-
-            test "${actual}" = "${expected}"
-          done
-
+            case "${actual}" in
+              "${symbol}=${expected}")
+            echo "OK: ${symbol}=${expected}"
+            ;;
+             "# ${symbol} is not set")
+            if [ "${expected}" = "n" ]; then
+                echo "OK: ${symbol}=n"
+            else
+                echo "ERROR: ${symbol}: expected ${expected}, found n"
+                exit 1
+            fi
+            ;;
+             *)
+            echo "ERROR: ${symbol}: expected ${expected}, found:"
+            echo "  ${actual:-<missing>}"
+            exit 1
+            ;;
+            esac
+            done
           echo
           echo "=== Forbidden QCACLD3 feature symbols in kernel .config ==="
 
@@ -4431,10 +4459,10 @@ jobs:
           echo
           echo "=== Clean release configuration ==="
 
-          grep -Fxq 'CONFIG_LOCALVERSION="-perf"' "${CONFIG}"
-          grep -Fxq '# CONFIG_LOCALVERSION_AUTO is not set' "${CONFIG}"
+           rep -Fxq 'CONFIG_LOCALVERSION="-perf-g39bcecd5c63d"' "${CONFIG}"
+           grep -Fxq '# CONFIG_LOCALVERSION_AUTO is not set' "${CONFIG}"
 
-          echo "LOCALVERSION=-perf"
+          echo "LOCALVERSION=-perf-g39bcecd5c63d"
           echo "LOCALVERSION_AUTO disabled."
 
           echo
@@ -4453,7 +4481,7 @@ jobs:
           echo
           echo "=== Compiled module ABI audit ==="
 
-          EXPECTED_VERMAGIC="4.19.325-cip135-st19-perf SMP preempt mod_unload modversions aarch64"
+          EXPECTED_VERMAGIC="4.19.325-cip135-st19-perf-g39bcecd5c63d SMP preempt mod_unload modversions aarch64"
 
           MODULE_COUNT=0
 
