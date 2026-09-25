@@ -2695,28 +2695,32 @@ jobs:
 
           CONFIG="${OUT_DIR}/.config"
 
+          test -s "${CONFIG}"
+
           echo "=== Kernel local-version configuration ==="
-          grep -E '^CONFIG_(LOCALVERSION|LOCALVERSION_AUTO)=' "${CONFIG}" \
-            || true
-          grep -E '^# CONFIG_LOCALVERSION_AUTO is not set$' "${CONFIG}" \
-            || true
 
-          echo
-          echo "=== Stock configuration reference ==="
-          grep -E '^CONFIG_(LOCALVERSION|LOCALVERSION_AUTO)=' \
-            "${GITHUB_WORKSPACE}/cebu-stock.config" \
-            || true
-
-          echo
-          echo "=== Required final configuration ==="
-
-          grep -Fxq 'CONFIG_LOCALVERSION="-perf"' "${CONFIG}"
+          grep -Fxq 'CONFIG_LOCALVERSION="-perf-g39bcecd5c63d"' "${CONFIG}"
           grep -Fxq '# CONFIG_LOCALVERSION_AUTO is not set' "${CONFIG}"
 
           echo
-          echo "Final kernel local-version configuration is correct."
-          echo "Expected release suffix: -perf"
-          echo "CONFIG_LOCALVERSION_AUTO: disabled"
+          echo "=== Verify exact kernel release ==="
+
+          RELEASE="$(make -s \
+            O="${OUT_DIR}" \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            LOCALVERSION= \
+            kernelrelease)"
+
+          echo "KERNEL_RELEASE=${RELEASE}"
+
+          test "${RELEASE}" = "4.19.325-cip135-st19-perf-g39bcecd5c63d"
+
+          echo
+          echo "Kernel release configuration PASSED."
+          echo "Expected release: 4.19.325-cip135-st19-perf-g39bcecd5c63d"
 
       # ============================================================
       # 43. VERIFY MODVERSIONS
