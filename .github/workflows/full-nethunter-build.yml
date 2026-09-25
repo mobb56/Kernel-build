@@ -4419,33 +4419,17 @@ jobs:
             "QCA_CLD_WLAN=m"
           )
              for item in "${REQUIRED_NETHUNTER[@]}"; do
-           symbol="${item%%=*}"
-           expected="${item#*=}"
+            symbol="${item%%=*}"
+            expected="${item#*=}"
 
-           actual="$(grep -E "^${symbol}=" "${CONFIG}" | head -n 1 || true)"
+           actual="$(scripts/config --file "${CONFIG}" --state "${symbol}" 2>/dev/null || true)"
 
-           if [ -z "${actual}" ]; then
-           actual="$(grep -E "^# ${symbol} is not set$" "${CONFIG}" | head -n 1 || true)"
+             if [ "${actual}" = "${expected}" ]; then
+            echo "OK: CONFIG_${symbol}=${expected}"
+           else
+             echo "ERROR: ${symbol}: expected ${expected}, found ${actual:-<missing>}"
+          exit 1
           fi
-
-            case "${actual}" in
-              "${symbol}=${expected}")
-            echo "OK: ${symbol}=${expected}"
-            ;;
-             "# ${symbol} is not set")
-            if [ "${expected}" = "n" ]; then
-                echo "OK: ${symbol}=n"
-            else
-                echo "ERROR: ${symbol}: expected ${expected}, found n"
-                exit 1
-            fi
-            ;;
-             *)
-            echo "ERROR: ${symbol}: expected ${expected}, found:"
-            echo "  ${actual:-<missing>}"
-            exit 1
-            ;;
-            esac
             done
           echo
           echo "=== Forbidden QCACLD3 feature symbols in kernel .config ==="
