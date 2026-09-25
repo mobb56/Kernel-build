@@ -3495,6 +3495,37 @@ jobs:
             "arch/arm64/boot/Image.gz" \
             "arch/arm64/boot/Image.gz-dtb"
 
+
+
+
+           echo
+           echo "=== Kernel version suffix sources ==="
+
+           echo "CONFIG_LOCALVERSION:"
+           grep -E '^CONFIG_LOCALVERSION=' "${OUT_DIR}/.config" || true
+
+           echo "CONFIG_LOCALVERSION_AUTO:"
+           grep -E '^CONFIG_LOCALVERSION_AUTO=' "${OUT_DIR}/.config" || \
+           grep -E '^# CONFIG_LOCALVERSION_AUTO is not set$' "${OUT_DIR}/.config" || true
+
+           echo
+           echo "Repository status:"
+           git status --short --branch
+
+           echo
+           echo "Repository HEAD:"
+           git rev-parse --short=12 HEAD
+
+           echo
+           echo "localversion files:"
+           find . -maxdepth 2 \
+           -type f \
+           -name 'localversion*' \
+           -print \
+           -exec cat {} \; || true
+
+           echo
+
           echo
           echo "=== Verify final kernel release before build ==="
 
