@@ -580,215 +580,7 @@ jobs:
       # 18. VERIFY CRITICAL STOCK HARDWARE CONFIGURATION
       # ============================================================
 
-      - name: Full stock-vs-final configuration audit
-        working-directory: kernel
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          CONFIG="${OUT_DIR}/.config"
-          STOCK="../cebu-stock.config"
-          FRAGMENT="nethunter-config/cebu-nethunter.config"
-
-          test -s "${CONFIG}"
-          test -s "${STOCK}"
-          test -s "${FRAGMENT}"
-
-          echo "============================================================"
-          echo " FULL STOCK VS FINAL CONFIGURATION AUDIT"
-          echo "============================================================"
-
-          TMP_DIR="${GITHUB_WORKSPACE}/config-audit"
-          rm -rf "${TMP_DIR}"
-          mkdir -p "${TMP_DIR}"
-
-          STOCK_NORM="${TMP_DIR}/stock.normalized"
-          FINAL_NORM="${TMP_DIR}/final.normalized"
-          ALLOWED="${TMP_DIR}/allowed.symbols"
-          DIFFERENCES="${TMP_DIR}/unexpected-differences"
-
-          echo
-          echo "=== Normalize stock configuration ==="
-
-          awk '
-            /^# CONFIG_[A-Za-z0-9_]+ is not set$/ {
-              line=$0
-              sub(/^# /, "", line)
-              sub(/ is not set$/, "", line)
-              print line "=n"
-              next
-            }
-
-            /^CONFIG_[A-Za-z0-9_]+=/ {
-              pos=index($0, "=")
-              print substr($0, 1, pos-1) "=" substr($0, pos+1)
-            }
-          ' "${STOCK}" | sort -u > "${STOCK_NORM}"
-
-          echo
-          echo "=== Normalize final configuration ==="
-
-          awk '
-            /^# CONFIG_[A-Za-z0-9_]+ is not set$/ {
-              line=$0
-              sub(/^# /, "", line)
-              sub(/ is not set$/, "", line)
-              print line "=n"
-              next
-            }
-
-            /^CONFIG_[A-Za-z0-9_]+=/ {
-              pos=index($0, "=")
-              print substr($0, 1, pos-1) "=" substr($0, pos+1)
-            }
-          ' "${CONFIG}" | sort -u > "${FINAL_NORM}"
-
-          echo
-          echo "=== Build explicit NetHunter change allowlist ==="
-
-          ALLOWED_CHANGES="${TMP_DIR}/allowed.changes"
-
-          cat > "${ALLOWED_CHANGES}" <<'EOF'
-             CONFIG_HIDRAW=y
-             CONFIG_UHID=y
-             CONFIG_BT=y
-            CONFIG_BT_BREDR=y
-             CONFIG_BT_LE=y
-             CONFIG_BT_RFCOMM=y
-            CONFIG_BT_RFCOMM_TTY=y
-             CONFIG_BT_BNEP=m
-             CONFIG_BT_BNEP_PROTO_FILTER=y
-             CONFIG_BT_BNEP_MULTICAST_FILTER=y
-             CONFIG_BT_HIDP=m
-            CONFIG_BT_HCIUART=m
-            CONFIG_BT_HCIUART_H4=y
-             CONFIG_BT_HCIVHCI=m
-             CONFIG_USB_GADGET=y
-            CONFIG_USB_CONFIGFS=y
-             CONFIG_USB_CONFIGFS_UEVENT=y
-             CONFIG_USB_CONFIGFS_ACM=y
-              CONFIG_USB_CONFIGFS_NCM=y
-            CONFIG_USB_CONFIGFS_RNDIS=y
-            CONFIG_USB_CONFIGFS_ECM=y
-           CONFIG_USB_CONFIGFS_EEM=y
-            CONFIG_USB_CONFIGFS_F_HID=y
-            CONFIG_USB_CONFIGFS_F_FS=y
-            CONFIG_USB_CONFIGFS_F_MASS_STORAGE=y
-             CONFIG_USB_SERIAL=y
-             CONFIG_USB_SERIAL_GENERIC=y
-             CONFIG_USB_USBNET=m
-             CONFIG_USB_NET_CDCETHER=m
-             CONFIG_USB_NET_CDC_NCM=m
-             CONFIG_PACKET=y
-             CONFIG_SENSORS_SSC=y
-              CONFIG_SENSORS_CLASS=m
-              CONFIG_WLAN=y
-               CONFIG_QCA_CLD_WLAN=m
-                CONFIG_LOCALVERSION=-perf-g39bcecd5c63d
-               CONFIG_LOCALVERSION_AUTO=n
-             EOF
-
-          sort -u "${ALLOWED_CHANGES}" -o "${ALLOWED_CHANGES}"
-
-          echo
-          echo "=== Explicitly allowed configuration changes ==="
-          cat "${ALLOWED_CHANGES}"
-
-          echo
-          echo "=== Compare every stock CONFIG symbol ==="
-
-          awk -F= '
-            NR==FNR {
-              stock[$1]=$0
-              next
-            }
-
-            {
-              final[$1]=$0
-            }
-
-            END {
-              for (symbol in stock) {
-                if (!(symbol in final)) {
-                  print "REMOVED|" symbol "|" stock[symbol] "|<missing>"
-                }
-                else if (stock[symbol] != final[symbol]) {
-                  print "CHANGED|" symbol "|" stock[symbol] "|" final[symbol]
-                }
-              }
-
-              for (symbol in final) {
-                if (!(symbol in stock)) {
-                  print "ADDED|" symbol "|<absent-from-stock>|" final[symbol]
-                }
-              }
-            }
-          ' "${STOCK_NORM}" "${FINAL_NORM}" > "${TMP_DIR}/all-differences"
-
-          : > "${DIFFERENCES}"
-
-          while IFS='|' read -r TYPE SYMBOL STOCK_VALUE FINAL_VALUE; do
-            [ -n "${SYMBOL}" ] || continue
-
-              if [ "${TYPE}" = "ADDED" ]; then
-           EXPECTED=""
-
-            awk -F'|' \
-             -v allowed="${ALLOWED_CHANGES}" \
-             -v differences="${DIFFERENCES}" '
-           BEGIN {
-           while ((getline line < allowed) > 0) {
-           split(line, parts, "=")
-           allowed_value[parts[1]] = substr(line, length(parts[1]) + 2)
-            }
-           close(allowed)
-            }
-           {
-            type   = $1
-            symbol = $2
-            stock  = $3
-             final  = $4
-
-             if (symbol in allowed_value && final == allowed_value[symbol]) {
-           print "ALLOWED: " symbol ": " stock " -> " final
-           } else {
-            print type "|" symbol "|" stock "|" final >> differences
-           }
-           }
-              '. "${TMP_DIR}/all-differences"
-          echo
-          echo "============================================================"
-          echo " UNEXPECTED STOCK CONFIGURATION DIFFERENCES"
-          echo "============================================================"
-
-          if [ -s "${DIFFERENCES}" ]; then
-            cat "${DIFFERENCES}"
-            echo
-            echo "ERROR: Unexpected configuration differences detected."
-            echo "The final configuration is NOT an acceptable stock cebu baseline."
-            exit 1
-          fi
-
-          echo "No unexpected stock configuration differences detected."
-
-          echo
-          echo "============================================================"
-          echo " STOCK CONFIGURATION PRESERVATION PASSED"
-          echo "============================================================"
-
-          echo
-          echo "Stock symbols:"
-          wc -l < "${STOCK_NORM}"
-
-          echo "Final symbols:"
-          wc -l < "${FINAL_NORM}"
-
-          echo
-          echo "The final configuration contains the complete stock"
-          echo "configuration plus only explicitly allowed NetHunter"
-          echo "and deliberate kernel-release changes."
-
-
+      
 
 
 
@@ -1146,6 +938,221 @@ jobs:
 
           echo
           echo "Stock-compatible kernel release confirmed."
+
+
+
+            
+
+
+
+      - name: Full stock-vs-final configuration audit
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CONFIG="${OUT_DIR}/.config"
+          STOCK="../cebu-stock.config"
+          FRAGMENT="nethunter-config/cebu-nethunter.config"
+
+          test -s "${CONFIG}"
+          test -s "${STOCK}"
+          test -s "${FRAGMENT}"
+
+          echo "============================================================"
+          echo " FULL STOCK VS FINAL CONFIGURATION AUDIT"
+          echo "============================================================"
+
+          TMP_DIR="${GITHUB_WORKSPACE}/config-audit"
+          rm -rf "${TMP_DIR}"
+          mkdir -p "${TMP_DIR}"
+
+          STOCK_NORM="${TMP_DIR}/stock.normalized"
+          FINAL_NORM="${TMP_DIR}/final.normalized"
+          ALLOWED="${TMP_DIR}/allowed.symbols"
+          DIFFERENCES="${TMP_DIR}/unexpected-differences"
+
+          echo
+          echo "=== Normalize stock configuration ==="
+
+          awk '
+            /^# CONFIG_[A-Za-z0-9_]+ is not set$/ {
+              line=$0
+              sub(/^# /, "", line)
+              sub(/ is not set$/, "", line)
+              print line "=n"
+              next
+            }
+
+            /^CONFIG_[A-Za-z0-9_]+=/ {
+              pos=index($0, "=")
+              print substr($0, 1, pos-1) "=" substr($0, pos+1)
+            }
+          ' "${STOCK}" | sort -u > "${STOCK_NORM}"
+
+          echo
+          echo "=== Normalize final configuration ==="
+
+          awk '
+            /^# CONFIG_[A-Za-z0-9_]+ is not set$/ {
+              line=$0
+              sub(/^# /, "", line)
+              sub(/ is not set$/, "", line)
+              print line "=n"
+              next
+            }
+
+            /^CONFIG_[A-Za-z0-9_]+=/ {
+              pos=index($0, "=")
+              print substr($0, 1, pos-1) "=" substr($0, pos+1)
+            }
+          ' "${CONFIG}" | sort -u > "${FINAL_NORM}"
+
+          echo
+          echo "=== Build explicit NetHunter change allowlist ==="
+
+          ALLOWED_CHANGES="${TMP_DIR}/allowed.changes"
+
+          cat > "${ALLOWED_CHANGES}" <<'EOF'
+             CONFIG_HIDRAW=y
+             CONFIG_UHID=y
+             CONFIG_BT=y
+            CONFIG_BT_BREDR=y
+             CONFIG_BT_LE=y
+             CONFIG_BT_RFCOMM=y
+            CONFIG_BT_RFCOMM_TTY=y
+             CONFIG_BT_BNEP=m
+             CONFIG_BT_BNEP_PROTO_FILTER=y
+             CONFIG_BT_BNEP_MULTICAST_FILTER=y
+             CONFIG_BT_HIDP=m
+            CONFIG_BT_HCIUART=m
+            CONFIG_BT_HCIUART_H4=y
+             CONFIG_BT_HCIVHCI=m
+             CONFIG_USB_GADGET=y
+            CONFIG_USB_CONFIGFS=y
+             CONFIG_USB_CONFIGFS_UEVENT=y
+             CONFIG_USB_CONFIGFS_ACM=y
+              CONFIG_USB_CONFIGFS_NCM=y
+            CONFIG_USB_CONFIGFS_RNDIS=y
+            CONFIG_USB_CONFIGFS_ECM=y
+           CONFIG_USB_CONFIGFS_EEM=y
+            CONFIG_USB_CONFIGFS_F_HID=y
+            CONFIG_USB_CONFIGFS_F_FS=y
+            CONFIG_USB_CONFIGFS_F_MASS_STORAGE=y
+             CONFIG_USB_SERIAL=y
+             CONFIG_USB_SERIAL_GENERIC=y
+             CONFIG_USB_USBNET=m
+             CONFIG_USB_NET_CDCETHER=m
+             CONFIG_USB_NET_CDC_NCM=m
+             CONFIG_PACKET=y
+             CONFIG_SENSORS_SSC=y
+              CONFIG_SENSORS_CLASS=m
+              CONFIG_WLAN=y
+               CONFIG_QCA_CLD_WLAN=m
+                CONFIG_LOCALVERSION=-perf-g39bcecd5c63d
+               CONFIG_LOCALVERSION_AUTO=n
+             EOF
+
+          sort -u "${ALLOWED_CHANGES}" -o "${ALLOWED_CHANGES}"
+
+          echo
+          echo "=== Explicitly allowed configuration changes ==="
+          cat "${ALLOWED_CHANGES}"
+
+          echo
+          echo "=== Compare every stock CONFIG symbol ==="
+
+          awk -F= '
+            NR==FNR {
+              stock[$1]=$0
+              next
+            }
+
+            {
+              final[$1]=$0
+            }
+
+            END {
+              for (symbol in stock) {
+                if (!(symbol in final)) {
+                  print "REMOVED|" symbol "|" stock[symbol] "|<missing>"
+                }
+                else if (stock[symbol] != final[symbol]) {
+                  print "CHANGED|" symbol "|" stock[symbol] "|" final[symbol]
+                }
+              }
+
+              for (symbol in final) {
+                if (!(symbol in stock)) {
+                  print "ADDED|" symbol "|<absent-from-stock>|" final[symbol]
+                }
+              }
+            }
+          ' "${STOCK_NORM}" "${FINAL_NORM}" > "${TMP_DIR}/all-differences"
+
+          : > "${DIFFERENCES}"
+
+          while IFS='|' read -r TYPE SYMBOL STOCK_VALUE FINAL_VALUE; do
+            [ -n "${SYMBOL}" ] || continue
+
+              if [ "${TYPE}" = "ADDED" ]; then
+           EXPECTED=""
+
+            awk -F'|' \
+             -v allowed="${ALLOWED_CHANGES}" \
+             -v differences="${DIFFERENCES}" '
+           BEGIN {
+           while ((getline line < allowed) > 0) {
+           split(line, parts, "=")
+           allowed_value[parts[1]] = substr(line, length(parts[1]) + 2)
+            }
+           close(allowed)
+            }
+           {
+            type   = $1
+            symbol = $2
+            stock  = $3
+             final  = $4
+
+             if (symbol in allowed_value && final == allowed_value[symbol]) {
+           print "ALLOWED: " symbol ": " stock " -> " final
+           } else {
+            print type "|" symbol "|" stock "|" final >> differences
+           }
+           }
+              '. "${TMP_DIR}/all-differences"
+          echo
+          echo "============================================================"
+          echo " UNEXPECTED STOCK CONFIGURATION DIFFERENCES"
+          echo "============================================================"
+
+          if [ -s "${DIFFERENCES}" ]; then
+            cat "${DIFFERENCES}"
+            echo
+            echo "ERROR: Unexpected configuration differences detected."
+            echo "The final configuration is NOT an acceptable stock cebu baseline."
+            exit 1
+          fi
+
+          echo "No unexpected stock configuration differences detected."
+
+          echo
+          echo "============================================================"
+          echo " STOCK CONFIGURATION PRESERVATION PASSED"
+          echo "============================================================"
+
+          echo
+          echo "Stock symbols:"
+          wc -l < "${STOCK_NORM}"
+
+          echo "Final symbols:"
+          wc -l < "${FINAL_NORM}"
+
+          echo
+          echo "The final configuration contains the complete stock"
+          echo "configuration plus only explicitly allowed NetHunter"
+          echo "and deliberate kernel-release changes."
+
 
       # ============================================================
       # 24. VERIFY NETHUNTER CONFIGURATION
