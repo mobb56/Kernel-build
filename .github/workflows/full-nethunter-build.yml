@@ -63,6 +63,7 @@ jobs:
             git \
             kmod \
             libssl-dev \
+            curl \
             python3 \
             rsync \
             unzip \
@@ -79,22 +80,22 @@ jobs:
           set -euo pipefail
 
           ANDROID_LLVM_DIR="${GITHUB_WORKSPACE}/android-llvm"
-          LLVM_ARCHIVE_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-16.0.0_r4/clang-r563880c.tar.gz"
+          LLVM_ARCHIVE_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/9916fb51ccb914d62d35ad9a7b9b21d2ef046928/clang-r563880c.tar.gz"
 
           rm -rf "${ANDROID_LLVM_DIR}"
           mkdir -p "${ANDROID_LLVM_DIR}"
 
           echo "=== Downloading Android clang-r563880c ==="
 
-          wget -q --show-progress \
-            -O /tmp/clang-r563880c.tar.gz \
-            "${LLVM_ARCHIVE_URL}"
+          curl -fL --retry 5 --retry-delay 5 \
+            "${LLVM_ARCHIVE_URL}" \
+            -o /tmp/clang-r563880c.tar.gz
 
-          echo
+          test -s /tmp/clang-r563880c.tar.gz
+
           echo "=== Extracting Android LLVM ==="
 
-          tar -xzf \
-            /tmp/clang-r563880c.tar.gz \
+          tar -xzf /tmp/clang-r563880c.tar.gz \
             -C "${ANDROID_LLVM_DIR}"
 
           test -x "${ANDROID_LLVM_DIR}/bin/clang"
@@ -112,7 +113,7 @@ jobs:
           "${ANDROID_LLVM_DIR}/bin/clang" --version
 
           "${ANDROID_LLVM_DIR}/bin/clang" --version \
-            | grep -F "clang version 21.0.0"
+            | grep -q -F 'clang version 21.0.0'
 
           echo
           echo "=== Activating Android LLVM ==="
