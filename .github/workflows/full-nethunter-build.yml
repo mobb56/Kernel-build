@@ -909,7 +909,7 @@ jobs:
           scripts/config \
             --file "${CONFIG}" \
             --disable LOCALVERSION_AUTO \
-            --set-str LOCALVERSION "-perf-g39bcecd5c63d"
+            --set-str LOCALVERSION "-perf"
 
           echo
           echo "=== Final local-version settings ==="
@@ -929,7 +929,7 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
-            LOCALVERSION= \
+            LOCALVERSION="-g39bcecd5c63d" \
             kernelrelease)"
 
           echo "KERNEL_RELEASE=${RELEASE}"
@@ -4306,18 +4306,20 @@ jobs:
 
           echo
           echo "=== Kernel release ==="
-          RELEASE="$(make -s \
-            O="${OUT_DIR}" \
-            ARCH=arm64 \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            CROSS_COMPILE="${CROSS_COMPILE}" \
-            LOCALVERSION="-perf-g39bcecd5c63d" \
-            kernelrelease)"
+               RELEASE="$(make -s \
+              O="${OUT_DIR}" \
+              ARCH=arm64 \
+              LLVM=1 \
+              LLVM_IAS=1 \
+              CROSS_COMPILE="${CROSS_COMPILE}" \
+              LOCALVERSION="-g39bcecd5c63d" \
+              kernelrelease)"
 
-          echo "KERNEL_RELEASE=${RELEASE}"
-          test "${RELEASE}" = "4.19.325-cip135-st19-perf-g39bcecd5c63d"
+              
+              echo "KERNEL_RELEASE=${RELEASE}"
+              test "${RELEASE}" = "4.19.325-cip135-st19-perf-g39bcecd5c63d"
 
+          
           echo
           echo "=== Stock hardware-critical configuration ==="
 
@@ -4459,10 +4461,10 @@ jobs:
           echo
           echo "=== Clean release configuration ==="
 
-           rep -Fxq 'CONFIG_LOCALVERSION="-perf-g39bcecd5c63d"' "${CONFIG}"
+           grep -Fxq 'CONFIG_LOCALVERSION="-perf"' "${CONFIG}"
            grep -Fxq '# CONFIG_LOCALVERSION_AUTO is not set' "${CONFIG}"
 
-          echo "LOCALVERSION=-perf-g39bcecd5c63d"
+          echo "LOCALVERSION=-perf"
           echo "LOCALVERSION_AUTO disabled."
 
           echo
