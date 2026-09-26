@@ -3988,9 +3988,10 @@ jobs:
 
           echo "=== Compare stock and custom QCACLD3 CRCs ==="
 
-          STOCK_CONFIG="${GITHUB_WORKSPACE}/cebu-stock.config"
-          STOCK_WLAN="/vendor/lib/modules/qca_cld3_wlan.ko"
-          CUSTOM_WLAN="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
+           STOCK_CONFIG="${GITHUB_WORKSPACE}/cebu-stock.config"
+           STOCK_VERSIONS="${GITHUB_WORKSPACE}/stock-versions.bin"
+           CUSTOM_WLAN="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
+           CUSTOM_VERSIONS="${OUT_DIR}/custom-versions.bin"
 
           test -s "${STOCK_CONFIG}"
           test -s "${CUSTOM_WLAN}"
@@ -4034,12 +4035,7 @@ jobs:
             "${GITHUB_WORKSPACE}/stock-versions.bin" \
             "${OUT_DIR}/custom-versions.bin"
 
-          if ! "${LLVM_BIN}/llvm-objcopy" \
-          --dump-section __versions="${GITHUB_WORKSPACE}/stock-versions.bin" \
-           "${STOCK_WLAN}"; then
-           echo "ERROR: failed to extract stock __versions."
-          exit 1
-          fi
+          
 
            if ! "${LLVM_BIN}/llvm-objcopy" \
           --dump-section __versions="${OUT_DIR}/custom-versions.bin" \
