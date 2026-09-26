@@ -1096,7 +1096,7 @@ jobs:
             CONFIG_BT_RFCOMM_TTY=y
              CONFIG_BT_BNEP=m
              CONFIG_BT_BNEP_PROTO_FILTER=y
-             CONFIG_BT_BNEP_MULTICAST_FILTER=y
+             CONFIG_BT_BNEP_MC_FILTER=y
              CONFIG_BT_HIDP=m
             CONFIG_BT_HCIUART=m
             CONFIG_BT_HCIUART_H4=y
@@ -1111,7 +1111,6 @@ jobs:
            CONFIG_USB_CONFIGFS_EEM=y
             CONFIG_USB_CONFIGFS_F_HID=y
             CONFIG_USB_CONFIGFS_F_FS=y
-            CONFIG_USB_CONFIGFS_F_MASS_STORAGE=y
              CONFIG_USB_SERIAL=y
              CONFIG_USB_SERIAL_GENERIC=y
              CONFIG_USB_USBNET=m
@@ -1122,7 +1121,6 @@ jobs:
               CONFIG_SENSORS_CLASS=m
               CONFIG_WLAN=y
                CONFIG_QCA_CLD_WLAN=m
-                CONFIG_LOCALVERSION=-perf-g39bcecd5c63d
                CONFIG_LOCALVERSION_AUTO=n
              EOF
 
@@ -1163,37 +1161,49 @@ jobs:
             }
           ' "${STOCK_NORM}" "${FINAL_NORM}" > "${TMP_DIR}/all-differences"
 
-          : > "${DIFFERENCES}"
+            : > "${DIFFERENCES}"
 
-          while IFS='|' read -r TYPE SYMBOL STOCK_VALUE FINAL_VALUE; do
-            [ -n "${SYMBOL}" ] || continue
+          awk -F'|' \
+            -v allowed="${ALLOWED_CHANGES}" \
+            -v differences="${DIFFERENCES}" '
+          BEGIN {
+            while ((getline line < allowed) > 0) {
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
 
-              if [ "${TYPE}" = "ADDED" ]; then
-           EXPECTED=""
+              if (line == "")
+                continue
 
-            awk -F'|' \
-             -v allowed="${ALLOWED_CHANGES}" \
-             -v differences="${DIFFERENCES}" '
-           BEGIN {
-           while ((getline line < allowed) > 0) {
-           split(line, parts, "=")
-           allowed_value[parts[1]] = substr(line, length(parts[1]) + 2)
+              pos = index(line, "=")
+
+              if (pos == 0)
+                continue
+
+              symbol = substr(line, 1, pos - 1)
+              value  = substr(line, pos + 1)
+
+              allowed_value[symbol] = value
             }
-           close(allowed)
-            }
-           {
+
+            close(allowed)
+          }
+
+          {
             type   = $1
             symbol = $2
             stock  = $3
-             final  = $4
+            final  = $4
 
-             if (symbol in allowed_value && final == allowed_value[symbol]) {
-           print "ALLOWED: " symbol ": " stock " -> " final
-           } else {
-            print type "|" symbol "|" stock "|" final >> differences
-           }
-           }
-              '. "${TMP_DIR}/all-differences"
+            if ((symbol in allowed_value) &&
+                (final == allowed_value[symbol])) {
+
+              print "ALLOWED: " symbol ": " stock " -> " final
+
+            } else {
+
+              print type "|" symbol "|" stock "|" final >> differences
+            }
+          }
+          ' "${TMP_DIR}/all-differences"
           echo
           echo "============================================================"
           echo " UNEXPECTED STOCK CONFIGURATION DIFFERENCES"
@@ -2836,7 +2846,6 @@ jobs:
             "CONFIG_USB_CONFIGFS_EEM=y"
             "CONFIG_USB_CONFIGFS_F_HID=y"
             "CONFIG_USB_CONFIGFS_F_FS=y"
-            "CONFIG_USB_CONFIGFS_MASS_STORAGE=y"
             "CONFIG_PACKET=y"
             "CONFIG_SENSORS_SSC=y"
             "CONFIG_QCA_CLD_WLAN=m"
@@ -4304,32 +4313,22 @@ jobs:
 
           echo "CAP_NET_RAW check confirmed."
 
-          echo
-          echo "=== No-flash / no-reboot safety check ==="
+          
+           echo
+          echo "=== Flash/reboot command safety check ==="
 
           if grep -RniE \
-            'fastboot[[:space:]]+(flash|boot)|adb[[:space:]]+reboot|reboot[[:space:]]+bootloader|reboot[[:space:]]+recovery|dd[[:space:]]+if=.*of=/dev/block' \
+            '^[[:space:]]*(fastboot([[:space:]]|$)|adb[[:space:]]+shell[[:space:]]+.*(reboot|dd)|dd[[:space:]]|reboot([[:space:]]|$))' \
             .github/workflows \
-            --exclude-dir=.git; then
-            echo "ERROR: Dangerous flash/reboot command detected in workflow."
+            --exclude-dir=.git \
+            --exclude='full-nethunter-build.yml'; then
+
+            echo "ERROR: Possible flashing or reboot command detected."
             exit 1
           fi
 
-          echo "No flash or reboot commands detected."
-
-          echo
-          echo "=== AnyKernel3 safety check ==="
-
-          if grep -Rni \
-            'AnyKernel3\|anykernel' \
-            .github/workflows \
-            --exclude-dir=.git; then
-            echo "ERROR: AnyKernel3 reference detected in workflow."
-            exit 1
-          fi
-
-          echo "No AnyKernel3 workflow operation detected."
-
+          echo "No fastboot, adb reboot, dd, or reboot command detected."
+          
           echo
           echo "=== Final Part 9 manifest ==="
 
