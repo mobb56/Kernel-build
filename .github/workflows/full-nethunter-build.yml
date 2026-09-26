@@ -4054,396 +4054,269 @@ jobs:
             "${STOCK_VERSIONS}" \
             "${CUSTOM_VERSIONS}" \
             "${CRC_REPORT}" <<'PY'
-           import struct
-            import sys
-            from pathlib import Path
+           
 
+          sed 's/^          //' <<'PY' > "${OUT_DIR}/compare_crc.py"
+          import struct
+          import sys
+          from pathlib import Path
 
-             stock_file = Path(sys.argv[1])
-             custom_file = Path(sys.argv[2])
-              report_file = Path(sys.argv[3])
+          stock_file = Path(sys.argv[1])
+          custom_file = Path(sys.argv[2])
+          report_file = Path(sys.argv[3])
 
-
-            REQUIRED = [
-           "module_layout",
-           "cfg80211_unlink_bss",
-           "cfg80211_get_bss",
-          "cfg80211_inform_bss_frame_data",
-           "cfg80211_sched_scan_results",
+          REQUIRED = [
+              "module_layout",
+              "cfg80211_unlink_bss",
+              "cfg80211_get_bss",
+              "cfg80211_inform_bss_frame_data",
+              "cfg80211_sched_scan_results",
           ]
 
+          def decode_name(raw):
+              raw = raw.split(b"\0", 1)[0]
 
-           def decode_name(raw):
-            raw = raw.split(b"\0", 1)[0]
+              if not raw:
+                  return None
 
-            if not raw:
-            return None
+              try:
+                  name = raw.decode("ascii")
+              except UnicodeDecodeError:
+                  return None
 
-          try:
-           name = raw.decode("ascii")
-          except UnicodeDecodeError:
-          return None
+              if not name:
+                  return None
 
-           if not name:
-            return None
+              if not all(32 <= ord(c) < 127 for c in name):
+                  return None
 
-           if not all(32 <= ord(char) < 127 for char in name):
-            return None
+              return name
 
-           return name
-
-
-           def parse_records(data, entry_size, crc_size, name_offset, name_size):
-           if len(data) % entry_size != 0:
-               return None
+          def parse_records(data, entry_size, crc_size, name_offset, name_size):
+              if len(data) % entry_size != 0:
+                  return None
 
               records = {}
 
-           for offset in range(0, len(data), entry_size):
-           entry = data[offset:offset + entry_size]
+              for offset in range(0, len(data), entry_size):
+                  entry = data[offset:offset + entry_size]
 
-           if crc_size == 4:
-            crc = struct.unpack_from("<I", entry, 0)[0]
-          elif crc_size == 8:
-            crc = struct.unpack_from("<Q", entry, 0)[0]
-           else:
-            raise RuntimeError("Unsupported CRC size")
+                  if crc_size == 4:
+                      crc = struct.unpack_from("<I", entry, 0)[0]
+                  else:
+                      crc = struct.unpack_from("<Q", entry, 0)[0]
 
-             raw_name = entry[
-              name_offset:name_offset + name_size
-           ]
+                  name = decode_name(
+                      entry[name_offset:name_offset + name_size]
+                  )
 
-              name = decode_name(raw_name)
+                  if name is not None:
+                      records[name] = crc
 
-            if name is not None:
-              records[name] = crc
-
-           return records
-
+              return records
 
           def parse_stock(data):
-           candidates = [
-           (
-             "stock-u32-60",
-             64,
-             4,
-             4,
-            60,
-           ),
-           (
-              "stock-u64-56",
-              64,
-               8,
-               8,
-               56,
-           ),
-           ]
+              candidates = [
+                  ("stock-u32-60", 64, 4, 4, 60),
+                  ("stock-u64-56", 64, 8, 8, 56),
+              ]
 
-            best = None
+              best = None
 
-             for label, entry_size, crc_size, name_offset, name_size in candidates:
-              records = parse_records(
-                data,
-                entry_size,
-                crc_size,
-                name_offset,
-                name_size,
-            )
+              for label, entry_size, crc_size, name_offset, name_size in candidates:
+                  records = parse_records(
+                      data,
+                      entry_size,
+                      crc_size,
+                      name_offset,
+                      name_size,
+                  )
 
-               if records is None:
-              continue
+                  if records is None:
+                      continue
 
-             required_count = sum(
-            1
-            for symbol in REQUIRED
-            if symbol in records
-             )
+                  required_count = sum(
+                      1 for symbol in REQUIRED if symbol in records
+                  )
 
-               score = (
-               required_count,
-               len(records),
-            )
+                  score = (required_count, len(records))
 
-             print(
-              f"Stock candidate {label}: "
-               f"{len(records)} records, "
-               f"{required_count}/{len(REQUIRED)} required symbols"
-            )
+                  print(
+                      f"Stock candidate {label}: "
+                      f"{len(records)} records, "
+                      f"{required_count}/{len(REQUIRED)} required"
+                  )
 
-           if best is None or score > best[0]:
-                best = (
-                score,
-                label,
-                records,
-             )
+                  if best is None or score > best[0]:
+                      best = (score, label, records)
 
-               if best is None:
-             raise RuntimeError(
-              "Unable to parse stock __versions data"
-           )
+              if best is None:
+                  raise RuntimeError(
+                      "Unable to parse stock __versions data"
+                  )
 
-           score, label, records = best
+              score, label, records = best
 
-           required_count = score[0]
+              print()
+              print(f"Selected stock layout: {label}")
+              print(f"Stock records parsed: {len(records)}")
 
-           print()
-           print(f"Selected stock layout: {label}")
-           print(f"Stock records parsed: {len(records)}")
-           print(
-             f"Required symbols found: "
-             f"{required_count}/{len(REQUIRED)}"
-           )
+              if score[0] != len(REQUIRED):
+                  missing = [
+                      symbol for symbol in REQUIRED
+                      if symbol not in records
+                  ]
 
-             if required_count != len(REQUIRED):
-              missing = [
-               symbol
-               for symbol in REQUIRED
-               if symbol not in records
-            ]
+                  raise RuntimeError(
+                      "Stock __versions missing required symbols: "
+                      + ", ".join(missing)
+                  )
 
-             raise RuntimeError(
-              "Stock __versions missing required symbols: "
-            + ", ".join(missing)
-             )
-
-           return records
-
+              return records
 
           def parse_custom(data):
-               entry_size = 72
-            crc_size = 4
-            name_offset = 8
-            name_size = 64
-
-            records = parse_records(
-               data,
-               entry_size,
-               crc_size,
-                name_offset,
-               name_size,
-            )
-
-             if records is None:
-              raise RuntimeError(
-              f"Custom __versions size {len(data)} "
-            f"is not divisible by {entry_size}"
-            )
-
-           print(
-             f"Custom records parsed: {len(records)}"
-            )
-
-           return records
-
-
-           stock_data = stock_file.read_bytes()
-           custom_data = custom_file.read_bytes()
-
-              print(
-             f"Stock __versions size:  "
-           f"{len(stock_data)} bytes"
-             )
-
-           print(
-            f"Custom __versions size: "
-            f"{len(custom_data)} bytes"
-             )
-
-             stock = parse_stock(stock_data)
-             custom = parse_custom(custom_data)
-
-
-            common = sorted(
-            set(stock) & set(custom)
-            )
-
-             missing = sorted(
-             set(stock) - set(custom)
+              records = parse_records(
+                  data,
+                  72,
+                  4,
+                  8,
+                  64,
               )
- 
-            extra = sorted(
-            set(custom) - set(stock)
-             )
 
- 
-                   mismatches = []
+              if records is None:
+                  raise RuntimeError(
+                      f"Custom __versions size {len(data)} "
+                      "is not divisible by 72"
+                  )
 
-                for symbol in common:
-                stock_crc = stock[symbol]
-                custom_crc = custom[symbol]
+              print(f"Custom records parsed: {len(records)}")
 
-              if stock_crc != custom_crc:
-                mismatches.append(
-                 (
-                    symbol,
-                    stock_crc,
-                   custom_crc,
-               )
-             )
- 
+              return records
 
-            required_failures = []
+          stock_data = stock_file.read_bytes()
+          custom_data = custom_file.read_bytes()
 
-            for symbol in REQUIRED:
-             if symbol not in stock:
-               required_failures.append(
-             f"{symbol}: missing from STOCK reference"
-               )
-
-               elif symbol not in custom:
-              required_failures.append(
-                f"{symbol}: missing from CUSTOM module"
-               )
-
-           elif stock[symbol] != custom[symbol]:
-               required_failures.append(
-               f"{symbol}: CRC mismatch "
-               f"stock=0x{stock[symbol]:08x} "
-               f"custom=0x{custom[symbol]:08x}"
-             )
-
-
-           report = []
-
-            report.append(
-            "QCACLD3 STOCK VS CUSTOM CRC REPORT"
-            )
-               report.append("=" * 60)
-               report.append("")
-                report.append(
-              f"STOCK_SYMBOLS={len(stock)}"
-             )
-                report.append(
-             f"CUSTOM_SYMBOLS={len(custom)}"
-             )
-                report.append(
-              f"COMMON_SYMBOLS={len(common)}"
-           )
-                 report.append(
-            f"MISSING_FROM_CUSTOM={len(missing)}"
-           )
-                 report.append(
-            f"EXTRA_IN_CUSTOM={len(extra)}"
-           )
-                report.append(
-            f"CRC_MISMATCHES={len(mismatches)}"
+          print(
+              f"Stock __versions size: {len(stock_data)} bytes"
           )
-                 report.append("")
 
-            report.append("REQUIRED SYMBOLS")
-               report.append("-" * 60)
+          print(
+              f"Custom __versions size: {len(custom_data)} bytes"
+          )
 
-           for symbol in REQUIRED:
-           if symbol not in stock:
-               report.append(
-              f"{symbol}: STOCK_MISSING"
-            )
+          stock = parse_stock(stock_data)
+          custom = parse_custom(custom_data)
 
-            elif symbol not in custom:
-              report.append(
-              f"{symbol}: CUSTOM_MISSING "
-               f"stock=0x{stock[symbol]:08x}"
-             )
+          common = sorted(set(stock) & set(custom))
 
-          elif stock[symbol] != custom[symbol]:
-               report.append(
-            f"{symbol}: MISMATCH "
-            f"stock=0x{stock[symbol]:08x} "
-            f"custom=0x{custom[symbol]:08x}"
-            )
+          mismatches = []
 
+          for symbol in common:
+              if stock[symbol] != custom[symbol]:
+                  mismatches.append(
+                      (
+                          symbol,
+                          stock[symbol],
+                          custom[symbol],
+                      )
+                  )
+
+          missing_custom = [
+              symbol for symbol in REQUIRED
+              if symbol not in custom
+          ]
+
+          report = []
+
+          report.append("QCACLD3 STOCK VS CUSTOM CRC REPORT")
+          report.append("=" * 60)
+          report.append(f"STOCK_SYMBOLS={len(stock)}")
+          report.append(f"CUSTOM_SYMBOLS={len(custom)}")
+          report.append(f"COMMON_SYMBOLS={len(common)}")
+          report.append(f"CRC_MISMATCHES={len(mismatches)}")
+          report.append("")
+
+          report.append("REQUIRED SYMBOLS")
+          report.append("-" * 60)
+
+          for symbol in REQUIRED:
+              if symbol not in stock:
+                  report.append(
+                      f"{symbol}: STOCK_MISSING"
+                  )
+              elif symbol not in custom:
+                  report.append(
+                      f"{symbol}: CUSTOM_MISSING "
+                      f"stock=0x{stock[symbol]:08x}"
+                  )
+              elif stock[symbol] != custom[symbol]:
+                  report.append(
+                      f"{symbol}: MISMATCH "
+                      f"stock=0x{stock[symbol]:08x} "
+                      f"custom=0x{custom[symbol]:08x}"
+                  )
+              else:
+                  report.append(
+                      f"{symbol}: MATCH "
+                      f"0x{stock[symbol]:08x}"
+                  )
+
+          report.append("")
+          report.append("ALL COMMON SYMBOL CRC MISMATCHES")
+          report.append("-" * 60)
+
+          if mismatches:
+              for symbol, stock_crc, custom_crc in mismatches:
+                  report.append(
+                      f"{symbol}: "
+                      f"stock=0x{stock_crc:08x} "
+                      f"custom=0x{custom_crc:08x}"
+                  )
           else:
-               report.append(
-               f"{symbol}: MATCH "
-               f"0x{stock[symbol]:08x}"
-             )
-
-
-             report.append("")
-             report.append(
-            "ALL COMMON SYMBOL CRC MISMATCHES"
-             )
-           report.append("-" * 60)
-
-            if mismatches:
-            for symbol, stock_crc, custom_crc in mismatches:
-                report.append(
-             f"{symbol}: "
-                f"stock=0x{stock_crc:08x} "
-                f"custom=0x{custom_crc:08x}"
-              )
-           else:
-            report.append("NONE")
-
-  
-            report.append("")
-            report.append("SYMBOLS MISSING FROM CUSTOM")
-            report.append("-" * 60)
-
-              if missing:
-              for symbol in missing:
-                report.append(symbol)
-           else:
-           report.append("NONE")
-
-              report.append("")
-              report.append("EXTRA CUSTOM SYMBOLS")
-              report.append("-" * 60)
-
-              if extra:
-             for symbol in extra:
-             report.append(symbol)
-          else:
-             report.append("NONE")
-
+              report.append("NONE")
 
           report_file.write_text(
-          "\n".join(report) + "\n",
+              "\n".join(report) + "\n",
               encoding="utf-8",
-             )
-
-             print()
-           print("\n".join(report))
-
-            if mismatches:
-          print()
-           print(
-           "ERROR: CRC mismatch detected in symbols "
-           "shared by stock and custom wlan.ko."
           )
-           print(
-           "The kernel/module ABI must be corrected "
-           "before flashing."
-           )
-           sys.exit(1)
 
+          print()
+          print("\n".join(report))
 
-          if required_failures:
-             print()
-            print(
-            "ERROR: Required QCACLD3 ABI symbols failed:"
-           )
+          if missing_custom:
+              print()
+              print(
+                  "ERROR: Required symbols missing from custom module:"
+              )
 
-           for failure in required_failures:
-          print(f"  {failure}")
- 
-           print()
-            print(
-            "The kernel/module ABI must be corrected "
-            "before flashing."
-             )
-             sys.exit(1)
-       
-          
-            print()
-            print(
-          "QCACLD3 common-symbol CRC comparison passed."
-           )
-           print(
-            "Required QCACLD3 ABI symbols passed."
-           )
+              for symbol in missing_custom:
+                  print(f"  {symbol}")
+
+              sys.exit(1)
+
+          if mismatches:
+              print()
+              print(
+                  "ERROR: Stock/custom CRC mismatches detected."
+              )
+              print(
+                  "The kernel/module ABI must be corrected "
+                  "before flashing."
+              )
+              sys.exit(1)
+
+          print()
+          print("QCACLD3 stock/custom CRC comparison passed.")
           PY
 
+          python3 \
+            "${OUT_DIR}/compare_crc.py" \
+            "${STOCK_VERSIONS}" \
+            "${CUSTOM_VERSIONS}" \
+            "${CRC_REPORT}"
+
+
+                
           echo
           echo "=== CRC report ==="
           cat "${CRC_REPORT}"
