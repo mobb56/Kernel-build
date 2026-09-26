@@ -2747,62 +2747,7 @@ jobs:
           echo "CONFIG_LOCALVERSION_AUTO=n"
           echo "Kernel release configuration PASSED."
           echo "Expected release: 4.19.325-cip135-st19-perf-g39bcecd5c63d"
-      # ============================================================
-      # 43. VERIFY MODVERSIONS
-      #
-      # Module ABI compatibility is important because the phone uses
-      # vendor modules such as qca_cld3_wlan.ko.
-      # ============================================================
-
-             
-      - name: Verify module ABI configuration
-        working-directory: kernel
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          CONFIG="${OUT_DIR}/.config"
-
-          echo "=== CONFIG_MODVERSIONS ==="
-
-          grep -Fxq \
-            "CONFIG_MODVERSIONS=y" \
-            "${CONFIG}"
-
-          grep -Fxq \
-            "CONFIG_MODVERSIONS=y" \
-            "${GITHUB_WORKSPACE}/cebu-stock.config"
-
-          echo "CONFIG_MODVERSIONS=y preserved in stock and final configs."
-
-          echo
-          echo "=== Module version data ==="
-
-          QCA_MODULE="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
-
-          test -s "${QCA_MODULE}"
-
-          echo "Checking QCACLD3 module for __versions section..."
-
-          if ! "${LLVM_BIN}/llvm-readelf" -S "${QCA_MODULE}" |
-            grep -q '__versions'; then
-            echo "ERROR: QCACLD3 wlan.ko has no __versions section."
-            exit 1
-          fi
-
-          echo "OK: QCACLD3 wlan.ko contains __versions."
-
-          echo
-          echo "Checking Module.symvers..."
-
-          MODULE_SYMVERS="${OUT_DIR}/Module.symvers"
-
-          test -s "${MODULE_SYMVERS}"
-
-          echo "OK: Module.symvers exists and is non-empty."
-
-          echo
-          echo "Module ABI configuration audit passed."
+      
 
       # ============================================================
       # 44. VERIFY INTENTIONAL NETHUNTER CHANGES
@@ -3924,37 +3869,78 @@ jobs:
            ls -lh "${OUT_DIR}/arch/arm64/boot/Image"
 
 
+               echo
+              echo "=== Building kernel modules ==="
 
-      - name: Inspect HDD injection object symbols
-        if: always()
+              make -j2 \
+              O="${OUT_DIR}" \
+              ARCH=arm64 \
+              LLVM=1 \
+              LLVM_IAS=1 \
+              CROSS_COMPILE="${CROSS_COMPILE}" \
+              LOCALVERSION="-g39bcecd5c63d" \
+              modules
+
+             echo "Kernel modules built successfully."
+
+
+
+      # ============================================================
+      # 43. VERIFY MODVERSIONS
+      #
+      # Module ABI compatibility is important because the phone uses
+      # vendor modules such as qca_cld3_wlan.ko.
+      # ============================================================
+
+             
+      - name: Verify module ABI configuration
         working-directory: kernel
         shell: bash
         run: |
           set -euo pipefail
 
-          OBJ="${OUT_DIR}/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.o"
-          CMD="${OUT_DIR}/drivers/staging/qcacld-3.0/core/hdd/src/.wlan_hdd_frame_inject.o.cmd"
+          CONFIG="${OUT_DIR}/.config"
 
-          echo "=== HDD injection object ==="
-          ls -l "${OBJ}" 2>/dev/null || true
+          echo "=== CONFIG_MODVERSIONS ==="
+
+          grep -Fxq \
+            "CONFIG_MODVERSIONS=y" \
+            "${CONFIG}"
+
+          grep -Fxq \
+            "CONFIG_MODVERSIONS=y" \
+            "${GITHUB_WORKSPACE}/cebu-stock.config"
+
+          echo "CONFIG_MODVERSIONS=y preserved in stock and final configs."
 
           echo
-          echo "=== HDD injection object symbols ==="
-          if [ -f "${OBJ}" ]; then
-            llvm-nm "${OBJ}" | grep -E \
-              'hdd_(init|deinit)_frame_injection' || true
+          echo "=== Module version data ==="
+
+          QCA_MODULE="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
+
+          test -s "${QCA_MODULE}"
+
+          echo "Checking QCACLD3 module for __versions section..."
+
+          if ! "${LLVM_BIN}/llvm-readelf" -S "${QCA_MODULE}" |
+            grep -q '__versions'; then
+            echo "ERROR: QCACLD3 wlan.ko has no __versions section."
+            exit 1
           fi
 
-          echo
-          echo "=== HDD injection compile command ==="
-          if [ -f "${CMD}" ]; then
-            grep -o -- \
-              '-DFEATURE_FRAME_INJECTION_SUPPORT' \
-              "${CMD}" || true
-          fi
+          echo "OK: QCACLD3 wlan.ko contains __versions."
 
           echo
-          echo "HDD injection symbol inspection complete."
+          echo "Checking Module.symvers..."
+
+          MODULE_SYMVERS="${OUT_DIR}/Module.symvers"
+
+          test -s "${MODULE_SYMVERS}"
+
+          echo "OK: Module.symvers exists and is non-empty."
+
+          echo
+          echo "Module ABI configuration audit passed."
 
 
       
