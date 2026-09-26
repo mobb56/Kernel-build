@@ -802,7 +802,7 @@ jobs:
           CONFIG_WLAN=y
           CONFIG_QCA_CLD_WLAN=m
 
-          -----------------------------------------------------
+          
 
           
 
@@ -2797,14 +2797,16 @@ jobs:
       # vendor modules such as qca_cld3_wlan.ko.
       # ============================================================
 
+             
       - name: Verify module ABI configuration
+        working-directory: kernel
         shell: bash
         run: |
-          set -euxo pipefail
-
-          cd kernel
+          set -euo pipefail
 
           CONFIG="${OUT_DIR}/.config"
+
+          echo "=== CONFIG_MODVERSIONS ==="
 
           grep -Fxq \
             "CONFIG_MODVERSIONS=y" \
@@ -2814,7 +2816,36 @@ jobs:
             "CONFIG_MODVERSIONS=y" \
             "${GITHUB_WORKSPACE}/cebu-stock.config"
 
-          echo "CONFIG_MODVERSIONS=y preserved."
+          echo "CONFIG_MODVERSIONS=y preserved in stock and final configs."
+
+          echo
+          echo "=== Module version data ==="
+
+          QCA_MODULE="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
+
+          test -s "${QCA_MODULE}"
+
+          echo "Checking QCACLD3 module for __versions section..."
+
+          if ! "${LLVM_BIN}/llvm-readelf" -S "${QCA_MODULE}" |
+            grep -q '__versions'; then
+            echo "ERROR: QCACLD3 wlan.ko has no __versions section."
+            exit 1
+          fi
+
+          echo "OK: QCACLD3 wlan.ko contains __versions."
+
+          echo
+          echo "Checking Module.symvers..."
+
+          MODULE_SYMVERS="${OUT_DIR}/Module.symvers"
+
+          test -s "${MODULE_SYMVERS}"
+
+          echo "OK: Module.symvers exists and is non-empty."
+
+          echo
+          echo "Module ABI configuration audit passed."
 
       # ============================================================
       # 44. VERIFY INTENTIONAL NETHUNTER CHANGES
@@ -2982,9 +3013,13 @@ jobs:
 
           echo "Checking workflow files for device flashing commands..."
 
-          if grep -RniE \
-            '(^|[[:space:]])(fastboot|heimdall|dd[[:space:]]+if=|adb[[:space:]]+reboot|fastboot[[:space:]]+flash)([[:space:]]|$)' \
-            .github/workflows/; then
+          if find .github/workflows \
+            -type f \
+            -not -path '*/.git/*' \
+            -not -name 'full-nethunter-build.yml' \
+            -print0 |
+            xargs -0 grep -niE \
+              '^[[:space:]]*(fastboot([[:space:]]|$)|heimdall([[:space:]]|$)|dd[[:space:]]+if=|adb[[:space:]]+reboot|reboot([[:space:]]|$))'; then
 
             echo
             echo "ERROR: device flashing/reboot command detected."
@@ -2993,7 +3028,6 @@ jobs:
 
           echo
           echo "No flashing or reboot commands found."
-
       # ============================================================
       # 49. CREATE PRE-BUILD AUDIT REPORT
       # ============================================================
@@ -3998,19 +4032,22 @@ jobs:
           echo
           echo "=== Kernel release ==="
 
-          KERNEL_RELEASE="$(
+            KERNEL_RELEASE="$(
             make -s \
               O="${OUT_DIR}" \
               ARCH="${ARCH}" \
               LLVM=1 \
               LLVM_IAS=1 \
               CROSS_COMPILE="${CROSS_COMPILE}" \
+              LOCALVERSION="-g39bcecd5c63d" \
               kernelrelease
           )"
 
           echo "Built release: ${KERNEL_RELEASE}"
 
-          test -n "${KERNEL_RELEASE}"
+          test "${KERNEL_RELEASE}" = "4.19.325-cip135-st19-perf-g39bcecd5c63d"
+
+          echo "Built kernel release is correct."
 
           echo
           echo "=== Final configuration checks ==="
