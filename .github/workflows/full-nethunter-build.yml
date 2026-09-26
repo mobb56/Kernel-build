@@ -4047,31 +4047,30 @@ jobs:
           wc -c "${CUSTOM_VERSIONS}"
 
           echo
+          echo
           echo "=== Comparing CRC tables ==="
 
-          python3 \
-            "${STOCK_VERSIONS}" \
-            "${CUSTOM_VERSIONS}" \
-            "${CRC_REPORT}" <<'PY'
-           import struct
-            import sys
-
+           python3 - \
+          "${STOCK_VERSIONS}" \
+           "${CUSTOM_VERSIONS}" \
+           "${CRC_REPORT}" << 'PY'
+          import struct
+           import sys
 
            stock_file = sys.argv[1]
-           custom_file = sys.argv[2]
+            vcustom_file = sys.argv[2]
             report_file = sys.argv[3]
 
-
-             REQUIRED = [
-               "module_layout",
-               "cfg80211_unlink_bss",
-                "cfg80211_get_bss",
-               "cfg80211_inform_bss_frame_data",
-              "cfg80211_sched_scan_results",
-            ]
+           REQUIRED = [
+           "module_layout",
+           "cfg80211_unlink_bss",
+           "cfg80211_get_bss",
+           "cfg80211_inform_bss_frame_data",
+          "cfg80211_sched_scan_results",
+          ]
 
  
-            def decode_name(raw):
+             def decode_name(raw):
               raw = raw.split(b"\0", 1)[0]
 
              if not raw:
