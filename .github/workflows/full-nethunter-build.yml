@@ -767,7 +767,7 @@ jobs:
           CONFIG_USB_CONFIGFS_EEM=y
           CONFIG_USB_CONFIGFS_F_HID=y
           CONFIG_USB_CONFIGFS_F_FS=y
-          CONFIG_USB_CONFIGFS_MASS_STORAGE=y
+         
 
           # ----------------------------------------------------------
           # USB serial / networking
@@ -871,7 +871,6 @@ jobs:
       # olddefconfig is allowed here because we will audit every
       # resulting difference later.
       # ============================================================
-
       - name: Resolve Kconfig dependencies
         shell: bash
         run: |
@@ -889,10 +888,79 @@ jobs:
 
           test -s "${OUT_DIR}/.config"
 
+          CONFIG="${OUT_DIR}/.config"
+
+          echo "=== Verify stock ABI/security configuration survived olddefconfig ==="
+
+          REQUIRED_STOCK_SECURITY=(
+            "LTO=y"
+            "THINLTO=y"
+            "LTO_CLANG=y"
+            "CFI=y"
+            "CFI_CLANG=y"
+            "CFI_CLANG_SHADOW=y"
+            "SHADOW_CALL_STACK=y"
+            "INIT_STACK_ALL_ZERO=y"
+            "DEBUG_INFO=y"
+            "MODVERSIONS=y"
+            "HZ_300=y"
+          )
+
+          for item in "${REQUIRED_STOCK_SECURITY[@]}"; do
+            symbol="${item%%=*}"
+            expected="${item#*=}"
+            actual="$(scripts/config --file "${CONFIG}" --state "${symbol}")"
+
+            if [ "${actual}" != "${expected}" ]; then
+              echo "ERROR: Stock setting was changed by olddefconfig:"
+              echo "  ${symbol}: expected ${expected}, got ${actual}"
+              exit 1
+            fi
+
+            echo "OK: ${symbol}=${actual}"
+          done
+
+          echo
+          echo "=== Verify critical stock hardware configuration survived ==="
+
+          REQUIRED_HARDWARE=(
+            "INPUT_TOUCHSCREEN=y"
+            "TOUCHSCREEN_NT36XXX_HOSTDL_SPI_MMI=m"
+            "INPUT_TOUCHSCREEN_FOCALTECH_0FLASH_MMI=m"
+            "TOUCHSCREEN_CHIPONE_TDDI=m"
+            "INPUT_MISC_FPC1020=m"
+            "I2C_QCOM_GENI=y"
+            "SPI_QCOM_GENI=y"
+            "WLAN=y"
+            "QCA_CLD_WLAN=m"
+            "RMNET=y"
+            "IPA3=y"
+            "RMNET_IPA3=y"
+            "USB_GADGET=y"
+            "USB_CONFIGFS=y"
+            "HIDRAW=y"
+            "UHID=y"
+          )
+
+          for item in "${REQUIRED_HARDWARE[@]}"; do
+            symbol="${item%%=*}"
+            expected="${item#*=}"
+            actual="$(scripts/config --file "${CONFIG}" --state "${symbol}")"
+
+            if [ "${actual}" != "${expected}" ]; then
+              echo "ERROR: Critical stock hardware setting changed:"
+              echo "  ${symbol}: expected ${expected}, got ${actual}"
+              exit 1
+            fi
+
+            echo "OK: ${symbol}=${actual}"
+          done
+
           echo
           echo "Kconfig dependency resolution completed."
-
-
+          echo "Stock ABI/security configuration preserved."
+          echo "Critical hardware configuration preserved."
+          
 
       - name: Set kernel release to stock-compatible release
         working-directory: kernel
