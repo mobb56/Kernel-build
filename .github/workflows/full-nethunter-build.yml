@@ -919,6 +919,41 @@ jobs:
 
             echo "Kconfig resolution completed."
 
+
+       
+      - name: Audit complete stock versus final config
+        working-directory: kernel
+        shell: bash
+        run: |
+         set -euo pipefail
+
+          echo "=== Complete stock versus final config audit ==="
+
+         STOCK_CONFIG="${GITHUB_WORKSPACE}/cebu-stock.config"
+         FINAL_CONFIG="${OUT_DIR}/.config"
+         REPORT="${OUT_DIR}/stock-final-config.diff"
+
+         test -s "${STOCK_CONFIG}"
+          test -s "${FINAL_CONFIG}"
+
+         scripts/diffconfig \
+         "${STOCK_CONFIG}" \
+         "${FINAL_CONFIG}" \
+         > "${REPORT}" || true
+ 
+         echo
+         echo "=== Configuration differences ==="
+
+          if [ -s "${REPORT}" ]; then
+          cat "${REPORT}"
+          else
+          echo "No configuration differences."
+          fi
+
+         echo
+         echo "Configuration audit report:"
+          wc -l "${REPORT}"
+
       - name: Set kernel release to stock-compatible release
         working-directory: kernel
         shell: bash
