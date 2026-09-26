@@ -3980,6 +3980,7 @@ jobs:
 
 
    
+                  
       - name: Compare stock and custom QCACLD3 CRCs
         working-directory: kernel
         shell: bash
@@ -4048,210 +4049,480 @@ jobs:
           echo
           echo "=== Comparing CRC tables ==="
 
-          python3 - \
+          python3 \
             "${STOCK_VERSIONS}" \
             "${CUSTOM_VERSIONS}" \
             "${CRC_REPORT}" <<'PY'
-          import struct
-          import sys
+           import struct
+            import sys
 
-          stock_file = sys.argv[1]
-          custom_file = sys.argv[2]
-          report_file = sys.argv[3]
 
-          ENTRY_SIZE = 72
-          NAME_OFFSET = 8
-          NAME_SIZE = 64
+           stock_file = sys.argv[1]
+           custom_file = sys.argv[2]
+            report_file = sys.argv[3]
 
-          def parse_versions(path):
-              data = open(path, "rb").read()
 
-              if len(data) % ENTRY_SIZE != 0:
-                  raise SystemExit(
-                      f"ERROR: {path} size {len(data)} "
-                      f"is not divisible by {ENTRY_SIZE}"
-                  )
+             REQUIRED = [
+               "module_layout",
+               "cfg80211_unlink_bss",
+                "cfg80211_get_bss",
+               "cfg80211_inform_bss_frame_data",
+              "cfg80211_sched_scan_results",
+            ]
+
+ 
+            def decode_name(raw):
+              raw = raw.split(b"\0", 1)[0]
+
+             if not raw:
+                return None
+
+            try:
+               name = raw.decode("ascii")
+           except UnicodeDecodeError:
+              return None
+
+            if not all(
+              32 <= ord(ch) <= 126
+              for ch in name
+             ):
+              return None
+
+           if not (
+             name[0].isalnum()
+              or name[0] in "_.$"
+          ):
+             return None
+
+            return name
+
+  
+           def parse_fixed_records(data, entry_size, crc_size,
+                            name_offset, name_size):
+
+            if len(data) % entry_size != 0:
+               return None
 
               result = {}
+     
+              for offset in range(0, len(data), entry_size):
+               entry = data[offset:offset + entry_size]
 
-              for offset in range(0, len(data), ENTRY_SIZE):
-                  entry = data[offset:offset + ENTRY_SIZE]
+            if crc_size == 4:
+               crc = struct.unpack_from(
+                "<I",
+                entry,
+                0
+            )[0]
 
-                  crc = struct.unpack_from("<I", entry, 0)[0]
+          elif crc_size == 8:
+            crc = struct.unpack_from(
+                "<Q",
+                entry,
+                0
+            )[0] & 0xffffffff
+  
+           else:
+               return None
 
-                  raw_name = entry[
-                      NAME_OFFSET:
-                      NAME_OFFSET + NAME_SIZE
-                  ]
+             raw_name = entry[
+            name_offset:
+              name_offset + name_size
+            ]
 
-                  name = raw_name.split(b"\0", 1)[0].decode(
-                      "ascii",
-                      errors="replace"
-                  )
+           name = decode_name(raw_name)
 
-                  if name:
-                      result[name] = crc
+          if name:
+               result[name] = crc
 
-              return result
+            return result
 
-          stock = parse_versions(stock_file)
-          custom = parse_versions(custom_file)
 
-          print(f"Stock symbols : {len(stock)}")
-          print(f"Custom symbols: {len(custom)}")
+          def parse_versions(path, expected_kind):
+             data = open(path, "rb").read()
 
-          common = sorted(set(stock) & set(custom))
-          missing = sorted(set(stock) - set(custom))
-          extra = sorted(set(custom) - set(stock))
+           if not data:
+                raise SystemExit(
+            f"ERROR: empty CRC table: {path}"
+              )
 
-          mismatches = []
+           candidates = []
+ 
+            if expected_kind == "custom":
+              candidates = [
+                (
+                72,
+                4,
+                0,
+                8,
+                64,
+                "72-byte: u32 CRC + 4-byte padding + 64-byte name",
+            )
+              ]
 
-          for name in common:
-              stock_crc = stock[name]
-              custom_crc = custom[name]
+             elif expected_kind == "stock":
+                candidates = [
+            (
+                64,
+                4,
+                0,
+                4,
+                60,
+                "64-byte: u32 CRC + 60-byte name",
+            ),
+            (
+                64,
+                8,
+                0,
+                8,
+                56,
+                "64-byte: u64 CRC + 56-byte name",
+            ),
+               ]
+ 
+          best = None
 
-              if stock_crc != custom_crc:
-                  mismatches.append(
-                      (
-                          name,
-                          stock_crc,
-                          custom_crc
-                      )
-                  )
+            for (
+            entry_size,
+             crc_size,
+             _unused,
+            name_offset,
+            name_size,
+            description,
+           ) in candidates:
 
-          required = [
-              "module_layout",
-              "cfg80211_unlink_bss",
-              "cfg80211_get_bss",
-              "cfg80211_inform_bss_frame_data",
-              "cfg80211_sched_scan_results",
-          ]
+              parsed = parse_fixed_records(
+            data,
+            entry_size,
+            crc_size,
+            name_offset,
+            name_size,
+           )
 
-          required_failures = []
+          if parsed is None:
+             continue
 
-          for name in required:
-              if name not in stock:
+           required_count = sum(
+            1 for name in REQUIRED
+            if name in parsed
+           )
+
+           score = (
+            required_count,
+            len(parsed),
+          )
+
+           if best is None or score > best[0]:
+            best = (
+                score,
+                parsed,
+                description,
+            )
+
+            if best is None:
+             raise SystemExit(
+            f"ERROR: could not parse {path} "
+            f"using a supported {expected_kind} "
+            f"__versions format"
+           )
+
+          score, result, description = best
+
+           print(
+            f"{expected_kind.upper()} format: "
+             f"{description}"
+          )
+
+           print(
+             f"{expected_kind.upper()} parsed symbols: "
+              f"{len(result)}"
+          )
+
+           print(
+            f"{expected_kind.upper()} required symbols found: "
+            f"{score[0]}/{len(REQUIRED)}"
+          )
+
+            if score[0] != len(REQUIRED):
+             missing_required = [
+               name for name in REQUIRED
+            if name not in result
+           ]
+
+              raise SystemExit(
+               f"ERROR: {expected_kind} CRC table could not "
+            f"resolve all required symbols: "
+            f"{', '.join(missing_required)}"
+            )
+
+          return result
+
+
+          stock = parse_versions(
+           stock_file,
+          "stock",
+          )
+
+           custom = parse_versions(
+           custom_file,
+          "custom",
+           )
+
+
+           print()
+           print(
+            f"Stock symbols : {len(stock)}"
+          )
+            print(
+          f"Custom symbols: {len(custom)}"
+            )
+
+
+           common = sorted(
+            set(stock) & set(custom)
+           )
+
+            missing = sorted(
+            set(stock) - set(custom)
+           )
+  
+            extra = sorted(
+           set(custom) - set(stock)
+           )
+  
+
+           mismatches = []
+
+              for name in common:
+           stock_crc = stock[name]
+            custom_crc = custom[name]
+
+           if stock_crc != custom_crc:
+           mismatches.append(
+            (
+                name,
+                stock_crc,
+                custom_crc,
+            )
+               )
+
+
+             required_failures = []
+
+            for name in REQUIRED:
+
+               if name not in stock:
                   required_failures.append(
-                      f"{name}: missing from STOCK reference"
-                  )
-              elif name not in custom:
-                  required_failures.append(
-                      f"{name}: missing from CUSTOM module"
-                  )
+               f"{name}: missing from STOCK reference"
+               )
+ 
+                elif name not in custom:
+                required_failures.append(
+            f"{name}: missing from CUSTOM module"
+              )
+
               elif stock[name] != custom[name]:
-                  required_failures.append(
-                      f"{name}: CRC mismatch "
-                      f"stock=0x{stock[name]:08x} "
-                      f"custom=0x{custom[name]:08x}"
-                  )
+                required_failures.append(
+                f"{name}: CRC mismatch "
+                f"stock=0x{stock[name]:08x} "
+                 f"custom=0x{custom[name]:08x}"
+              )
 
-          report = []
 
-          report.append("QCACLD3 STOCK VS CUSTOM CRC REPORT")
+              report = []
+
+              report.append(
+                "QCACLD3 STOCK VS CUSTOM CRC REPORT"
+              )
+
+               report.append(
+               "=" * 60
+              )
+
+                 report.append(
+                  f"STOCK_SYMBOLS={len(stock)}"
+                )
+
+                 report.append(
+                f"CUSTOM_SYMBOLS={len(custom)}"
+              )
+
+                   report.append(
+               f"COMMON_SYMBOLS={len(common)}"
+               )
+
+               report.append(
+               f"MISSING_FROM_CUSTOM={len(missing)}"
+                )
+
+                   report.append(
+           f"EXTRA_IN_CUSTOM={len(extra)}"
+             )
+
+               report.append(
+              f"CRC_MISMATCHES={len(mismatches)}"
+             )
+
+            report.append("")
+
+            report.append("REQUIRED SYMBOLS")
+             report.append("=" * 60)
+
+
+            for name in REQUIRED:
+
+             if name not in stock:
+
+                 report.append(
+               f"{name}: STOCK_MISSING"
+                )
+
+             elif name not in custom:
+
+                 report.append(
+              f"{name}: CUSTOM_MISSING"
+              )
+  
+          elif stock[name] != custom[name]:
+
+                 report.append(
+               f"{name}: MISMATCH "
+               f"stock=0x{stock[name]:08x} "
+               f"custom=0x{custom[name]:08x}"
+              )
+
+           else:
+
+                report.append(
+                f"{name}: MATCH "
+            f"0x{stock[name]:08x}"
+             )
+
+
+           report.append("")
+            report.append(
+          "ALL COMMON SYMBOL CRC MISMATCHES"
+          )
           report.append("=" * 60)
-          report.append("")
-          report.append(f"STOCK_SYMBOLS={len(stock)}")
-          report.append(f"CUSTOM_SYMBOLS={len(custom)}")
-          report.append(f"COMMON_SYMBOLS={len(common)}")
-          report.append(f"MISSING_FROM_CUSTOM={len(missing)}")
-          report.append(f"EXTRA_IN_CUSTOM={len(extra)}")
-          report.append(f"CRC_MISMATCHES={len(mismatches)}")
-          report.append("")
 
-          report.append("REQUIRED SYMBOLS")
-          report.append("-" * 60)
-
-          for name in required:
-              if name not in stock:
-                  report.append(
-                      f"{name}: STOCK_MISSING"
-                  )
-              elif name not in custom:
-                  report.append(
-                      f"{name}: CUSTOM_MISSING "
-                      f"stock=0x{stock[name]:08x}"
-                  )
-              elif stock[name] != custom[name]:
-                  report.append(
-                      f"{name}: MISMATCH "
-                      f"stock=0x{stock[name]:08x} "
-                      f"custom=0x{custom[name]:08x}"
-                  )
-              else:
-                  report.append(
-                      f"{name}: MATCH "
-                      f"0x{stock[name]:08x}"
-                  )
-
-          report.append("")
-          report.append("ALL COMMON SYMBOL CRC MISMATCHES")
-          report.append("-" * 60)
 
           if mismatches:
-              for name, stock_crc, custom_crc in mismatches:
-                  report.append(
-                      f"{name}: "
-                      f"stock=0x{stock_crc:08x} "
-                      f"custom=0x{custom_crc:08x}"
-                  )
-          else:
+
+              for (
+               name,
+               stock_crc,
+              custom_crc,
+           ) in mismatches:
+
+               report.append(
+            f"{name}: "
+            f"stock=0x{stock_crc:08x} "
+            f"custom=0x{custom_crc:08x}"
+           )
+
+           else:
+
+                report.append("NONE")
+ 
+
+            report.append("")
+            report.append(
+          "SYMBOLS MISSING FROM CUSTOM"
+           )
+           report.append("=" * 60)
+
+
+               if missing:
+
+                for name in missing:
+                   report.append(name)
+
+             else:
+
               report.append("NONE")
 
-          report.append("")
-          report.append("SYMBOLS MISSING FROM CUSTOM")
-          report.append("-" * 60)
 
-          if missing:
-              for name in missing:
-                  report.append(name)
-          else:
-              report.append("NONE")
+            report.append("")
+            report.append(
+           "EXTRA CUSTOM SYMBOLS"
+          )
+            report.append("=" * 60)
 
-          report.append("")
-          report.append("EXTRA CUSTOM SYMBOLS")
-          report.append("-" * 60)
 
-          if extra:
-              for name in extra:
-                  report.append(name)
-          else:
-              report.append("NONE")
+           if extra:
 
-          with open(report_file, "w") as f:
-              f.write("\n".join(report) + "\n")
+            for name in extra:
+            report.append(name)
 
-          print("\n".join(report))
+            else:
+
+          report.append("NONE")
+
+
+          with open(
+            report_file,
+          "w",
+           ) as f:
+
+             f.write(
+            "\n".join(report) + "\n"
+           )
+
+
+           print()
+            print(
+           "\n".join(report)
+           )
+
 
           if mismatches:
-              print()
-              print(
-                  "ERROR: CRC mismatch detected in symbols "
-                  "shared by stock and custom wlan.ko."
+
+            print()
+            print(
+             "ERROR: CRC mismatch detected in "
+              "symbols shared by stock and custom wlan.ko."
+          )
+
+             print(
+              "The kernel/module ABI must be corrected "
+               "before flashing."
+            )
+
+            sys.exit(1)
+
+
+           if required_failures:
+
+            print()
+             print(
+              "ERROR: Required QCACLD3 ABI symbols failed:"
+            )
+
+            for failure in required_failures:
+
+               print(
+              f"  {failure}"
               )
-              print(
-                  "The kernel/module ABI must be corrected "
-                  "before flashing."
+ 
+           print()
+            print(
+             "The kernel/module ABI must be corrected "
+             "before flashing."
               )
-              sys.exit(1)
 
-          if required_failures:
-              print()
-              print("ERROR: Required QCACLD3 ABI symbols failed:")
+            sys.exit(1)
 
-              for failure in required_failures:
-                  print(f"  {failure}")
 
-              print()
-              print(
-                  "The kernel/module ABI must be corrected "
-                  "before flashing."
+            print()
+            print(
+               "QCACLD3 common-symbol CRC comparison passed."
+             )
+
+            print(
+               "Required QCACLD3 ABI symbols passed."
               )
-              sys.exit(1)
 
-          print()
-          print("QCACLD3 common-symbol CRC comparison passed.")
-          print("Required QCACLD3 ABI symbols passed.")
-          PY
+             PY
 
           echo
           echo "=== CRC report ==="
@@ -4259,43 +4530,6 @@ jobs:
 
           echo
           echo "QCACLD3 stock/custom CRC comparison passed."
-            
-             
-                
-
-      - name: Generate stock versus final config diff
-        working-directory: kernel
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "=== Stock versus final kernel configuration diff ==="
-
-          STOCK_CONFIG="${GITHUB_WORKSPACE}/cebu-stock.config"
-          FINAL_CONFIG="${OUT_DIR}/.config"
-          DIFF_REPORT="${OUT_DIR}/stock-vs-final-config.diff"
-
-           test -s "${STOCK_CONFIG}"
-           test -s "${FINAL_CONFIG}"
-
-            "${GITHUB_WORKSPACE}/kernel/scripts/diffconfig" \
-             "${STOCK_CONFIG}" \
-             "${FINAL_CONFIG}" \
-            > "${DIFF_REPORT}" || true
-
-           test -s "${DIFF_REPORT}" || {
-          echo "ERROR: Configuration diff was not generated."
-           exit 1
-          }
-
-          echo
-          echo "=== Configuration differences ==="
-
-            cat "${DIFF_REPORT}"
-
-          echo
-          echo "Stock versus final configuration diff generated."
-
 
 
                       
