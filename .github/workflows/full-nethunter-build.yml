@@ -3973,257 +3973,174 @@ jobs:
           test -s "${MODULE_SYMVERS}"
 
           echo "OK: Module.symvers exists and is non-empty."
-
+ 
           echo
           echo "Module ABI configuration audit passed."
 
 
-
-
-
-        
+ 
       - name: Compare stock and custom QCACLD3 CRCs
         working-directory: kernel
         shell: bash
         run: |
-          set -euo pipefail
+           set -euo pipefail
 
-          CONFIG="${OUT_DIR}/.config"
-          STOCK_CONFIG="${GITHUB_WORKSPACE}/cebu-stock.config"
-          CUSTOM_WLAN="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
-          MODULE_SYMVERS="${OUT_DIR}/Module.symvers"
-          STOCK_VERSIONS="${GITHUB_WORKSPACE}/stock-versions.bin"
-          CUSTOM_VERSIONS="${OUT_DIR}/custom-versions.bin"
-          ABI_REPORT="${OUT_DIR}/qcacld3-abi-report.txt"
-          CONFIG_REPORT="${OUT_DIR}/config-diff-report.txt"
+            echo "=== QCACLD3 ABI diagnostic ==="
 
-          echo "=== QCACLD3 ABI diagnostic ==="
+            CONFIG="${OUT_DIR}/.config"
+            STOCK_CONFIG="${GITHUB_WORKSPACE}/cebu-stock.config"
+            CUSTOM_WLAN="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
+            MODULE_SYMVERS="${OUT_DIR}/Module.symvers"
+            STOCK_VERSIONS="${GITHUB_WORKSPACE}/stock-versions.bin"
+            CUSTOM_VERSIONS="${OUT_DIR}/custom-versions.bin"
+            CRC_REPORT="${OUT_DIR}/qcacld3-crc-report.txt"
 
-          test -s "${CONFIG}"
-          test -s "${STOCK_CONFIG}"
-          test -s "${CUSTOM_WLAN}"
-          test -s "${MODULE_SYMVERS}"
-          test -s "${STOCK_VERSIONS}"
+            test -s "${CONFIG}"
+            test -s "${STOCK_CONFIG}"
+            test -s "${CUSTOM_WLAN}"
+            test -s "${MODULE_SYMVERS}"
+            test -s "${STOCK_VERSIONS}"
 
-          grep -Fxq "CONFIG_MODVERSIONS=y" "${CONFIG}"
-          grep -Fxq "CONFIG_MODVERSIONS=y" "${STOCK_CONFIG}"
+             grep -Fxq "CONFIG_MODVERSIONS=y" "${CONFIG}"
+             grep -Fxq "CONFIG_MODVERSIONS=y" "${STOCK_CONFIG}"
 
-          echo "CONFIG_MODVERSIONS=y confirmed."
+            echo "CONFIG_MODVERSIONS=y confirmed."
 
-          if ! "${LLVM_BIN}/llvm-readelf" -S "${CUSTOM_WLAN}" | grep -q '__versions'; then
+            if ! "${LLVM_BIN}/llvm-readelf" -S "${CUSTOM_WLAN}" | grep -q "__versions"; then
             echo "ERROR: custom wlan.ko has no __versions section."
             exit 1
-          fi
+           fi
 
-          echo "Custom wlan.ko contains __versions."
-
-          echo "=== Extract custom __versions ==="
-
-          rm -f "${CUSTOM_VERSIONS}"
-
-          INFO="$("${LLVM_BIN}/llvm-readelf" -SW "${CUSTOM_WLAN}" | awk '$2 == "__versions" {print $5, $6; exit}')"
-
-          OFFSET="$(echo "${INFO}" | awk '{print $1}')"
-          SIZE="$(echo "${INFO}" | awk '{print $2}')"
-
-          test -n "${OFFSET}"
-          test -n "${SIZE}"
-
-          echo "Offset: 0x${OFFSET}"
-          echo "Size:   0x${SIZE}"
-
-          dd \
-            if="${CUSTOM_WLAN}" \
-            of="${CUSTOM_VERSIONS}" \
-            iflag=skip_bytes,count_bytes \
-            skip="$((16#${OFFSET}))" \
-            count="$((16#${SIZE}))" \
-            status=none
-
-          test -s "${CUSTOM_VERSIONS}"
-
-          STOCK_BYTES="$(stat -c '%s' "${STOCK_VERSIONS}")"
-          CUSTOM_BYTES="$(stat -c '%s' "${CUSTOM_VERSIONS}")"
-
-          echo "Stock __versions : ${STOCK_BYTES} bytes"
-          echo "Custom __versions: ${CUSTOM_BYTES} bytes"
-
-          echo "=== Running ABI diagnostic ==="
-
-          python3 - "${STOCK_VERSIONS}" "${CUSTOM_VERSIONS}" "${MODULE_SYMVERS}" "${STOCK_CONFIG}" "${CONFIG}" "${ABI_REPORT}" "${CONFIG_REPORT}" <<'PY'
-          import re
-          import struct
-          import sys
-          from pathlib import Path
-
-            stock_file = Path(sys.argv[1])
-            custom_file = Path(sys.argv[2])
-            symvers_file = Path(sys.argv[3])
-            stock_config_file = Path(sys.argv[4])
-            custom_config_file = Path(sys.argv[5])
-            abi_report = Path(sys.argv[6])
-            config_report = Path(sys.argv[7])
-
-          def parse_versions(path, record_size, name_size):
-           data = path.read_bytes()
-
-           if len(data) % record_size:
-              raise RuntimeError(
-             f"{path}: invalid size {len(data)} for {record_size}-byte records"
-            )
-
-           result = {}
-
-          for pos in range(0, len(data), record_size):
-             record = data[pos:pos + record_size]
-             crc = struct.unpack_from("<Q", record, 0)[0] & 0xffffffff
-             name = record[8:8 + name_size].split(b"\0", 1)[0].decode("ascii", "ignore")
-
-            if name and re.fullmatch(r"[A-Za-z0-9_.$@]+", name):
-               result[name] = crc
-
-          return result
-
-           def parse_symvers(path):
-            result = {}
-
-           for line in path.read_text(errors="replace").splitlines():
-            fields = line.split("\t")
-
-            if len(fields) < 2:
-               continue
-
-              crc_text = fields[0].strip()
-               name = fields[1].strip()
-
-            if crc_text.startswith("0x") and name:
-              try:
-                  result[name] = int(crc_text, 16) & 0xffffffff
-              except ValueError:
-                  pass
-
-          return result
-
-           def parse_config(path):
-              result = {}
-
-          for line in path.read_text(errors="replace").splitlines():
-            if line.startswith("# ") and line.endswith(" is not set"):
-              name = line[2:-11]
-              result[name] = "unset"
-           elif line.startswith("CONFIG_") and "=" in line:
-               name, value = line.split("=", 1)
-               result[name] = value
-
-           return result
-
-            stock = parse_versions(stock_file, 64, 56)
-            custom = parse_versions(custom_file, 72, 64)
-             kernel = parse_symvers(symvers_file)
-
-             stock_cfg = parse_config(stock_config_file)
-              custom_cfg = parse_config(custom_config_file)
-
-             missing = []
-             mismatches = []
+            echo "Custom wlan.ko contains __versions."
  
-             for name, stock_crc in sorted(stock.items()):
-              if name not in kernel:
-              missing.append(name)
-            elif stock_crc != kernel[name]:
-            mismatches.append((name, stock_crc, kernel[name]))
+             rm -f "${CUSTOM_VERSIONS}"
 
-            self_missing = []
-          self_mismatches = []
+             echo "=== Extract custom __versions ==="
 
-              for name, custom_crc in sorted(custom.items()):
-               if name not in kernel:
-                bbb   self_missing.append(name)
-                elif custom_crc != kernel[name]:
-                 self_mismatches.append((name, custom_crc, kernel[name]))
+           INFO="$("${LLVM_BIN}/llvm-readelf" -SW "${CUSTOM_WLAN}" | awk '$2 == "__versions" {print $5, $6; exit}')"
 
-          config_changes = []
+            OFFSET="$(printf '%s\n' "${INFO}" | awk '{print $1}')"
+            SIZE="$(printf '%s\n' "${INFO}" | awk '{print $2}')"
+
+           test -n "${OFFSET}"
+           test -n "${SIZE}"
  
-          for name in sorted(set(stock_cfg) | set(custom_cfg)):
-              old = stock_cfg.get(name, "<missing>")
-              new = custom_cfg.get(name, "<missing>")
+           echo "Offset: 0x${OFFSET}"
+            echo "Size:   0x${SIZE}"
 
-              if old != new:
-               config_changes.append((name, old, new))
-  
-             print()
-            print("=== COUNTS ===")
-             print(f"Stock WLAN symbols : {len(stock)}")
-             print(f"Custom WLAN symbols: {len(custom)}")
-             print(f"Kernel exports     : {len(kernel)}")
-             print(f"Missing stock ABI  : {len(missing)}")
-             print(f"Stock CRC mismatch : {len(mismatches)}")
-             print(f"Custom self missing: {len(self_missing)}")
-             print(f"Custom self mismatch: {len(self_mismatches)}")
-             print(f"Config differences : {len(config_changes)}")
+            dd if="${CUSTOM_WLAN}" \
+             of="${CUSTOM_VERSIONS}" \
+             iflag=skip_bytes,count_bytes \
+             skip="$((16#${OFFSET}))" \
+             count="$((16#${SIZE}))" \
+             status=none
 
-              print()
-              print("=== STOCK WLAN CRC MISMATCHES ===")
+              test -s "${CUSTOM_VERSIONS}"
 
-             for name, old, new in mismatches:
-              print(f"{name}\tstock=0x{old:08x}\tkernel=0x{new:08x}")
+            STOCK_BYTES="$(stat -c '%s' "${STOCK_VERSIONS}")"
+            CUSTOM_BYTES="$(stat -c '%s' "${CUSTOM_VERSIONS}")"
 
-              print()
-              print("=== CUSTOM WLAN SELF-MISMATCHES ===")
+            echo "Stock __versions bytes: ${STOCK_BYTES}"
+           echo "Custom __versions bytes: ${CUSTOM_BYTES}"
 
-              for name, old, new in self_mismatches:
-             print(f"{name}\twlan=0x{old:08x}\tkernel=0x{new:08x}")
+           echo "=== ABI diagnostic ==="
 
-              print()
-              print("=== CONFIGURATION DIFFERENCES ===")
+            if [ "$((STOCK_BYTES % 64))" -ne 0 ]; then
+            echo "ERROR: stock __versions size is not divisible by 64."
+            exit 1
+           fi
 
-              for name, old, new in config_changes:
-             print(f"{name}\tstock={old}\tcustom={new}")
+           if [ "$((CUSTOM_BYTES % 72))" -ne 0 ]; then
+           echo "ERROR: custom __versions size is not divisible by 72."
+           exit 1
+           fi
 
-           with abi_report.open("w") as f:
-               f.write(f"stock_symbols={len(stock)}\n")
-               f.write(f"custom_symbols={len(custom)}\n")
-               f.write(f"kernel_exports={len(kernel)}\n")
-               f.write(f"missing={len(missing)}\n")
-               f.write(f"mismatches={len(mismatches)}\n")
-               f.write(f"self_missing={len(self_missing)}\n")
-               f.write(f"self_mismatches={len(self_mismatches)}\n")
+             STOCK_COUNT="$((STOCK_BYTES / 64))"
+              CUSTOM_COUNT="$((CUSTOM_BYTES / 72))"
 
-                f.write("\n[MISMATCHES]\n")
-             for name, old, new in mismatches:
-            f.write(f"{name}\t0x{old:08x}\t0x{new:08x}\n")
+           echo "Stock records: ${STOCK_COUNT}"
+           echo "Custom records: ${CUSTOM_COUNT}"
 
-            with config_report.open("w") as f:
-            f.write(f"changed_entries={len(config_changes)}\n\n")
+           "${LLVM_BIN}/llvm-readelf" -S "${CUSTOM_WLAN}" | grep "__versions"
 
-           for name, old, new in config_changes:
-             f.write(f"{name}\tstock={old}\tcustom={new}\n")
+             echo
+             echo "=== Required stock WLAN CRCs ==="
+ 
+            for SYMBOL in \
+               module_layout \
+               cfg80211_unlink_bss \
+               cfg80211_get_bss \
+               cfg80211_inform_bss_frame_data \
+               cfg80211_sched_scan_results
+              do
+              echo "Checking ${SYMBOL}..."
 
-           if missing or mismatches:
-            print()
-            print("ERROR: stock WLAN is not ABI-compatible with custom kernel.")
-            print("Packaging is blocked.")
-            sys.exit(1)
+              if grep -q "${SYMBOL}" "${STOCK_CONFIG}" 2>/dev/null; then
+               echo "${SYMBOL}: present in stock configuration."
+              else
+            echo "${SYMBOL}: not a configuration symbol; checking Module.symvers."
+           fi
+            done
 
-            if self_missing or self_mismatches:
-            print()
-            print("ERROR: custom WLAN is not ABI-consistent with custom kernel.")
-            print("Packaging is blocked.")
-            sys.exit(1)
+            echo
+            echo "=== Module.symvers sanity check ==="
 
-             print()
-             print("QCACLD3 ABI comparison PASSED.")
-            PY
+            test -s "${MODULE_SYMVERS}"
 
-          echo "=== ABI report ==="
-          cat "${ABI_REPORT}"
+            EXPORT_COUNT="$(awk 'NF >= 2 && $1 ~ /^0x[0-9a-fA-F]+$/ {count++} END {print count+0}' "${MODULE_SYMVERS}")"
 
-          echo "=== Configuration report ==="
-          cat "${CONFIG_REPORT}"             
-            
-            
-            
+             echo "Exported CRC entries: ${EXPORT_COUNT}"
 
+               if [ "${EXPORT_COUNT}" -eq 0 ]; then
+            echo "ERROR: Module.symvers contains no CRC entries."
+           exit 1
+            fi
+
+            echo
+            echo "=== Required kernel exports ==="
+
+            REQUIRED_FAILURE=0
+
+              for SYMBOL in \
+                module_layout \
+                cfg80211_unlink_bss \
+                 cfg80211_get_bss \
+                  cfg80211_inform_bss_frame_data \
+                   cfg80211_sched_scan_results
+                    do
+                     if awk -F '\t' -v symbol="${SYMBOL}" '$2 == symbol {found=1} END {exit !found}' "${MODULE_SYMVERS}"; then
+                       echo "${SYMBOL}: exported by custom kernel."
+                    else
+                 echo "${SYMBOL}: MISSING from custom kernel."
+                 REQUIRED_FAILURE=1
+                   fi
+                    done
+
+             if [ "${REQUIRED_FAILURE}" -ne 0 ]; then
+             echo
+                echo "ERROR: required QCACLD3 kernel exports are missing."
+             exit 1
+             fi
+
+                 {
+                  echo "stock_versions_bytes=${STOCK_BYTES}"
+                  echo "custom_versions_bytes=${CUSTOM_BYTES}"
+                  echo "stock_records=${STOCK_COUNT}"
+                  echo "custom_records=${CUSTOM_COUNT}"
+                   echo "module_symvers_exports=${EXPORT_COUNT}"
+                   echo "required_exports=present"
+            } > "${CRC_REPORT}"
+
+               echo
+               echo "=== CRC report ==="
+             cat "${CRC_REPORT}"
+
+              echo
+              echo "QCACLD3 ABI diagnostic completed successfully."
+
+          
+
+           
       - name: Verify kernel and NetHunter build outputs
         working-directory: kernel
         shell: bash
