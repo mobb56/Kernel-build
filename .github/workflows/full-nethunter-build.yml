@@ -3979,8 +3979,7 @@ jobs:
 
 
 
-
-
+            
       - name: Verify stock ABI CRCs against custom kernel
         working-directory: kernel
         shell: bash
@@ -4016,11 +4015,11 @@ jobs:
           STOCK_CFG80211_INFORM_BSS_FRAME_DATA="0xaf0332f3"
           STOCK_CFG80211_SCHED_SCAN_RESULTS="0x73e1515f"
 
-          echo "module_layout                       = ${STOCK_MODULE_LAYOUT}"
-          echo "cfg80211_unlink_bss                 = ${STOCK_CFG80211_UNLINK_BSS}"
-          echo "cfg80211_get_bss                    = ${STOCK_CFG80211_GET_BSS}"
-          echo "cfg80211_inform_bss_frame_data      = ${STOCK_CFG80211_INFORM_BSS_FRAME_DATA}"
-          echo "cfg80211_sched_scan_results         = ${STOCK_CFG80211_SCHED_SCAN_RESULTS}"
+          echo "module_layout                  = ${STOCK_MODULE_LAYOUT}"
+          echo "cfg80211_unlink_bss            = ${STOCK_CFG80211_UNLINK_BSS}"
+          echo "cfg80211_get_bss               = ${STOCK_CFG80211_GET_BSS}"
+          echo "cfg80211_inform_bss_frame_data = ${STOCK_CFG80211_INFORM_BSS_FRAME_DATA}"
+          echo "cfg80211_sched_scan_results    = ${STOCK_CFG80211_SCHED_SCAN_RESULTS}"
 
           echo
           echo "============================================================"
@@ -4043,17 +4042,17 @@ jobs:
             ' "${SYMVERS}"
           }
 
-          CUSTOM_MODULE_LAYOUT="$(get_crc module_layout)"
-          CUSTOM_CFG80211_UNLINK_BSS="$(get_crc cfg80211_unlink_bss)"
-          CUSTOM_CFG80211_GET_BSS="$(get_crc cfg80211_get_bss)"
-          CUSTOM_CFG80211_INFORM_BSS_FRAME_DATA="$(get_crc cfg80211_inform_bss_frame_data)"
-          CUSTOM_CFG80211_SCHED_SCAN_RESULTS="$(get_crc cfg80211_sched_scan_results)"
+          CUSTOM_MODULE_LAYOUT="$(get_crc "module_layout")"
+          CUSTOM_CFG80211_UNLINK_BSS="$(get_crc "cfg80211_unlink_bss")"
+          CUSTOM_CFG80211_GET_BSS="$(get_crc "cfg80211_get_bss")"
+          CUSTOM_CFG80211_INFORM_BSS_FRAME_DATA="$(get_crc "cfg80211_inform_bss_frame_data")"
+          CUSTOM_CFG80211_SCHED_SCAN_RESULTS="$(get_crc "cfg80211_sched_scan_results")"
 
-          echo "module_layout                       = ${CUSTOM_MODULE_LAYOUT}"
-          echo "cfg80211_unlink_bss                 = ${CUSTOM_CFG80211_UNLINK_BSS}"
-          echo "cfg80211_get_bss                    = ${CUSTOM_CFG80211_GET_BSS}"
-          echo "cfg80211_inform_bss_frame_data      = ${CUSTOM_CFG80211_INFORM_BSS}"
-          echo "cfg80211_sched_scan_results         = ${CUSTOM_CFG80211_SCHED_SCAN_RESULTS}"
+          echo "module_layout                  = ${CUSTOM_MODULE_LAYOUT}"
+          echo "cfg80211_unlink_bss            = ${CUSTOM_CFG80211_UNLINK_BSS}"
+          echo "cfg80211_get_bss               = ${CUSTOM_CFG80211_GET_BSS}"
+          echo "cfg80211_inform_bss_frame_data = ${CUSTOM_CFG80211_INFORM_BSS_FRAME_DATA}"
+          echo "cfg80211_sched_scan_results    = ${CUSTOM_CFG80211_SCHED_SCAN_RESULTS}"
 
           echo
           echo "============================================================"
@@ -4072,11 +4071,11 @@ jobs:
             printf '%-40s stock=%-12s custom=%-12s\n' \
               "${symbol}" "${expected}" "${actual}" | tee -a "${REPORT}"
 
-            if [ "${actual}" != "${expected}" ]; then
+            if [ "${actual}" = "${expected}" ]; then
+              echo "MATCH: ${symbol}" | tee -a "${REPORT}"
+            else
               echo "MISMATCH: ${symbol}" | tee -a "${REPORT}"
               FAILED=1
-            else
-              echo "MATCH: ${symbol}" | tee -a "${REPORT}"
             fi
           }
 
@@ -4107,7 +4106,7 @@ jobs:
 
           echo
           echo "============================================================"
-          echo " CRC REPORT"
+          echo " FINAL CRC RESULT"
           echo "============================================================"
 
           cat "${REPORT}"
@@ -4116,8 +4115,8 @@ jobs:
             echo
             echo "ERROR: CUSTOM KERNEL ABI DOES NOT MATCH STOCK."
             echo
-            echo "The build is intentionally stopped."
-            echo "No kernel should be flashed with these CRC differences."
+            echo "The CRC comparison itself completed and found differences."
+            echo "The kernel build is intentionally stopped."
             exit 1
           fi
 
@@ -4125,7 +4124,6 @@ jobs:
           echo "============================================================"
           echo " QCACLD3 STOCK ABI MATCH PASSED"
           echo "============================================================"
-
 
         
         
