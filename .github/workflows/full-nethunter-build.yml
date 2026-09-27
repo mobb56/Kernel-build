@@ -4037,9 +4037,27 @@ jobs:
 
           
 
-           "${LLVM_BIN}/llvm-objcopy" \
-           --dump-section __versions="${OUT_DIR}/custom-versions.bin" \
-          "${CUSTOM_WLAN}"
+              echo "=== Custom __versions section details ==="
+
+              "${LLVM_BIN}/llvm-readelf" -S "${CUSTOM_WLAN}" |
+                 grep -A2 -B2 '__versions'
+
+              echo
+                echo "=== Custom wlan.ko file type ==="
+
+               file "${CUSTOM_WLAN}"
+
+                echo
+                echo "=== Attempting custom __versions extraction ==="
+
+              "${LLVM_BIN}/llvm-objcopy" \
+              --dump-section __versions="${OUT_DIR}/custom-versions.bin" \
+               "${CUSTOM_WLAN}"
+
+               echo
+               echo "=== Extraction completed ==="
+
+             test -s "${OUT_DIR}/custom-versions.bin"
 
            test -s "${GITHUB_WORKSPACE}/stock-versions.bin"
            test -s "${OUT_DIR}/custom-versions.bin"
