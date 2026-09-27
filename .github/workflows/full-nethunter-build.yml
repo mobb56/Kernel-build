@@ -4105,11 +4105,12 @@ jobs:
            stat -c 'Custom bytes: %s' \
           "${OUT_DIR}/custom-versions.bin"
 
-           cat > "${OUT_DIR}/compare_crc.py" <<'PY'
-           import re
-           import struct
-           import sys
-           from pathlib import Path
+            cat > "${OUT_DIR}/compare_crc.py"
+            <<'PY'
+                import re
+                import struct
+                import sys
+                from pathlib import Path
  
             STOCK_FILE = Path(sys.argv[1])
             CUSTOM_FILE = Path(sys.argv[2])
