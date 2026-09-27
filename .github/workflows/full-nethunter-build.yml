@@ -4037,12 +4037,9 @@ jobs:
 
           
 
-           if ! "${LLVM_BIN}/llvm-objcopy" \
-          --dump-section __versions="${OUT_DIR}/custom-versions.bin" \
-           "${CUSTOM_WLAN}"; then
-            echo "ERROR: failed to extract custom __versions."
-          exit 1
-           fi
+           "${LLVM_BIN}/llvm-objcopy" \
+           --dump-section __versions="${OUT_DIR}/custom-versions.bin" \
+          "${CUSTOM_WLAN}"
 
            test -s "${GITHUB_WORKSPACE}/stock-versions.bin"
            test -s "${OUT_DIR}/custom-versions.bin"
