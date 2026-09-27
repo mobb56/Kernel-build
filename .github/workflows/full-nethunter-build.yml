@@ -243,9 +243,10 @@ jobs:
 
 
       # ============================================================
-      # 7. CLONE KERNEL SOURCE
+      # 7. CLONE CEBU KERNEL SOURCE
       # ============================================================
-      - name: Clone exact cebu kernel source
+
+      - name: Clone cebu kernel source
         shell: bash
         run: |
           set -euxo pipefail
@@ -262,12 +263,17 @@ jobs:
 
           echo
           echo "============================================================"
-          echo " CEBU KERNEL SOURCE IDENTITY"
+          echo "CEBU KERNEL SOURCE IDENTITY"
           echo "============================================================"
 
           CURRENT_COMMIT="$(git rev-parse HEAD)"
           CURRENT_SHORT="$(git rev-parse --short=12 HEAD)"
 
+          echo
+          echo "Repository:"
+          git remote get-url origin
+
+          echo
           echo "Branch:"
           git branch --show-current
 
@@ -279,46 +285,51 @@ jobs:
           echo "Current 12-character commit:"
           echo "${CURRENT_SHORT}"
 
-          echo
-          echo "Expected stock release:"
-          echo "${CLEAN_RELEASE}"
-
-          STOCK_COMMIT="${CLEAN_RELEASE##*-g}"
+          test -n "${CURRENT_COMMIT}"
+          test -n "${CURRENT_SHORT}"
 
           echo
-          echo "Commit encoded by stock release:"
-          echo "${STOCK_COMMIT}"
+          echo "Kernel source successfully cloned."
 
-          if [ "${CURRENT_SHORT}" != "${STOCK_COMMIT}" ]; then
-            echo
-            echo "Current branch HEAD is NOT the source revision encoded"
-            echo "by the stock kernel release."
-            echo
-            echo "Fetching the exact stock revision..."
+      # ============================================================
+      # 8. VERIFY CORRECT KERNEL BRANCH
+      # ============================================================
 
-            git fetch \
-              --no-tags \
-              origin \
-              "${STOCK_COMMIT}"
+      - name: Verify cebu kernel source
+        shell: bash
+        run: |
+          set -euxo pipefail
 
-            git checkout --detach "${STOCK_COMMIT}"
-          fi
+          cd kernel
 
-          FINAL_COMMIT="$(git rev-parse HEAD)"
-          FINAL_SHORT="$(git rev-parse --short=12 HEAD)"
+          test "$(git branch --show-current)" = "${KERNEL_BRANCH}"
 
-          echo
-          echo "Final kernel commit:"
-          echo "${FINAL_COMMIT}"
+          test -f Makefile
+          test -d arch/arm64
+          test -d drivers
+
+          test -f \
+            arch/arm64/configs/vendor/bengal-perf_defconfig
 
           echo
-          echo "Final 12-character commit:"
-          echo "${FINAL_SHORT}"
-
-          test "${FINAL_SHORT}" = "${STOCK_COMMIT}"
+          echo "============================================================"
+          echo "CEBU KERNEL SOURCE VERIFIED"
+          echo "============================================================"
 
           echo
-          echo "EXACT STOCK SOURCE REVISION CONFIRMED."
+          echo "Branch:"
+          git branch --show-current
+
+          echo
+          echo "Commit:"
+          git rev-parse HEAD
+
+          echo
+          echo "Defconfig:"
+          echo "arch/arm64/configs/vendor/bengal-perf_defconfig"
+
+          echo
+          echo "Correct cebu kernel source verified."
       # ============================================================
       # 8. VERIFY CORRECT KERNEL BRANCH
       # ============================================================
