@@ -727,6 +727,195 @@ jobs:
           echo
           echo "Stock compiler metadata verified."
 
+
+
+
+
+
+
+
+
+      # ============================================================
+      # STOCK ABI BASELINE
+      #
+      # Build the untouched stock configuration from the exact cebu
+      # source tree before applying ANY NetHunter configuration or
+      # QCACLD3 source changes.
+      #
+      # This proves whether the public source + stock config +
+      # Android Clang toolchain reproduce the ABI expected by the
+      # real Motorola WLAN module.
+      #
+      # STATIC TEST ONLY.
+      # NO FLASHING.
+      # NO REBOOT.
+      # ============================================================
+
+      - name: Reproduce stock kernel ABI
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "============================================================"
+          echo "STOCK ABI BASELINE"
+          echo "============================================================"
+
+          STOCK_ABI_OUT="${GITHUB_WORKSPACE}/out-stock-abi"
+
+          rm -rf "${STOCK_ABI_OUT}"
+          mkdir -p "${STOCK_ABI_OUT}"
+
+          echo
+          echo "Source commit:"
+          git rev-parse HEAD
+
+          test "$(git rev-parse HEAD)" = \
+            "39bcecd563df849923b1faadc9cde482648a1a1"
+
+          echo
+          echo "Copying exact stock configuration..."
+
+          test -s "${GITHUB_WORKSPACE}/cebu-stock.config"
+
+          cp \
+            "${GITHUB_WORKSPACE}/cebu-stock.config" \
+            "${STOCK_ABI_OUT}/.config"
+
+          echo
+          echo "Resolving stock configuration..."
+
+          make \
+            O="${STOCK_ABI_OUT}" \
+            ARCH="${ARCH}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            olddefconfig
+
+          CONFIG="${STOCK_ABI_OUT}/.config"
+
+          echo
+          echo "Checking stock ABI/security settings..."
+
+          REQUIRED_STOCK_ABI=(
+            "LTO=y"
+            "THINLTO=y"
+            "LTO_CLANG=y"
+            "CFI=y"
+            "CFI_CLANG=y"
+            "CFI_CLANG_SHADOW=y"
+            "SHADOW_CALL_STACK=y"
+            "INIT_STACK_ALL_ZERO=y"
+            "DEBUG_INFO=y"
+            "MODVERSIONS=y"
+            "HZ_300=y"
+          )
+
+          for item in "${REQUIRED_STOCK_ABI[@]}"; do
+            symbol="${item%%=*}"
+            expected="${item#*=}"
+
+            actual="$(
+              scripts/config \
+                --file "${CONFIG}" \
+                --state "${symbol}"
+            )"
+
+            if [ "${actual}" != "${expected}" ]; then
+              echo
+              echo "ERROR: stock configuration changed:"
+              echo "  ${symbol}"
+              echo "  expected: ${expected}"
+              echo "  actual:   ${actual}"
+              exit 1
+            fi
+
+            echo "OK: ${symbol}=${actual}"
+          done
+
+          echo
+          echo "Building untouched stock kernel..."
+
+          make \
+            O="${STOCK_ABI_OUT}" \
+            ARCH="${ARCH}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            KBUILD_SYMTYPES=1 \
+            LOCALVERSION="-g39bcecd5c63d" \
+            -j"$(nproc)"
+
+          test -s "${STOCK_ABI_OUT}/Module.symvers"
+
+          echo
+          echo "Stock ABI Module.symvers:"
+          ls -lh "${STOCK_ABI_OUT}/Module.symvers"
+
+          echo
+          echo "Comparing known Motorola stock CRCs..."
+
+          STOCK_SYMVERS="${STOCK_ABI_OUT}/Module.symvers"
+
+          check_crc() {
+            symbol="$1"
+            expected="$2"
+
+            actual="$(
+              awk -v wanted="${symbol}" '
+                $2 == wanted {
+                  print $1
+                  exit
+                }
+              ' "${STOCK_SYMVERS}"
+            )"
+
+            if [ -z "${actual}" ]; then
+              echo "ERROR: ${symbol} missing from stock reproduction."
+              return 1
+            fi
+
+            actual="${actual#0x}"
+
+            echo
+            echo "${symbol}"
+            echo "  expected = 0x${expected}"
+            echo "  actual   = ${actual}"
+
+            if [ "${actual}" != "${expected}" ]; then
+              echo "  RESULT   = MISMATCH"
+              return 1
+            fi
+
+            echo "  RESULT   = MATCH"
+          }
+
+          check_crc \
+            "module_layout" \
+            "efc8997b"
+
+          check_crc \
+            "cfg80211_unlink_bss" \
+            "f190a484"
+
+          check_crc \
+            "cfg80211_get_bss" \
+            "078af9da"
+
+          check_crc \
+            "cfg80211_inform_bss_frame_data" \
+            "af0332f3"
+
+          check_crc \
+            "cfg80211_sched_scan_results" \
+            "73e1515f"
+
+          echo
+          echo "============================================================"
+          echo "STOCK ABI BASELINE PASSED"
+          echo "============================================================"
+
       # ============================================================
       # 20. CREATE NETHUNTER CONFIGURATION FRAGMENT
       #
@@ -962,6 +1151,92 @@ jobs:
             scripts/config --file "${OUT_DIR}/.config" --state HZ_300
 
             echo "Kconfig resolution completed."
+
+
+
+
+
+
+      # ============================================================
+      # ABI-SENSITIVE CONFIGURATION AUDIT
+      #
+      # The failing symbols include module_layout and cfg80211 APIs.
+      # Audit every CONFIG_* symbol referenced by the kernel module
+      # and cfg80211 public headers.
+      #
+      # A NetHunter feature is not allowed to silently alter one of
+      # these configuration conditions.
+      # ============================================================
+
+      - name: Audit ABI-sensitive configuration
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          STOCK_CONFIG="${GITHUB_WORKSPACE}/cebu-stock.config"
+          FINAL_CONFIG="${OUT_DIR}/.config"
+
+          test -s "${STOCK_CONFIG}"
+          test -s "${FINAL_CONFIG}"
+
+          echo "============================================================"
+          echo "ABI-SENSITIVE CONFIGURATION AUDIT"
+          echo "============================================================"
+
+          FAILED=0
+
+          for HEADER in \
+            include/linux/module.h \
+            include/net/cfg80211.h
+          do
+            echo
+            echo "------------------------------------------------------------"
+            echo "Header: ${HEADER}"
+            echo "------------------------------------------------------------"
+
+            grep -oE 'CONFIG_[A-Z0-9_]+' "${HEADER}" |
+              sort -u |
+              while read -r SYMBOL; do
+
+                STOCK_STATE="$(
+                  scripts/config \
+                    --file "${STOCK_CONFIG}" \
+                    --state "${SYMBOL}" 2>/dev/null ||
+                  true
+                )"
+
+                FINAL_STATE="$(
+                  scripts/config \
+                    --file "${FINAL_CONFIG}" \
+                    --state "${SYMBOL}" 2>/dev/null ||
+                  true
+                )"
+
+                if [ "${STOCK_STATE}" != "${FINAL_STATE}" ]; then
+                  echo
+                  echo "ABI CONFIG DIFFERENCE:"
+                  echo "  ${SYMBOL}"
+                  echo "  stock = ${STOCK_STATE:-unset}"
+                  echo "  final = ${FINAL_STATE:-unset}"
+                  FAILED=1
+                fi
+
+              done
+          done
+
+          if [ "${FAILED}" -ne 0 ]; then
+            echo
+            echo "ERROR: ABI-sensitive configuration differs from stock."
+            echo
+            echo "The NetHunter configuration must not change these"
+            echo "configuration conditions until the affected ABI is"
+            echo "understood."
+            exit 1
+          fi
+
+          echo
+          echo "ABI-sensitive configuration matches stock."
 
 
        
