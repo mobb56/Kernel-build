@@ -1172,73 +1172,70 @@ jobs:
         working-directory: kernel
         shell: bash
         run: |
-          set -euo pipefail
+           set -euo pipefail
+           
+           STOCK_CONFIG="${GITHUB_WORKSPACE}/cebu-stock.config"
+           FINAL_CONFIG="${OUT_DIR}/.config"
 
-          STOCK_CONFIG="${GITHUB_WORKSPACE}/cebu-stock.config"
-          FINAL_CONFIG="${OUT_DIR}/.config"
+            test -s "${STOCK_CONFIG}"
+            test -s "${FINAL_CONFIG}"
 
-          test -s "${STOCK_CONFIG}"
-          test -s "${FINAL_CONFIG}"
+            echo "============================================================"
+            echo "ABI-SENSITIVE CONFIGURATION AUDIT"
+            echo "============================================================"
 
-          echo "============================================================"
-          echo "ABI-SENSITIVE CONFIGURATION AUDIT"
-          echo "============================================================"
+             FAILED=0
 
-          FAILED=0
-
-          for HEADER in \
-            include/linux/module.h \
-            include/net/cfg80211.h
-          do
+              for HEADER in \
+              include/linux/module.h \
+              include/net/cfg80211.h
+             do
             echo
             echo "------------------------------------------------------------"
             echo "Header: ${HEADER}"
             echo "------------------------------------------------------------"
 
-            grep -oE 'CONFIG_[A-Z0-9_]+' "${HEADER}" |
-              sort -u |
-              while read -r SYMBOL; do
+               while read -r SYMBOL; do
 
-                STOCK_STATE="$(
-                  scripts/config \
-                    --file "${STOCK_CONFIG}" \
-                    --state "${SYMBOL}" 2>/dev/null ||
-                  true
-                )"
+                  STOCK_STATE="$(
+                 scripts/config \
+              --file "${STOCK_CONFIG}" \
+              --state "${SYMBOL}" 2>/dev/null ||
+              true
+              )"
 
                 FINAL_STATE="$(
-                  scripts/config \
-                    --file "${FINAL_CONFIG}" \
-                    --state "${SYMBOL}" 2>/dev/null ||
-                  true
-                )"
+                scripts/config \
+             --file "${FINAL_CONFIG}" \
+             --state "${SYMBOL}" 2>/dev/null ||
+              true
+             )"
 
-                if [ "${STOCK_STATE}" != "${FINAL_STATE}" ]; then
-                  echo
-                  echo "ABI CONFIG DIFFERENCE:"
-                  echo "  ${SYMBOL}"
-                  echo "  stock = ${STOCK_STATE:-unset}"
-                  echo "  final = ${FINAL_STATE:-unset}"
-                  FAILED=1
-                fi
+             if [ "${STOCK_STATE}" != "${FINAL_STATE}" ]; then
+             echo
+             echo "ABI CONFIG DIFFERENCE:"
+              echo "  ${SYMBOL}"
+              echo "  stock = ${STOCK_STATE:-unset}"
+              echo "  final = ${FINAL_STATE:-unset}"
+              FAILED=1
+             fi
 
-              done
-          done
+             done < <(
+             grep -oE 'CONFIG_[A-Z0-9_]+' "${HEADER}" |
+              sort -u
+              )
+               done
 
-          if [ "${FAILED}" -ne 0 ]; then
+              if [ "${FAILED}" -ne 0 ]; then
+           echo
+           echo "ERROR: ABI-sensitive configuration differs from stock."
+           echo "The NetHunter configuration must not change these"
+           echo "configuration conditions until the ABI is understood."
+           exit 1
+           fi
+
             echo
-            echo "ERROR: ABI-sensitive configuration differs from stock."
-            echo
-            echo "The NetHunter configuration must not change these"
-            echo "configuration conditions until the affected ABI is"
-            echo "understood."
-            exit 1
-          fi
-
-          echo
-          echo "ABI-sensitive configuration matches stock."
-
-
+            echo "ABI-sensitive configuration matches stock."
        
       - name: Audit complete stock versus final config
         working-directory: kernel
@@ -4189,13 +4186,14 @@ jobs:
           echo
           echo "=== Starting kernel compilation ==="
 
-              make -j2 \
-              O="${OUT_DIR}" \
-              ARCH=arm64 \
-              LLVM=1 \
-              LLVM_IAS=1 \
-              CROSS_COMPILE="${CROSS_COMPILE}" \
-              LOCALVERSION="-g39bcecd5c63d"
+               make -j2 \
+               O="${OUT_DIR}" \
+               ARCH=arm64 \
+               LLVM=1 \
+               LLVM_IAS=1 \
+               CROSS_COMPILE="${CROSS_COMPILE}" \
+               KBUILD_SYMTYPES=1 \
+               LOCALVERSION="-g39bcecd5c63d"
            
 
            echo
@@ -4226,14 +4224,15 @@ jobs:
                echo
               echo "=== Building kernel modules ==="
 
-              make -j2 \
-              O="${OUT_DIR}" \
-              ARCH=arm64 \
-              LLVM=1 \
-              LLVM_IAS=1 \
-              CROSS_COMPILE="${CROSS_COMPILE}" \
-              LOCALVERSION="-g39bcecd5c63d" \
-              modules
+               make -j2 \
+               O="${OUT_DIR}" \
+               ARCH=arm64 \
+               LLVM=1 \
+               LLVM_IAS=1 \
+               CROSS_COMPILE="${CROSS_COMPILE}" \
+               KBUILD_SYMTYPES=1 \
+               LOCALVERSION="-g39bcecd5c63d" \
+               modules
 
              echo "Kernel modules built successfully."
 
