@@ -4277,7 +4277,7 @@ jobs:
           set -euo pipefail
 
           echo "============================================================"
-          echo " STOCK -> CUSTOM QCACLD3 ABI CRC CHECK"
+          echo "STOCK -> CUSTOM QCACLD3 ABI CRC CHECK"
           echo "============================================================"
 
           CONFIG="${OUT_DIR}/.config"
@@ -4289,14 +4289,182 @@ jobs:
 
           grep -Fxq "CONFIG_MODVERSIONS=y" "${CONFIG}"
 
-          echo
           echo "CONFIG_MODVERSIONS=y confirmed."
           echo "Module.symvers:"
           ls -lh "${SYMVERS}"
 
           echo
           echo "============================================================"
-          echo " EXPECTED STOCK CRCs"
+          echo "LOCATE CUSTOM QCACLD3 MODULE"
+          echo "============================================================"
+
+          WLAN_MODULE="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
+
+          if [ ! -s "${WLAN_MODULE}" ]; then
+            WLAN_MODULE="$(find "${OUT_DIR}" \
+              -type f \
+              -name 'wlan.ko' \
+              -print -quit)"
+          fi
+
+          test -n "${WLAN_MODULE}"
+          test -s "${WLAN_MODULE}"
+
+          echo "Custom WLAN module:"
+          echo "${WLAN_MODULE}"
+          ls -lh "${WLAN_MODULE}"
+
+          echo
+          echo "============================================================"
+          echo "PARSE CUSTOM wlan.ko __versions"
+          echo "============================================================"
+
+          WLAN_VERSIONS="${OUT_DIR}/wlan-custom-versions.bin"
+
+          "${LLVM_BIN}/llvm-objcopy" \
+            --dump-section "__versions=${WLAN_VERSIONS}" \
+            "${WLAN_MODULE}"
+
+          test -s "${WLAN_VERSIONS}"
+
+          echo "Extracted __versions:"
+          ls -lh "${WLAN_VERSIONS}"
+
+          echo
+          echo "============================================================"
+          echo "MODULE.symvers <-> wlan.ko INTERNAL CONSISTENCY"
+          echo "============================================================"
+
+          WLAN_MODULE="${WLAN_MODULE}" \
+          SYMVERS="${SYMVERS}" \
+          WLAN_VERSIONS="${WLAN_VERSIONS}" \
+          python3 - <<'PY'
+          import os
+          import struct
+          import sys
+
+          symvers_path = os.environ["SYMVERS"]
+          versions_path = os.environ["WLAN_VERSIONS"]
+
+          wanted = {
+              "module_layout",
+              "cfg80211_unlink_bss",
+              "cfg80211_get_bss",
+              "cfg80211_inform_bss_frame_data",
+              "cfg80211_sched_scan_results",
+          }
+
+          def bswap32(value):
+              value &= 0xffffffff
+              return int.from_bytes(
+                  value.to_bytes(4, "little"),
+                  "big"
+              )
+
+          symvers = {}
+
+          with open(symvers_path, "r", encoding="utf-8", errors="replace") as f:
+              for line in f:
+                  fields = line.rstrip("\n").split("\t")
+                  if len(fields) >= 2 and fields[1] in wanted:
+                      symvers[fields[1]] = int(fields[0], 16) & 0xffffffff
+
+          data = open(versions_path, "rb").read()
+
+          RECORD_SIZE = 72
+
+          if len(data) % RECORD_SIZE != 0:
+              print(
+                  f"ERROR: __versions size {len(data)} "
+                  f"is not divisible by {RECORD_SIZE}"
+              )
+              sys.exit(1)
+
+          module_versions = {}
+
+          for offset in range(0, len(data), RECORD_SIZE):
+              crc64 = struct.unpack_from("<Q", data, offset)[0]
+              crc = crc64 & 0xffffffff
+
+              raw_name = data[offset + 8:offset + RECORD_SIZE]
+              name = raw_name.split(b"\0", 1)[0].decode(
+                  "ascii",
+                  errors="replace"
+              )
+
+              if name in wanted:
+                  module_versions[name] = crc
+
+          print()
+          print(
+              f"{'SYMBOL':42} "
+              f"{'Module.symvers':14} "
+              f"{'wlan.ko':14} "
+              f"{'bswap(symvers)':16}"
+          )
+          print("-" * 90)
+
+          failed = False
+
+          for symbol in sorted(wanted):
+              sym_crc = symvers.get(symbol)
+              mod_crc = module_versions.get(symbol)
+
+              if sym_crc is None:
+                  print(f"{symbol:42} MISSING FROM Module.symvers")
+                  failed = True
+                  continue
+
+              if mod_crc is None:
+                  print(f"{symbol:42} MISSING FROM wlan.ko __versions")
+                  failed = True
+                  continue
+
+              swapped = bswap32(sym_crc)
+
+              print(
+                  f"{symbol:42} "
+                  f"0x{sym_crc:08x}      "
+                  f"0x{mod_crc:08x}      "
+                  f"0x{swapped:08x}"
+              )
+
+              if mod_crc == sym_crc:
+                  print(
+                      f"  INTERNAL MATCH: {symbol}"
+                  )
+              elif mod_crc == swapped:
+                  print(
+                      f"  BYTE-REVERSED INTERNAL MATCH: {symbol}"
+                  )
+                  failed = True
+              else:
+                  print(
+                      f"  INTERNAL MISMATCH: {symbol}"
+                  )
+                  failed = True
+
+          print()
+
+          if failed:
+              print(
+                  "ERROR: Module.symvers and custom wlan.ko do not "
+                  "have the same CRC representation."
+              )
+              print(
+                  "The stock/custom ABI comparison will NOT be trusted."
+              )
+              sys.exit(1)
+
+          print(
+              "PASS: Module.symvers and custom wlan.ko use "
+              "the same CRC representation."
+          )
+          PY
+
+          echo
+          echo "============================================================"
+          echo "EXPECTED STOCK CRCS"
           echo "============================================================"
 
           STOCK_MODULE_LAYOUT="0xefc8997b"
@@ -4313,7 +4481,7 @@ jobs:
 
           echo
           echo "============================================================"
-          echo " CUSTOM KERNEL CRCs"
+          echo "CUSTOM KERNEL CRCS FROM Module.symvers"
           echo "============================================================"
 
           get_crc() {
@@ -4346,7 +4514,7 @@ jobs:
 
           echo
           echo "============================================================"
-          echo " CRC COMPARISON"
+          echo "STOCK -> CUSTOM CRC COMPARISON"
           echo "============================================================"
 
           : > "${REPORT}"
@@ -4359,7 +4527,8 @@ jobs:
             local actual="$3"
 
             printf '%-40s stock=%-12s custom=%-12s\n' \
-              "${symbol}" "${expected}" "${actual}" | tee -a "${REPORT}"
+              "${symbol}" "${expected}" "${actual}" \
+              | tee -a "${REPORT}"
 
             if [ "${actual}" = "${expected}" ]; then
               echo "MATCH: ${symbol}" | tee -a "${REPORT}"
@@ -4396,7 +4565,7 @@ jobs:
 
           echo
           echo "============================================================"
-          echo " FINAL CRC RESULT"
+          echo "FINAL CRC RESULT"
           echo "============================================================"
 
           cat "${REPORT}"
@@ -4405,16 +4574,17 @@ jobs:
             echo
             echo "ERROR: CUSTOM KERNEL ABI DOES NOT MATCH STOCK."
             echo
-            echo "The CRC comparison itself completed and found differences."
+            echo "The CRC comparison completed after verifying that"
+            echo "Module.symvers and wlan.ko use the same representation."
+            echo
             echo "The kernel build is intentionally stopped."
             exit 1
           fi
 
           echo
           echo "============================================================"
-          echo " QCACLD3 STOCK ABI MATCH PASSED"
+          echo "QCACLD3 STOCK ABI MATCH PASSED"
           echo "============================================================"
-
         
         
       - name: Verify kernel and NetHunter build outputs
