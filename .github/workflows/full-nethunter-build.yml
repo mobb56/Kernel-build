@@ -894,39 +894,49 @@ jobs:
 
           STOCK_SYMVERS="${STOCK_ABI_OUT}/Module.symvers"
 
-          check_crc() {
-            symbol="$1"
-            expected="$2"
-
-            actual="$(
-              awk -v wanted="${symbol}" '
-                $2 == wanted {
+             check_crc() {
+               symbol="$1"
+               expected="$2"
+ 
+                   actual="$(
+                   awk -v wanted="${symbol}" '
+                  $2 == wanted {
                   print $1
                   exit
-                }
-              ' "${STOCK_SYMVERS}"
-            )"
+                  }
+                 ' "${STOCK_SYMVERS}"
+                  )"
 
-            if [ -z "${actual}" ]; then
-              echo "ERROR: ${symbol} missing from stock reproduction."
+                  if [ -z "${actual}" ]; then
+                  echo "ERROR: ${symbol} missing from stock reproduction."
+                  return 1
+                  fi
+
+                  actual="${actual#0x}"
+  
+            # Module.symvers stores the CRC in the opposite byte order
+            # from the raw __versions representation we extracted.
+                 if [ "${#actual}" -ne 8 ]; then
+                 echo "ERROR: unexpected CRC length for ${symbol}: ${actual}"
+                return 1
+                fi
+
+             normalized="${actual:6:2}${actual:4:2}${actual:2:2}${actual:0:2}"
+
+                echo
+                echo "${symbol}"
+                echo "  expected       = 0x${expected}"
+                echo "  Module.symvers = 0x${actual}"
+                echo "  normalized     = 0x${normalized}"
+
+              if [ "${normalized}" != "${expected}" ]; then
+               echo "  RESULT         = MISMATCH"
               return 1
-            fi
+              fi
 
-            actual="${actual#0x}"
-
-            echo
-            echo "${symbol}"
-            echo "  expected = 0x${expected}"
-            echo "  actual   = ${actual}"
-
-            if [ "${actual}" != "${expected}" ]; then
-              echo "  RESULT   = MISMATCH"
-              return 1
-            fi
-
-            echo "  RESULT   = MATCH"
-          }
-
+              echo "  RESULT         = MATCH"
+               }
+               
           check_crc \
             "module_layout" \
             "efc8997b"
