@@ -1,4 +1,4 @@
-aname: Moto G9 Power cebu NetHunter
+name: Moto G9 Power cebu NetHunter
 
 on:
   workflow_dispatch:
