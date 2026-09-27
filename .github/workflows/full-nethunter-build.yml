@@ -794,6 +794,41 @@ jobs:
             CROSS_COMPILE="${CROSS_COMPILE}" \
             olddefconfig
 
+
+
+          echo
+          echo "============================================================"
+          echo "STOCK CONFIGURATION CHANGE AUDIT"
+          echo "============================================================"
+
+          STOCK_CONFIG="${GITHUB_WORKSPACE}/cebu-stock.config"
+          GENERATED_CONFIG="${STOCK_ABI_OUT}/.config"
+          CONFIG_DIFF="${STOCK_ABI_OUT}/stock-config-diff.txt"
+
+          test -s "${STOCK_CONFIG}"
+          test -s "${GENERATED_CONFIG}"
+
+          scripts/diffconfig \
+            "${STOCK_CONFIG}" \
+            "${GENERATED_CONFIG}" \
+            > "${CONFIG_DIFF}" 
+
+          echo
+          echo "=== Differences after olddefconfig ==="
+
+          if [ -s "${CONFIG_DIFF}" ]; then
+            cat "${CONFIG_DIFF}"
+
+            echo
+            echo "============================================================"
+            echo "ERROR: olddefconfig changed the stock configuration."
+            echo "============================================================"
+            exit 1
+          fi
+
+          echo
+          echo "OK: olddefconfig made no configuration changes."
+
           CONFIG="${STOCK_ABI_OUT}/.config"
 
           echo
