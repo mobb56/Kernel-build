@@ -4031,9 +4031,9 @@ jobs:
            echo
            echo "=== Extract __versions sections ==="
 
-           rm -f \
-            "${GITHUB_WORKSPACE}/stock-versions.bin" \
-            "${OUT_DIR}/custom-versions.bin"
+
+              rm -f \
+             "${OUT_DIR}/custom-versions.bin"
 
           
 
@@ -4047,18 +4047,46 @@ jobs:
 
                file "${CUSTOM_WLAN}"
 
+                 echo "=== Extracting custom __versions directly ==="
+
+
+               CUSTOM_VERSIONS="${OUT_DIR}/custom-versions.bin"
+
+                 VERSIONS_INFO="$(
+                 "${LLVM_BIN}/llvm-readelf" -SW "${CUSTOM_WLAN}" |
+                  awk '$2 == "__versions" {
+                 print $5, $6
+                 exit
+                }'
+             )"
+
+                  CUSTOM_VERSIONS_OFFSET="$(echo "${VERSIONS_INFO}" | awk '{print $1}')"
+                  CUSTOM_VERSIONS_SIZE="$(echo "${VERSIONS_INFO}" | awk '{print $2}')"
+
+               test -n "${CUSTOM_VERSIONS_OFFSET}"
+               test -n "${CUSTOM_VERSIONS_SIZE}"
+
+
+               
+               echo "Custom __versions file offset: 0x${CUSTOM_VERSIONS_OFFSET}"
+               echo "Custom __versions size:        0x${CUSTOM_VERSIONS_SIZE}"
+
+             dd \
+                  if="${CUSTOM_WLAN}" \
+                  of="${CUSTOM_VERSIONS}" \
+                  iflag=skip_bytes,count_bytes \
+                  skip="$((16#${CUSTOM_VERSIONS_OFFSET}))" \
+                  count="$((16#${CUSTOM_VERSIONS_SIZE}))" \
+                  status=none
+
                 echo
-                echo "=== Attempting custom __versions extraction ==="
+                echo "=== Extraction completed ==="
 
-              "${LLVM_BIN}/llvm-objcopy" \
-              --dump-section __versions="${OUT_DIR}/custom-versions.bin" \
-               "${CUSTOM_WLAN}"
+               test -s "${CUSTOM_VERSIONS}"
 
-               echo
-               echo "=== Extraction completed ==="
-
-             test -s "${OUT_DIR}/custom-versions.bin"
-
+                 echo "Extracted custom __versions:"
+                 ls -lh "${CUSTOM_VERSIONS}"
+                 
            test -s "${GITHUB_WORKSPACE}/stock-versions.bin"
            test -s "${OUT_DIR}/custom-versions.bin"
 
