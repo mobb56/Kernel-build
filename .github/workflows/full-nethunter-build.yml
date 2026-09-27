@@ -294,84 +294,55 @@ jobs:
       # ============================================================
       # 8. VERIFY CORRECT KERNEL BRANCH
       # ============================================================
-
+  
+  
       - name: Verify cebu kernel source
+        working-directory: kernel
         shell: bash
         run: |
-          set -euxo pipefail
+         set -euo pipefail
 
-          cd kernel
-
-          test "$(git branch --show-current)" = "${KERNEL_BRANCH}"
-
-          test -f Makefile
-          test -d arch/arm64
-          test -d drivers
-
-          test -f \
-            arch/arm64/configs/vendor/bengal-perf_defconfig
-
-          echo
           echo "============================================================"
-          echo "CEBU KERNEL SOURCE VERIFIED"
-          echo "============================================================"
+         echo "CEBU KERNEL SOURCE VERIFIED"
+         echo "============================================================"
 
-          echo
-          echo "Branch:"
-          git branch --show-current
+          EXPECTED_COMMIT="39bcecd5c63d"
 
-          echo
-          echo "Commit:"
-          git rev-parse HEAD
-
-          echo
-          echo "Defconfig:"
-          echo "arch/arm64/configs/vendor/bengal-perf_defconfig"
-
-          echo
-          echo "Correct cebu kernel source verified."
-      # ============================================================
-      # 8. VERIFY CORRECT KERNEL BRANCH
-      # ============================================================
-
-      - name: Verify cebu kernel source
-        shell: bash
-        run: |
-          set -euxo pipefail
-    
-             cd kernel
-
-          STOCK_COMMIT="${CLEAN_RELEASE##*-g}"
-
+          CURRENT_BRANCH="$(git branch --show-current)"
           CURRENT_COMMIT="$(git rev-parse HEAD)"
           CURRENT_SHORT="$(git rev-parse --short=12 HEAD)"
 
-           echo "Expected stock source revision:"
-            echo "${STOCK_COMMIT}"
+           echo
+           echo "Branch:"
+           echo "${CURRENT_BRANCH}"
 
-          echo
-          echo "Actual kernel source revision:"
+           echo
+           echo "Commit:"
            echo "${CURRENT_COMMIT}"
 
-          echo
-            echo "Actual 12-character revision:"
-            echo "${CURRENT_SHORT}"
+           echo
+           echo "12-character commit:"
+           echo "${CURRENT_SHORT}"
 
-          test "${CURRENT_SHORT}" = "${STOCK_COMMIT}"
+           echo
+           echo "Expected stock source revision:"
+           echo "${EXPECTED_COMMIT}"
 
-          test -f Makefile
+           test "${CURRENT_BRANCH}" = "lineage-23.2"
+           test "${CURRENT_SHORT}" = "${EXPECTED_COMMIT}"
+
+           test -f Makefile
            test -d arch/arm64
-            test -d drivers
-   
-           test -f \
-           arch/arm64/configs/vendor/bengal-perf_defconfig
+           test -d drivers
+          test -f arch/arm64/configs/vendor/bengal-perf_defconfig
 
-          echo
-          echo "Exact cebu kernel source revision verified."
-
-          echo
+           echo
            echo "Defconfig:"
-                echo "arch/arm64/configs/vendor/bengal-perf_defconfig"
+           echo "arch/arm64/configs/vendor/bengal-perf_defconfig"
+
+           echo
+           echo "Correct cebu kernel source verified."
+      
 
       # ============================================================
       # 9. VERIFY QCACLD3 SOURCE TREE
