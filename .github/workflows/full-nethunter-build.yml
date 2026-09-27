@@ -1,4 +1,4 @@
-name: Moto G9 Power cebu NetHunter
+aname: Moto G9 Power cebu NetHunter
 
 on:
   workflow_dispatch:
@@ -3977,9 +3977,13 @@ jobs:
           echo
           echo "Module ABI configuration audit passed."
 
-             
-   
-           
+
+          
+              
+                
+
+
+          
       - name: Compare stock and custom QCACLD3 CRCs
         working-directory: kernel
         shell: bash
@@ -3988,551 +3992,442 @@ jobs:
 
           echo "=== Compare stock and custom QCACLD3 CRCs ==="
 
-           STOCK_CONFIG="${GITHUB_WORKSPACE}/cebu-stock.config"
-           STOCK_VERSIONS="${GITHUB_WORKSPACE}/stock-versions.bin"
-           CUSTOM_WLAN="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
-           CUSTOM_VERSIONS="${OUT_DIR}/custom-versions.bin"
-
-          test -s "${STOCK_CONFIG}"
-          test -s "${CUSTOM_WLAN}"
+          CONFIG="${OUT_DIR}/.config"
+          MODULE_SYMVERS="${OUT_DIR}/Module.symvers"
+          QCA_MODULE="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
+          STOCK_VERSIONS="${GITHUB_WORKSPACE}/stock-versions.bin"
+          CUSTOM_VERSIONS="${OUT_DIR}/custom-versions.bin"
+          CRC_REPORT="${OUT_DIR}/qca-crc-report.txt"
 
           echo
           echo "=== Required files ==="
 
-          echo "Stock config:"
-          ls -lh "${STOCK_CONFIG}"
+          test -s "${CONFIG}"
+          test -s "${MODULE_SYMVERS}"
+          test -s "${QCA_MODULE}"
+          test -s "${STOCK_VERSIONS}"
 
-          echo "Custom WLAN module:"
-          ls -lh "${CUSTOM_WLAN}"
-
-          echo "Module.symvers:"
-          test -s "${OUT_DIR}/Module.symvers"
-          ls -lh "${OUT_DIR}/Module.symvers"
+          ls -lh "${GITHUB_WORKSPACE}/stock-versions.bin"
+          ls -lh "${QCA_MODULE}"
+          ls -lh "${MODULE_SYMVERS}"
 
           echo
           echo "=== CONFIG_MODVERSIONS ==="
 
-          grep -Fxq "CONFIG_MODVERSIONS=y" "${STOCK_CONFIG}"
-          grep -Fxq "CONFIG_MODVERSIONS=y" "${OUT_DIR}/.config"
+          grep -Fxq \
+            "CONFIG_MODVERSIONS=y" \
+            "${CONFIG}"
+
+          grep -Fxq \
+            "CONFIG_MODVERSIONS=y" \
+            "${GITHUB_WORKSPACE}/cebu-stock.config"
 
           echo "CONFIG_MODVERSIONS=y confirmed in stock and custom configs."
 
           echo
           echo "=== Verify custom __versions section ==="
 
-          if ! "${LLVM_BIN}/llvm-readelf" -S "${CUSTOM_WLAN}" |
-          grep -q '__versions'; then
-          echo "ERROR: custom wlan.ko does not contain __versions."
-          exit 1
+          if ! "${LLVM_BIN}/llvm-readelf" -S "${QCA_MODULE}" |
+            grep -q '__versions'; then
+            echo "ERROR: custom wlan.ko does not contain __versions."
+            exit 1
           fi
 
-           echo "Custom wlan.ko contains __versions."
+          echo "Custom wlan.ko contains __versions."
 
-           echo
-           echo "=== Extract __versions sections ==="
+          echo
+          echo "=== Extract custom __versions ==="
 
+          rm -f "${CUSTOM_VERSIONS}"
 
-              rm -f \
-             "${OUT_DIR}/custom-versions.bin"
+          "${LLVM_BIN}/llvm-objcopy" \
+            --dump-section "__versions=${CUSTOM_VERSIONS}" \
+            "${QCA_MODULE}"
 
-          
+          test -s "${CUSTOM_VERSIONS}"
 
-              echo "=== Custom __versions section details ==="
-
-              "${LLVM_BIN}/llvm-readelf" -S "${CUSTOM_WLAN}" |
-                 grep -A2 -B2 '__versions'
-
-              echo
-                echo "=== Custom wlan.ko file type ==="
-
-               file "${CUSTOM_WLAN}"
-
-                 echo "=== Extracting custom __versions directly ==="
-
-
-               CUSTOM_VERSIONS="${OUT_DIR}/custom-versions.bin"
-
-                 VERSIONS_INFO="$(
-                 "${LLVM_BIN}/llvm-readelf" -SW "${CUSTOM_WLAN}" |
-                  awk '$2 == "__versions" {
-                 print $5, $6
-                 exit
-                }'
-             )"
-
-                  CUSTOM_VERSIONS_OFFSET="$(echo "${VERSIONS_INFO}" | awk '{print $1}')"
-                  CUSTOM_VERSIONS_SIZE="$(echo "${VERSIONS_INFO}" | awk '{print $2}')"
-
-               test -n "${CUSTOM_VERSIONS_OFFSET}"
-               test -n "${CUSTOM_VERSIONS_SIZE}"
-
-
-               
-               echo "Custom __versions file offset: 0x${CUSTOM_VERSIONS_OFFSET}"
-               echo "Custom __versions size:        0x${CUSTOM_VERSIONS_SIZE}"
-
-             dd \
-                  if="${CUSTOM_WLAN}" \
-                  of="${CUSTOM_VERSIONS}" \
-                  iflag=skip_bytes,count_bytes \
-                  skip="$((16#${CUSTOM_VERSIONS_OFFSET}))" \
-                  count="$((16#${CUSTOM_VERSIONS_SIZE}))" \
-                  status=none
-
-                echo
-                echo "=== Extraction completed ==="
-
-               test -s "${CUSTOM_VERSIONS}"
-
-                 echo "Extracted custom __versions:"
-                 ls -lh "${CUSTOM_VERSIONS}"
-                 
-           test -s "${GITHUB_WORKSPACE}/stock-versions.bin"
-           test -s "${OUT_DIR}/custom-versions.bin"
-
-          echo "Stock __versions:"
-          ls -lh "${GITHUB_WORKSPACE}/stock-versions.bin"
-
-          echo "Custom __versions:"
-          ls -lh "${OUT_DIR}/custom-versions.bin"
+          echo "Custom __versions extracted successfully."
 
           echo
           echo "=== Raw __versions sizes ==="
 
-          stat -c 'Stock bytes:  %s' \
-          "${GITHUB_WORKSPACE}/stock-versions.bin"
+          STOCK_BYTES="$(stat -c '%s' "${STOCK_VERSIONS}")"
+          CUSTOM_BYTES="$(stat -c '%s' "${CUSTOM_VERSIONS}")"
 
-           stat -c 'Custom bytes: %s' \
-          "${OUT_DIR}/custom-versions.bin"
+          echo "Stock __versions bytes : ${STOCK_BYTES}"
+          echo "Custom __versions bytes: ${CUSTOM_BYTES}"
 
-            cat > "${OUT_DIR}/compare_crc.py"
-            <<'PY'
-                import re
-                import struct
-                import sys
-                from pathlib import Path
- 
-            STOCK_FILE = Path(sys.argv[1])
-            CUSTOM_FILE = Path(sys.argv[2])
+          echo
+          echo "=== Create CRC comparison script ==="
 
-              REQUIRED = [
-             "module_layout",
-             "cfg80211_unlink_bss",
-             "cfg80211_get_bss",
-             "cfg80211_inform_bss_frame_data",
-             "cfg80211_sched_scan_results",
-            ]
+          cat > "${OUT_DIR}/compare_crc.py" <<'PY'
+          import re
+          import struct
+          import sys
+          from pathlib import Path
 
-             SYMBOL_RE = re.compile(r"^[A-Za-z0-9_.$@]+$")
+          stock_file = Path(sys.argv[1])
+          custom_file = Path(sys.argv[2])
+          module_symvers = Path(sys.argv[3])
+          report_file = Path(sys.argv[4])
 
-            def load(path):
-            data = path.read_bytes()
-            if not data:
-             raise RuntimeError(f"{path}: empty __versions section")
-            return data
+          REQUIRED = [
+              "module_layout",
+              "cfg80211_unlink_bss",
+              "cfg80211_get_bss",
+              "cfg80211_inform_bss_frame_data",
+              "cfg80211_sched_scan_results",
+          ]
 
-             def occurrences(data, symbol):
-             needle = symbol.encode("ascii") + b"\x00"
-            positions = []
-            start = 0
+          SYMBOL_RE = re.compile(r"^[A-Za-z0-9_.$@]+$")
 
-            while True:
-            pos = data.find(needle, start)
-            if pos < 0:
-                break
 
-            positions.append(pos)
-            start = pos + 1
+          def parse_modversions(path, entry_size, name_size):
+              data = path.read_bytes()
 
-          return positions
+              if not data:
+                  raise RuntimeError(
+                      f"{path}: empty __versions section"
+                  )
 
-          def show_required_offsets(label, data, record_size):
-          print(f"\n=== {label} required-symbol raw offsets ===")
-
-          for symbol in REQUIRED:
-              positions = occurrences(data, symbol)
-
-            if not positions:
-                print(f"{symbol}: NOT FOUND")
-                continue
-
-            print(f"{symbol}: {len(positions)} occurrence(s)")
-
-            for pos in positions[:10]:
-                print(
-                    f"  byte={pos} "
-                    f"record={pos // record_size} "
-                    f"offset_in_record={pos % record_size}"
-                )
-
-           def parse_layout(data, record_size, name_offset, name_size):
-            if len(data) % record_size != 0:
-              raise RuntimeError(
-                  f"section size {len(data)} is not divisible by "
-                  f"record size {record_size}"
-              )
+              if len(data) % entry_size != 0:
+                  raise RuntimeError(
+                      f"{path}: {len(data)} bytes is not divisible by "
+                      f"{entry_size}-byte records"
+                  )
 
               result = {}
 
-               for record_number, start in enumerate(
-               range(0, len(data), record_size)
-           ):
-                 record = data[start:start + record_size]
+              for offset in range(0, len(data), entry_size):
+                  entry = data[offset:offset + entry_size]
 
-            if name_offset + name_size > len(record):
-                continue
+                  crc = struct.unpack_from("<Q", entry, 0)[0] & 0xffffffff
 
-            raw_name = record[
-                name_offset:name_offset + name_size
-            ]
+                  raw_name = entry[
+                      8:
+                      8 + name_size
+                  ]
 
-            name = raw_name.split(b"\x00", 1)[0].decode(
-                "ascii",
-                errors="ignore"
-            )
+                  name = raw_name.split(
+                      b"\0",
+                      1
+                  )[0].decode(
+                      "ascii",
+                      errors="ignore"
+                  )
 
-            if not name:
-                continue
+                  if not name:
+                      continue
 
-            if not SYMBOL_RE.fullmatch(name):
-                continue
+                  if not SYMBOL_RE.fullmatch(name):
+                      continue
 
-            # On arm64, the expected modversion_info CRC field is
-            # an unsigned long (8 bytes).  The symbol name follows it.
-            if name_offset < 8:
-                continue
+                  result[name] = crc
 
-            crc_offset = name_offset - 8
+              return result, len(data)
 
-            crc = struct.unpack_from(
-                "<Q",
-                record,
-                crc_offset
-            )[0] & 0xffffffff
 
-            result.setdefault(name, crc)
- 
-            return result
- 
-          def find_layout(data, label, candidate_sizes):
-          print(f"\n=== {label} record-layout detection ===")
+          def parse_module_symvers(path):
+              result = {}
 
-           best = None
+              for line in path.read_text(
+                  errors="replace"
+              ).splitlines():
 
-          for record_size, name_offset, name_size in candidate_sizes:
-            try:
-                parsed = parse_layout(
-                    data,
-                    record_size,
-                    name_offset,
-                    name_size
-                )
-            except Exception as exc:
-                print(
-                    f"{label} layout "
-                    f"{record_size}/{name_offset}/{name_size}: "
-                    f"ERROR: {exc}"
-                )
-                continue
+                  fields = line.split("\t")
 
-            required_found = sum(
-                1 for symbol in REQUIRED
-                if symbol in parsed
-            )
+                  if len(fields) < 2:
+                      continue
 
-            print(
-                f"{label} layout "
-                f"record={record_size}, "
-                f"name_offset={name_offset}, "
-                f"name_size={name_size}: "
-                f"{len(parsed)} records, "
-                f"{required_found}/{len(REQUIRED)} required symbols"
-            )
+                  crc_text = fields[0].strip()
+                  name = fields[1].strip()
 
-            if (
-                best is None
-                or required_found > best[0]
-                or (
-                    required_found == best[0]
-                    and len(parsed) > best[1]
-                )
-            ):
-                best = (
-                    required_found,
-                    len(parsed),
-                    record_size,
-                    name_offset,
-                    name_size,
-                    parsed,
-                )
+                  if not crc_text.startswith("0x"):
+                      continue
 
-          if best is None:
-            raise RuntimeError(
-                f"{label}: no usable __versions layout detected"
-            )
+                  if not name:
+                      continue
 
-            return best
- 
-           stock = load(STOCK_FILE)
-           custom = load(CUSTOM_FILE)
- 
-           print("\n=== Section sizes ===")
-           print(f"Stock __versions bytes:  {len(stock)}")
-           print(f"Custom __versions bytes: {len(custom)}")
-                 .      
-           # Linux 4.19 arm64 stock layout:
-           #   unsigned long crc = 8 bytes
-           #   char name[56]     = 56 bytes
-           #   total             = 64 bytes
-              stock_candidates = [
-              (64, 8, 56),
-           ]
+                  try:
+                      crc = int(
+                          crc_text,
+                          16
+                      ) & 0xffffffff
+                  except ValueError:
+                      continue
 
-          # The custom module observed in the previous run is 72 bytes/record.
-          # Try the actual observed layout first, while also testing a few
-          # possible name offsets.  This is diagnostic and does not bypass
-          # any CRC mismatch.
-             custom_candidates = [
-             (72, 8, 64),
-             (72, 12, 60),
-             (72, 16, 56),
-             (72, 20, 52),
-             (72, 24, 48),
-          ]
+                  result[name] = crc
 
-          show_required_offsets(
-          "Stock",
-           stock,
-           64
+              return result
+
+
+          # Stock Android/vendor wlan.ko was extracted previously.
+          # Its observed __versions section is 26176 bytes.
+          # That corresponds to 64-byte records:
+          # 8-byte CRC + 56-byte symbol name.
+          stock, stock_bytes = parse_modversions(
+              stock_file,
+              64,
+              56
           )
 
-          show_required_offsets(
-          "Custom",
-           custom,
-           72
+          # Custom arm64 wlan.ko currently contains 72-byte records:
+          # 8-byte CRC + 64-byte symbol name.
+          custom, custom_bytes = parse_modversions(
+              custom_file,
+              72,
+              64
           )
 
-          stock_layout = find_layout(
-           stock,
-          "Stock",
-           stock_candidates
+          kernel_exports = parse_module_symvers(
+              module_symvers
           )
-
-          custom_layout = find_layout(
-           custom,
-           "Custom",
-           custom_candidates
-          )
-
-          (
-            stock_required,
-            stock_count,
-            stock_record_size,
-            stock_name_offset,
-            stock_name_size,
-            stock_symbols,
-          ) = stock_layout
-
-          (
-             custom_required,
-             custom_count,
-             custom_record_size,
-             custom_name_offset,
-             custom_name_size,
-             custom_symbols,
-          ) = custom_layout
-
-          print("\n=== Selected layouts ===")
-
-           print(
-             "Stock: "
-             f"record={stock_record_size}, "
-             f"name_offset={stock_name_offset}, "
-             f"name_size={stock_name_size}"
-          )
-
-           print(
-             "Custom: "
-             f"record={custom_record_size}, "
-             f"name_offset={custom_name_offset}, "
-             f"name_size={custom_name_size}"
-          )
-
-          print(f"Stock symbols parsed: {len(stock_symbols)}")
-          print(f"Custom symbols parsed: {len(custom_symbols)}")
-
-           print("\n=== Required-symbol presence ===")
-
-           missing_stock = [
-           symbol for symbol in REQUIRED
-           if symbol not in stock_symbols
-           ]
-
-           missing_custom = [
-           symbol for symbol in REQUIRED
-           if symbol not in custom_symbols
-           ]
-
-          for symbol in REQUIRED:
-           stock_state = (
-            "FOUND"
-            if symbol in stock_symbols
-            else "MISSING"
-            )
-
-            custom_state = (
-            "FOUND"
-            if symbol in custom_symbols
-            else "MISSING"
-           )
-
-             print(
-            f"{symbol}: "
-            f"stock={stock_state}, "
-            f"custom={custom_state}"
-            )
-
-           if missing_stock:
-            raise RuntimeError(
-            "Required symbols missing from stock __versions: "
-            + ", ".join(missing_stock)
-             )
-
-           if missing_custom:
-             print(
-            "\nERROR: required symbols are missing from the "
-            "custom parser result."
-             )
-
-            print(
-            "This means the custom __versions layout is not yet "
-            "being interpreted correctly."
-             )
-
-              raise RuntimeError(
-              "Custom __versions parsing failed for required symbols: "
-            + ", ".join(missing_custom)
-             )
-
-            print("\n=== Compare common symbol CRCs ===")
-
-           common = sorted(
-           set(stock_symbols) & set(custom_symbols)
-           )
-
-            mismatches = []
-
-             for symbol in common:
-             stock_crc = stock_symbols[symbol]
-             custom_crc = custom_symbols[symbol]
-
-               if stock_crc != custom_crc:
-               mismatches.append(
-                (
-                    symbol,
-                    stock_crc,
-                    custom_crc,
-                )
-            )
-
-           missing_from_custom = sorted(
-           set(stock_symbols) - set(custom_symbols)
-           )
-
-           extra_in_custom = sorted(
-           set(custom_symbols) - set(stock_symbols)
-            )
-
-          print(f"Stock symbols:          {len(stock_symbols)}")
-          print(f"Custom symbols:         {len(custom_symbols)}")
-          print(f"Common symbols:         {len(common)}")
-          print(f"Missing from custom:    {len(missing_from_custom)}")
-          print(f"Extra in custom:        {len(extra_in_custom)}")
-          print(f"CRC mismatches:         {len(mismatches)}")
-
-            print("\n=== Required-symbol CRCs ===")
-
-             for symbol in REQUIRED:
-            stock_crc = stock_symbols[symbol]
-            custom_crc = custom_symbols[symbol]
-
-            print(
-              f"{symbol}: "
-            f"stock=0x{stock_crc:08x} "
-            f"custom=0x{custom_crc:08x}"
-            )
-
-          if mismatches:
-             print("\n=== CRC MISMATCHES ===")
-
-           for symbol, stock_crc, custom_crc in mismatches:
-            print(
-                f"{symbol}: "
-                f"stock=0x{stock_crc:08x} "
-                f"custom=0x{custom_crc:08x}"
-            )
-
-           if missing_from_custom:
-           print("\n=== SYMBOLS MISSING FROM CUSTOM ===")
-
-           for symbol in missing_from_custom:
-              print(symbol)
-
-           if extra_in_custom:
-            print("\n=== EXTRA SYMBOLS IN CUSTOM ===")
-
-          for symbol in extra_in_custom:
-              print(symbol)
-
-             print("\n=== Final CRC decision ===")
-
-            if (
-           stock_record_size != custom_record_size
-           or stock_name_offset != custom_name_offset
-           or stock_name_size != custom_name_size
-           ):
-           print(
-            "WARNING: stock and custom __versions record layouts differ."
-           )
-           print(
-            "This is an ABI red flag and must not be ignored."
-           )
-
-          if mismatches:
-           print(
-            "ERROR: stock/custom CRC mismatches detected."
-           )
-            raise SystemExit(1)
-
-           if missing_from_custom:
-           print(
-            "ERROR: stock symbols are missing from custom __versions."
-           )
-           raise SystemExit(1)
 
           print(
-            "QCACLD3 stock/custom CRC comparison passed."
-           )
+              f"Stock __versions bytes : {stock_bytes}"
+          )
+
+          print(
+              f"Custom __versions bytes: {custom_bytes}"
+          )
+
+          print(
+              f"Stock imported symbols : {len(stock)}"
+          )
+
+          print(
+              f"Custom imported symbols: {len(custom)}"
+          )
+
+          print(
+              f"Custom kernel exports   : {len(kernel_exports)}"
+          )
+
+          print()
+          print(
+              "=== Vendor ABI check: stock WLAN -> custom kernel ==="
+          )
+
+          missing = []
+          mismatches = []
+
+          for name, stock_crc in sorted(
+              stock.items()
+          ):
+
+              if name not in kernel_exports:
+                  missing.append(name)
+                  continue
+
+              custom_kernel_crc = kernel_exports[name]
+
+              if stock_crc != custom_kernel_crc:
+                  mismatches.append(
+                      (
+                          name,
+                          stock_crc,
+                          custom_kernel_crc
+                      )
+                  )
+
+          print(
+              "Stock WLAN imports missing from custom kernel: "
+              f"{len(missing)}"
+          )
+
+          print(
+              "Stock WLAN CRC mismatches vs custom kernel: "
+              f"{len(mismatches)}"
+          )
+
+          print()
+          print(
+              "=== Required symbol checks ==="
+          )
+
+          required_failures = []
+
+          for name in REQUIRED:
+
+              if name not in stock:
+                  print(
+                      f"{name}: NOT_PRESENT_IN_STOCK_WLAN"
+                  )
+                  continue
+
+              if name not in kernel_exports:
+                  print(
+                      f"{name}: MISSING_FROM_CUSTOM_KERNEL"
+                  )
+                  required_failures.append(name)
+                  continue
+
+              stock_crc = stock[name]
+              custom_kernel_crc = kernel_exports[name]
+
+              if stock_crc == custom_kernel_crc:
+                  print(
+                      f"{name}: OK "
+                      f"stock=0x{stock_crc:08x} "
+                      f"custom_kernel=0x{custom_kernel_crc:08x}"
+                  )
+              else:
+                  print(
+                      f"{name}: MISMATCH "
+                      f"stock=0x{stock_crc:08x} "
+                      f"custom_kernel=0x{custom_kernel_crc:08x}"
+                  )
+                  required_failures.append(name)
+
+          print()
+          print(
+              "=== Custom WLAN self-consistency check ==="
+          )
+
+          self_missing = []
+          self_mismatches = []
+
+          for name, custom_crc in sorted(
+              custom.items()
+          ):
+
+              if name not in kernel_exports:
+                  self_missing.append(name)
+                  continue
+
+              kernel_crc = kernel_exports[name]
+
+              if custom_crc != kernel_crc:
+                  self_mismatches.append(
+                      (
+                          name,
+                          custom_crc,
+                          kernel_crc
+                      )
+                  )
+
+          print(
+              "Custom WLAN imports missing from custom kernel: "
+              f"{len(self_missing)}"
+          )
+
+          print(
+              "Custom WLAN CRC mismatches vs custom kernel: "
+              f"{len(self_mismatches)}"
+          )
+
+          with report_file.open(
+              "w",
+              encoding="utf-8"
+          ) as report:
+
+              report.write(
+                  f"stock_bytes={stock_bytes}\n"
+              )
+
+              report.write(
+                  f"custom_bytes={custom_bytes}\n"
+              )
+
+              report.write(
+                  f"stock_symbols={len(stock)}\n"
+              )
+
+              report.write(
+                  f"custom_symbols={len(custom)}\n"
+              )
+
+              report.write(
+                  f"kernel_exports={len(kernel_exports)}\n"
+              )
+
+              report.write(
+                  f"vendor_missing={len(missing)}\n"
+              )
+
+              report.write(
+                  f"vendor_mismatches={len(mismatches)}\n"
+              )
+
+              report.write(
+                  f"custom_missing={len(self_missing)}\n"
+              )
+
+              report.write(
+                  f"custom_mismatches={len(self_mismatches)}\n"
+              )
+
+              report.write(
+                  "\n[VENDOR_MISSING]\n"
+              )
+
+              for name in missing:
+                  report.write(
+                      name + "\n"
+                  )
+
+              report.write(
+                  "\n[VENDOR_MISMATCH]\n"
+              )
+
+              for name, stock_crc, custom_crc in mismatches:
+                  report.write(
+                      f"{name}\t"
+                      f"0x{stock_crc:08x}\t"
+                      f"0x{custom_crc:08x}\n"
+                  )
+
+          print()
+          print(
+              "=== ABI comparison result ==="
+          )
+
+          if missing or mismatches:
+              print(
+                  "ERROR: custom kernel is not ABI-compatible "
+                  "with the stock WLAN module."
+              )
+              print(
+                  "The workflow will stop before packaging."
+              )
+              sys.exit(1)
+
+          if required_failures:
+              print(
+                  "ERROR: required ABI symbols failed."
+              )
+              sys.exit(1)
+
+          if self_missing or self_mismatches:
+              print(
+                  "ERROR: custom WLAN is not ABI-consistent "
+                  "with the custom kernel."
+              )
+              sys.exit(1)
+
+          print(
+              "QCACLD3/vendor-module ABI comparison PASSED."
+          )
           PY
 
-           echo
-           echo "=== Running CRC comparison ==="
+          echo
+          echo "=== Running CRC comparison ==="
 
-           python3 \
-           "${OUT_DIR}/compare_crc.py" \
-           "${GITHUB_WORKSPACE}/stock-versions.bin" \
-           "${OUT_DIR}/custom-versions.bin"
+          python3 \
+            "${OUT_DIR}/compare_crc.py" \
+            "${STOCK_VERSIONS}" \
+            "${CUSTOM_VERSIONS}" \
+            "${MODULE_SYMVERS}" \
+            "${CRC_REPORT}"
 
           echo
-          echo "QCACLD3 stock/custom CRC comparison passed."
+          echo "=== CRC report ==="
 
-          
-              
-      
+          test -s "${CRC_REPORT}"
+          cat "${CRC_REPORT}"
 
-
-          
-
+          echo
+          echo "QCACLD3 CRC/ABI comparison completed successfully."
   
 
     
