@@ -976,38 +976,57 @@ jobs:
       # ============================================================
 
       - name: Create cebu NetHunter config fragment
+        working-directory: kernel
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
-          cd kernel
+          echo "============================================================"
+          echo "CREATE CEBU NETHUNTER CONFIG FRAGMENT"
+          echo "============================================================"
 
           mkdir -p nethunter-config
 
           cat > nethunter-config/cebu-nethunter.config <<'EOF'
-          # ==========================================================
-          # Moto G9 Power cebu NetHunter configuration
+          # ============================================================
+          # Moto G9 Power cebu - NetHunter configuration fragment
           #
-          # This is a fragment merged into the verified stock config.
+          # IMPORTANT:
+          # This fragment is merged INTO the verified stock config.
           #
-          # DO NOT add:
+          # Do NOT define stock compiler/security ABI settings here.
+          # They must come directly from cebu-stock.config.
+          #
+          # Do NOT add:
+          # CONFIG_LTO
+          # CONFIG_THINLTO
+          # CONFIG_LTO_CLANG
+          # CONFIG_LTO_NONE
+          # CONFIG_CFI
+          # CONFIG_CFI_CLANG
+          # CONFIG_CFI_CLANG_SHADOW
+          # CONFIG_SHADOW_CALL_STACK
+          # CONFIG_INIT_STACK_ALL_ZERO
+          # CONFIG_DEBUG_INFO
+          # CONFIG_MODVERSIONS
+          #
+          # Also do NOT add these QCACLD3 build variables:
           # CONFIG_FEATURE_FRAME_INJECTION_SUPPORT
           # CONFIG_FEATURE_MONITOR_MODE_SUPPORT
-          #
-          # Those are QCACLD3 Kbuild variables, not kernel config
-          # symbols.
-          # ==========================================================
+          # ============================================================
 
-          # ----------------------------------------------------------
+
+          # ============================================================
           # HID
-          # ----------------------------------------------------------
+          # ============================================================
 
           CONFIG_HIDRAW=y
           CONFIG_UHID=y
 
-          # ----------------------------------------------------------
-          # Bluetooth
-          # ----------------------------------------------------------
+
+          # ============================================================
+          # Bluetooth / NetHunter
+          # ============================================================
 
           CONFIG_BT=y
           CONFIG_BT_BREDR=y
@@ -1027,30 +1046,28 @@ jobs:
 
           CONFIG_BT_HCIVHCI=m
 
-          # ----------------------------------------------------------
+
+          # ============================================================
           # USB gadget / ConfigFS
           #
           # Existing stock USB gadget functionality is preserved.
-          # Additional NetHunter gadget functions are enabled here.
-          # ----------------------------------------------------------
+          # These additional functions are enabled for NetHunter.
+          # ============================================================
 
           CONFIG_USB_GADGET=y
           CONFIG_USB_CONFIGFS=y
           CONFIG_USB_CONFIGFS_UEVENT=y
-
-          CONFIG_USB_CONFIGFS_ACM=y
-          CONFIG_USB_CONFIGFS_NCM=y
 
           CONFIG_USB_CONFIGFS_RNDIS=y
           CONFIG_USB_CONFIGFS_ECM=y
           CONFIG_USB_CONFIGFS_EEM=y
           CONFIG_USB_CONFIGFS_F_HID=y
           CONFIG_USB_CONFIGFS_F_FS=y
-         
 
-          # ----------------------------------------------------------
+
+          # ============================================================
           # USB serial / networking
-          # ----------------------------------------------------------
+          # ============================================================
 
           CONFIG_USB_SERIAL=y
           CONFIG_USB_SERIAL_GENERIC=y
@@ -1059,37 +1076,73 @@ jobs:
           CONFIG_USB_NET_CDCETHER=m
           CONFIG_USB_NET_CDC_NCM=m
 
-          # ----------------------------------------------------------
+
+          # ============================================================
           # Packet sockets
-          # ----------------------------------------------------------
+          # ============================================================
 
           CONFIG_PACKET=y
 
-          # ----------------------------------------------------------
+
+          # ============================================================
           # Sensors
-          # ----------------------------------------------------------
+          # ============================================================
 
           CONFIG_SENSORS_SSC=y
           CONFIG_SENSORS_CLASS=m
 
-          # ----------------------------------------------------------
+
+          # ============================================================
           # Qualcomm WLAN
           #
-          # Preserve the stock module arrangement.
-          # ----------------------------------------------------------
+          # Preserve the stock QCACLD3 module arrangement.
+          # ============================================================
 
           CONFIG_WLAN=y
           CONFIG_QCA_CLD_WLAN=m
 
-          
 
-          
+          # ============================================================
+          # END OF NETHUNTER FRAGMENT
+          # ============================================================
+          EOF
 
           test -s nethunter-config/cebu-nethunter.config
 
           echo
-          echo "NetHunter fragment:"
+          echo "NetHunter fragment created:"
+          echo
+
           cat nethunter-config/cebu-nethunter.config
+
+          echo
+          echo "Checking that forbidden ABI/compiler symbols are absent..."
+
+          if grep -nE \
+            'CONFIG_(LTO|THINLTO|LTO_CLANG|LTO_NONE|CFI|CFI_CLANG|CFI_CLANG_SHADOW|SHADOW_CALL_STACK|INIT_STACK_ALL_ZERO|DEBUG_INFO|MODVERSIONS)=' \
+            nethunter-config/cebu-nethunter.config; then
+
+            echo
+            echo "ERROR: stock ABI/compiler configuration leaked into"
+            echo "the NetHunter fragment."
+            exit 1
+          fi
+
+          echo
+          echo "Checking that QCACLD3 feature variables are absent..."
+
+          if grep -nE \
+            '^CONFIG_FEATURE_(FRAME_INJECTION_SUPPORT|MONITOR_MODE_SUPPORT)=' \
+            nethunter-config/cebu-nethunter.config; then
+
+            echo
+            echo "ERROR: QCACLD3 Kbuild variables were added as"
+            echo "kernel configuration symbols."
+            exit 1
+          fi
+
+          echo
+          echo "NetHunter configuration fragment is clean."
 
       # ============================================================
       # 21. VERIFY FORBIDDEN FEATURE SYMBOLS ARE ABSENT
