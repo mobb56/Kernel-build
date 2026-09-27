@@ -1144,6 +1144,43 @@ jobs:
           echo
           echo "NetHunter fragment merged."
 
+
+
+      - name: Audit CFI/LTO before olddefconfig
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CONFIG="${OUT_DIR}/.config"
+
+          echo "============================================================"
+          echo "CFI/LTO CONFIG BEFORE OLDDEFCONFIG"
+          echo "============================================================"
+
+          for SYMBOL in \
+            LTO \
+            THINLTO \
+            LTO_CLANG \
+            LTO_NONE \
+            CFI \
+            CFI_CLANG \
+            CFI_CLANG_SHADOW \
+            SHADOW_CALL_STACK \
+            INIT_STACK_ALL_ZERO \
+            DEBUG_INFO \
+            MODVERSIONS
+          do
+            echo -n "${SYMBOL}: "
+            scripts/config --file "${CONFIG}" --state "${SYMBOL}" || true
+          done
+
+          echo
+          echo "Relevant raw config lines:"
+          grep -E \
+            '^(CONFIG_(LTO|THINLTO|LTO_CLANG|LTO_NONE|CFI|CFI_CLANG|CFI_CLANG_SHADOW|SHADOW_CALL_STACK|INIT_STACK_ALL_ZERO|DEBUG_INFO|MODVERSIONS)=|# CONFIG_(LTO|THINLTO|LTO_CLANG|LTO_NONE|CFI|CFI_CLANG|CFI_CLANG_SHADOW|SHADOW_CALL_STACK|INIT_STACK_ALL_ZERO|DEBUG_INFO|MODVERSIONS) is not set)' \
+            "${CONFIG}" || true
+
       # ============================================================
       # 23. RESOLVE KCONFIG DEPENDENCIES
       #
