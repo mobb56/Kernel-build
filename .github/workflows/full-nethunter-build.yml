@@ -3978,169 +3978,157 @@ jobs:
           echo "Module ABI configuration audit passed."
 
 
- 
-      - name: Compare stock and custom QCACLD3 CRCs
+
+
+
+      - name: Verify stock ABI CRCs against custom kernel
         working-directory: kernel
         shell: bash
         run: |
-           set -euo pipefail
+          set -euo pipefail
 
-            echo "=== QCACLD3 ABI diagnostic ==="
+          echo "============================================================"
+          echo " STOCK -> CUSTOM QCACLD3 ABI CRC CHECK"
+          echo "============================================================"
 
-            CONFIG="${OUT_DIR}/.config"
-            STOCK_CONFIG="${GITHUB_WORKSPACE}/cebu-stock.config"
-            CUSTOM_WLAN="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
-            MODULE_SYMVERS="${OUT_DIR}/Module.symvers"
-            STOCK_VERSIONS="${GITHUB_WORKSPACE}/stock-versions.bin"
-            CUSTOM_VERSIONS="${OUT_DIR}/custom-versions.bin"
-            CRC_REPORT="${OUT_DIR}/qcacld3-crc-report.txt"
+          CONFIG="${OUT_DIR}/.config"
+          SYMVERS="${OUT_DIR}/Module.symvers"
+          REPORT="${OUT_DIR}/qca-crc-report.txt"
 
-            test -s "${CONFIG}"
-            test -s "${STOCK_CONFIG}"
-            test -s "${CUSTOM_WLAN}"
-            test -s "${MODULE_SYMVERS}"
-            test -s "${STOCK_VERSIONS}"
+          test -s "${CONFIG}"
+          test -s "${SYMVERS}"
 
-             grep -Fxq "CONFIG_MODVERSIONS=y" "${CONFIG}"
-             grep -Fxq "CONFIG_MODVERSIONS=y" "${STOCK_CONFIG}"
+          grep -Fxq "CONFIG_MODVERSIONS=y" "${CONFIG}"
 
-            echo "CONFIG_MODVERSIONS=y confirmed."
+          echo
+          echo "CONFIG_MODVERSIONS=y confirmed."
+          echo "Module.symvers:"
+          ls -lh "${SYMVERS}"
 
-            if ! "${LLVM_BIN}/llvm-readelf" -S "${CUSTOM_WLAN}" | grep -q "__versions"; then
-            echo "ERROR: custom wlan.ko has no __versions section."
-            exit 1
-           fi
+          echo
+          echo "============================================================"
+          echo " EXPECTED STOCK CRCs"
+          echo "============================================================"
 
-            echo "Custom wlan.ko contains __versions."
- 
-             rm -f "${CUSTOM_VERSIONS}"
+          STOCK_MODULE_LAYOUT="0xefc8997b"
+          STOCK_CFG80211_UNLINK_BSS="0xf190a484"
+          STOCK_CFG80211_GET_BSS="0x078af9da"
+          STOCK_CFG80211_INFORM_BSS_FRAME_DATA="0xaf0332f3"
+          STOCK_CFG80211_SCHED_SCAN_RESULTS="0x73e1515f"
 
-             echo "=== Extract custom __versions ==="
+          echo "module_layout                       = ${STOCK_MODULE_LAYOUT}"
+          echo "cfg80211_unlink_bss                 = ${STOCK_CFG80211_UNLINK_BSS}"
+          echo "cfg80211_get_bss                    = ${STOCK_CFG80211_GET_BSS}"
+          echo "cfg80211_inform_bss_frame_data      = ${STOCK_CFG80211_INFORM_BSS_FRAME_DATA}"
+          echo "cfg80211_sched_scan_results         = ${STOCK_CFG80211_SCHED_SCAN_RESULTS}"
 
-           INFO="$("${LLVM_BIN}/llvm-readelf" -SW "${CUSTOM_WLAN}" | awk '$2 == "__versions" {print $5, $6; exit}')"
+          echo
+          echo "============================================================"
+          echo " CUSTOM KERNEL CRCs"
+          echo "============================================================"
 
-            OFFSET="$(printf '%s\n' "${INFO}" | awk '{print $1}')"
-            SIZE="$(printf '%s\n' "${INFO}" | awk '{print $2}')"
+          get_crc() {
+            local symbol="$1"
 
-           test -n "${OFFSET}"
-           test -n "${SIZE}"
- 
-           echo "Offset: 0x${OFFSET}"
-            echo "Size:   0x${SIZE}"
+            awk -v wanted="${symbol}" '
+              $2 == wanted {
+                print $1
+                found=1
+                exit
+              }
+              END {
+                if (!found)
+                  exit 2
+              }
+            ' "${SYMVERS}"
+          }
 
-            dd if="${CUSTOM_WLAN}" \
-             of="${CUSTOM_VERSIONS}" \
-             iflag=skip_bytes,count_bytes \
-             skip="$((16#${OFFSET}))" \
-             count="$((16#${SIZE}))" \
-             status=none
+          CUSTOM_MODULE_LAYOUT="$(get_crc module_layout)"
+          CUSTOM_CFG80211_UNLINK_BSS="$(get_crc cfg80211_unlink_bss)"
+          CUSTOM_CFG80211_GET_BSS="$(get_crc cfg80211_get_bss)"
+          CUSTOM_CFG80211_INFORM_BSS_FRAME_DATA="$(get_crc cfg80211_inform_bss_frame_data)"
+          CUSTOM_CFG80211_SCHED_SCAN_RESULTS="$(get_crc cfg80211_sched_scan_results)"
 
-              test -s "${CUSTOM_VERSIONS}"
+          echo "module_layout                       = ${CUSTOM_MODULE_LAYOUT}"
+          echo "cfg80211_unlink_bss                 = ${CUSTOM_CFG80211_UNLINK_BSS}"
+          echo "cfg80211_get_bss                    = ${CUSTOM_CFG80211_GET_BSS}"
+          echo "cfg80211_inform_bss_frame_data      = ${CUSTOM_CFG80211_INFORM_BSS}"
+          echo "cfg80211_sched_scan_results         = ${CUSTOM_CFG80211_SCHED_SCAN_RESULTS}"
 
-            STOCK_BYTES="$(stat -c '%s' "${STOCK_VERSIONS}")"
-            CUSTOM_BYTES="$(stat -c '%s' "${CUSTOM_VERSIONS}")"
+          echo
+          echo "============================================================"
+          echo " CRC COMPARISON"
+          echo "============================================================"
 
-            echo "Stock __versions bytes: ${STOCK_BYTES}"
-           echo "Custom __versions bytes: ${CUSTOM_BYTES}"
+          : > "${REPORT}"
 
-           echo "=== ABI diagnostic ==="
+          FAILED=0
 
-            if [ "$((STOCK_BYTES % 64))" -ne 0 ]; then
-            echo "ERROR: stock __versions size is not divisible by 64."
-            exit 1
-           fi
+          check_crc() {
+            local symbol="$1"
+            local expected="$2"
+            local actual="$3"
 
-           if [ "$((CUSTOM_BYTES % 72))" -ne 0 ]; then
-           echo "ERROR: custom __versions size is not divisible by 72."
-           exit 1
-           fi
+            printf '%-40s stock=%-12s custom=%-12s\n' \
+              "${symbol}" "${expected}" "${actual}" | tee -a "${REPORT}"
 
-             STOCK_COUNT="$((STOCK_BYTES / 64))"
-              CUSTOM_COUNT="$((CUSTOM_BYTES / 72))"
-
-           echo "Stock records: ${STOCK_COUNT}"
-           echo "Custom records: ${CUSTOM_COUNT}"
-
-           "${LLVM_BIN}/llvm-readelf" -S "${CUSTOM_WLAN}" | grep "__versions"
-
-             echo
-             echo "=== Required stock WLAN CRCs ==="
- 
-            for SYMBOL in \
-               module_layout \
-               cfg80211_unlink_bss \
-               cfg80211_get_bss \
-               cfg80211_inform_bss_frame_data \
-               cfg80211_sched_scan_results
-              do
-              echo "Checking ${SYMBOL}..."
-
-              if grep -q "${SYMBOL}" "${STOCK_CONFIG}" 2>/dev/null; then
-               echo "${SYMBOL}: present in stock configuration."
-              else
-            echo "${SYMBOL}: not a configuration symbol; checking Module.symvers."
-           fi
-            done
-
-            echo
-            echo "=== Module.symvers sanity check ==="
-
-            test -s "${MODULE_SYMVERS}"
-
-            EXPORT_COUNT="$(awk 'NF >= 2 && $1 ~ /^0x[0-9a-fA-F]+$/ {count++} END {print count+0}' "${MODULE_SYMVERS}")"
-
-             echo "Exported CRC entries: ${EXPORT_COUNT}"
-
-               if [ "${EXPORT_COUNT}" -eq 0 ]; then
-            echo "ERROR: Module.symvers contains no CRC entries."
-           exit 1
+            if [ "${actual}" != "${expected}" ]; then
+              echo "MISMATCH: ${symbol}" | tee -a "${REPORT}"
+              FAILED=1
+            else
+              echo "MATCH: ${symbol}" | tee -a "${REPORT}"
             fi
+          }
 
+          check_crc \
+            "module_layout" \
+            "${STOCK_MODULE_LAYOUT}" \
+            "${CUSTOM_MODULE_LAYOUT}"
+
+          check_crc \
+            "cfg80211_unlink_bss" \
+            "${STOCK_CFG80211_UNLINK_BSS}" \
+            "${CUSTOM_CFG80211_UNLINK_BSS}"
+
+          check_crc \
+            "cfg80211_get_bss" \
+            "${STOCK_CFG80211_GET_BSS}" \
+            "${CUSTOM_CFG80211_GET_BSS}"
+
+          check_crc \
+            "cfg80211_inform_bss_frame_data" \
+            "${STOCK_CFG80211_INFORM_BSS_FRAME_DATA}" \
+            "${CUSTOM_CFG80211_INFORM_BSS_FRAME_DATA}"
+
+          check_crc \
+            "cfg80211_sched_scan_results" \
+            "${STOCK_CFG80211_SCHED_SCAN_RESULTS}" \
+            "${CUSTOM_CFG80211_SCHED_SCAN_RESULTS}"
+
+          echo
+          echo "============================================================"
+          echo " CRC REPORT"
+          echo "============================================================"
+
+          cat "${REPORT}"
+
+          if [ "${FAILED}" -ne 0 ]; then
             echo
-            echo "=== Required kernel exports ==="
+            echo "ERROR: CUSTOM KERNEL ABI DOES NOT MATCH STOCK."
+            echo
+            echo "The build is intentionally stopped."
+            echo "No kernel should be flashed with these CRC differences."
+            exit 1
+          fi
 
-            REQUIRED_FAILURE=0
+          echo
+          echo "============================================================"
+          echo " QCACLD3 STOCK ABI MATCH PASSED"
+          echo "============================================================"
 
-              for SYMBOL in \
-                module_layout \
-                cfg80211_unlink_bss \
-                 cfg80211_get_bss \
-                  cfg80211_inform_bss_frame_data \
-                   cfg80211_sched_scan_results
-                    do
-                     if awk -F '\t' -v symbol="${SYMBOL}" '$2 == symbol {found=1} END {exit !found}' "${MODULE_SYMVERS}"; then
-                       echo "${SYMBOL}: exported by custom kernel."
-                    else
-                 echo "${SYMBOL}: MISSING from custom kernel."
-                 REQUIRED_FAILURE=1
-                   fi
-                    done
 
-             if [ "${REQUIRED_FAILURE}" -ne 0 ]; then
-             echo
-                echo "ERROR: required QCACLD3 kernel exports are missing."
-             exit 1
-             fi
-
-                 {
-                  echo "stock_versions_bytes=${STOCK_BYTES}"
-                  echo "custom_versions_bytes=${CUSTOM_BYTES}"
-                  echo "stock_records=${STOCK_COUNT}"
-                  echo "custom_records=${CUSTOM_COUNT}"
-                   echo "module_symvers_exports=${EXPORT_COUNT}"
-                   echo "required_exports=present"
-            } > "${CRC_REPORT}"
-
-               echo
-               echo "=== CRC report ==="
-             cat "${CRC_REPORT}"
-
-              echo
-              echo "QCACLD3 ABI diagnostic completed successfully."
-
-          
-
-           
+        
+        
       - name: Verify kernel and NetHunter build outputs
         working-directory: kernel
         shell: bash
