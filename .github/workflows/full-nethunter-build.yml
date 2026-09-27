@@ -957,9 +957,10 @@ jobs:
             "${CONFIG_BEFORE}"
 
           scripts/kconfig/merge_config.sh \
-            -O "${OUT_DIR}" \
-            "${CONFIG_BEFORE}" \
-            nethunter-config/cebu-nethunter.config
+          -m \
+          -O "${OUT_DIR}" \
+          "${CONFIG_BEFORE}" \
+           nethunter-config/cebu-nethunter.config
 
           test -s "${OUT_DIR}/.config"
 
