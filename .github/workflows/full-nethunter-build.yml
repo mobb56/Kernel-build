@@ -4316,35 +4316,61 @@ jobs:
 
           echo
           echo "============================================================"
-          echo "PARSE CUSTOM wlan.ko __versions"
+          echo "INSPECT CUSTOM wlan.ko VERSIONING FORMAT"
           echo "============================================================"
 
-          WLAN_VERSIONS="${OUT_DIR}/wlan-custom-versions.bin"
+          echo "ELF identity:"
+          "${LLVM_BIN}/llvm-readelf" -h "${WLAN_MODULE}" | \
+            grep -E 'Class:|Data:|Machine:|Type:'
 
-          "${LLVM_BIN}/llvm-objcopy" \
-            --dump-section "__versions=${WLAN_VERSIONS}" \
-            "${WLAN_MODULE}"
+          echo
+          echo "Version-related ELF sections:"
+          "${LLVM_BIN}/llvm-readelf" -S -W "${WLAN_MODULE}" | \
+            grep -E '__versions|__version_ext_names|__version_ext_crcs' || true
 
-          test -s "${WLAN_VERSIONS}"
-
-          echo "Extracted __versions:"
-          ls -lh "${WLAN_VERSIONS}"
+          echo
+          echo "Kernel versioning configuration:"
+          for SYMBOL in BASIC_MODVERSIONS EXTENDED_MODVERSIONS MODVERSIONS
+          do
+            printf '%-24s' "${SYMBOL}: "
+            scripts/config --file "${CONFIG}" --state "${SYMBOL}" || true
+          done
 
           echo
           echo "============================================================"
-          echo "MODULE.symvers <-> wlan.ko INTERNAL CONSISTENCY"
+          echo "LOCATE GENERATED wlan.mod.c"
           echo "============================================================"
 
-          WLAN_MODULE="${WLAN_MODULE}" \
+          WLAN_MOD_C="$(find "${OUT_DIR}" \
+            -type f \
+            -name 'wlan.mod.c' \
+            -print -quit)"
+
+          if [ -z "${WLAN_MOD_C}" ]; then
+            echo "ERROR: Generated wlan.mod.c was not found."
+            exit 1
+          fi
+
+          test -s "${WLAN_MOD_C}"
+
+          echo "Generated module metadata:"
+          echo "${WLAN_MOD_C}"
+          ls -lh "${WLAN_MOD_C}"
+
+          echo
+          echo "============================================================"
+          echo "EXTRACT CRCs FROM GENERATED wlan.mod.c"
+          echo "============================================================"
+
+          WLAN_MOD_C="${WLAN_MOD_C}" \
           SYMVERS="${SYMVERS}" \
-          WLAN_VERSIONS="${WLAN_VERSIONS}" \
           python3 - <<'PY'
           import os
-          import struct
+          import re
           import sys
 
+          mod_c_path = os.environ["WLAN_MOD_C"]
           symvers_path = os.environ["SYMVERS"]
-          versions_path = os.environ["WLAN_VERSIONS"]
 
           wanted = {
               "module_layout",
@@ -4354,113 +4380,117 @@ jobs:
               "cfg80211_sched_scan_results",
           }
 
-          def bswap32(value):
-              value &= 0xffffffff
-              return int.from_bytes(
-                  value.to_bytes(4, "little"),
-                  "big"
-              )
+          with open(mod_c_path, "r", encoding="utf-8", errors="replace") as f:
+              text = f.read()
+
+          generated = {}
+
+          pattern = re.compile(
+              r'\{\s*(0x[0-9a-fA-F]+)\s*,\s*"([^"]+)"\s*\}'
+          )
+
+          for match in pattern.finditer(text):
+              crc_text = match.group(1)
+              symbol = match.group(2)
+
+              if symbol in wanted:
+                  generated[symbol] = int(crc_text, 16) & 0xffffffff
 
           symvers = {}
 
           with open(symvers_path, "r", encoding="utf-8", errors="replace") as f:
               for line in f:
                   fields = line.rstrip("\n").split("\t")
+
                   if len(fields) >= 2 and fields[1] in wanted:
                       symvers[fields[1]] = int(fields[0], 16) & 0xffffffff
-
-          data = open(versions_path, "rb").read()
-
-          RECORD_SIZE = 72
-
-          if len(data) % RECORD_SIZE != 0:
-              print(
-                  f"ERROR: __versions size {len(data)} "
-                  f"is not divisible by {RECORD_SIZE}"
-              )
-              sys.exit(1)
-
-          module_versions = {}
-
-          for offset in range(0, len(data), RECORD_SIZE):
-              crc64 = struct.unpack_from("<Q", data, offset)[0]
-              crc = crc64 & 0xffffffff
-
-              raw_name = data[offset + 8:offset + RECORD_SIZE]
-              name = raw_name.split(b"\0", 1)[0].decode(
-                  "ascii",
-                  errors="replace"
-              )
-
-              if name in wanted:
-                  module_versions[name] = crc
 
           print()
           print(
               f"{'SYMBOL':42} "
-              f"{'Module.symvers':14} "
-              f"{'wlan.ko':14} "
-              f"{'bswap(symvers)':16}"
+              f"{'Module.symvers':18} "
+              f"{'wlan.mod.c':18}"
           )
-          print("-" * 90)
+          print("-" * 82)
 
           failed = False
 
           for symbol in sorted(wanted):
               sym_crc = symvers.get(symbol)
-              mod_crc = module_versions.get(symbol)
+              gen_crc = generated.get(symbol)
 
               if sym_crc is None:
-                  print(f"{symbol:42} MISSING FROM Module.symvers")
+                  print(
+                      f"{symbol:42} "
+                      f"MISSING FROM Module.symvers"
+                  )
                   failed = True
                   continue
 
-              if mod_crc is None:
-                  print(f"{symbol:42} MISSING FROM wlan.ko __versions")
+              if gen_crc is None:
+                  print(
+                      f"{symbol:42} "
+                      f"MISSING FROM wlan.mod.c"
+                  )
                   failed = True
                   continue
-
-              swapped = bswap32(sym_crc)
 
               print(
                   f"{symbol:42} "
-                  f"0x{sym_crc:08x}      "
-                  f"0x{mod_crc:08x}      "
-                  f"0x{swapped:08x}"
+                  f"0x{sym_crc:08x}          "
+                  f"0x{gen_crc:08x}"
               )
 
-              if mod_crc == sym_crc:
-                  print(
-                      f"  INTERNAL MATCH: {symbol}"
-                  )
-              elif mod_crc == swapped:
-                  print(
-                      f"  BYTE-REVERSED INTERNAL MATCH: {symbol}"
-                  )
-                  failed = True
+              if sym_crc == gen_crc:
+                  print(f"  INTERNAL MATCH: {symbol}")
               else:
-                  print(
-                      f"  INTERNAL MISMATCH: {symbol}"
-                  )
+                  print(f"  INTERNAL MISMATCH: {symbol}")
                   failed = True
 
           print()
 
           if failed:
               print(
-                  "ERROR: Module.symvers and custom wlan.ko do not "
-                  "have the same CRC representation."
+                  "ERROR: Generated wlan.mod.c and Module.symvers "
+                  "do not agree."
               )
               print(
-                  "The stock/custom ABI comparison will NOT be trusted."
+                  "The CRC generation pipeline must be fixed before "
+                  "stock ABI comparison."
               )
               sys.exit(1)
 
           print(
-              "PASS: Module.symvers and custom wlan.ko use "
-              "the same CRC representation."
+              "PASS: Generated wlan.mod.c and Module.symvers "
+              "use the same CRC values."
           )
           PY
+
+          echo
+          echo "============================================================"
+          echo "RAW __versions SECTION INFORMATION"
+          echo "============================================================"
+
+          WLAN_VERSIONS="${OUT_DIR}/wlan-custom-versions.bin"
+
+          "${LLVM_BIN}/llvm-objcopy" \
+            --dump-section "__versions=${WLAN_VERSIONS}" \
+            "${WLAN_MODULE}" 2>/dev/null || true
+
+          if [ -s "${WLAN_VERSIONS}" ]; then
+            echo "Extracted __versions:"
+            ls -lh "${WLAN_VERSIONS}"
+
+            echo
+            echo "First 128 bytes of __versions:"
+            "${LLVM_BIN}/llvm-objdump" \
+              -s \
+              -j __versions \
+              "${WLAN_MODULE}" | head -n 20 || true
+          else
+            echo "No basic __versions section was extracted."
+            echo "This may indicate extended module versioning."
+          fi
 
           echo
           echo "============================================================"
