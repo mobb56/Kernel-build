@@ -770,8 +770,9 @@ jobs:
           echo "Source commit:"
           git rev-parse HEAD
 
+
           test "$(git rev-parse HEAD)" = \
-            "39bcecd563df849923b1faadc9cde482648a1a1"
+          "39bcecd5c63df849923b1faadc9cde482648a1a1"
 
           echo
           echo "Copying exact stock configuration..."
