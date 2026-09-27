@@ -245,8 +245,7 @@ jobs:
       # ============================================================
       # 7. CLONE KERNEL SOURCE
       # ============================================================
-
-      - name: Clone cebu kernel source
+      - name: Clone exact cebu kernel source
         shell: bash
         run: |
           set -euxo pipefail
@@ -254,25 +253,72 @@ jobs:
           rm -rf kernel
 
           git clone \
-            --depth=1 \
             --branch "${KERNEL_BRANCH}" \
+            --single-branch \
             "${KERNEL_REPO}" \
             kernel
 
           cd kernel
 
           echo
-          echo "Kernel repository:"
-          git remote -v
+          echo "============================================================"
+          echo " CEBU KERNEL SOURCE IDENTITY"
+          echo "============================================================"
 
-          echo
-          echo "Kernel branch:"
+          CURRENT_COMMIT="$(git rev-parse HEAD)"
+          CURRENT_SHORT="$(git rev-parse --short=12 HEAD)"
+
+          echo "Branch:"
           git branch --show-current
 
           echo
-          echo "Kernel commit:"
-          git rev-parse HEAD
+          echo "Current HEAD:"
+          echo "${CURRENT_COMMIT}"
 
+          echo
+          echo "Current 12-character commit:"
+          echo "${CURRENT_SHORT}"
+
+          echo
+          echo "Expected stock release:"
+          echo "${CLEAN_RELEASE}"
+
+          STOCK_COMMIT="${CLEAN_RELEASE##*-g}"
+
+          echo
+          echo "Commit encoded by stock release:"
+          echo "${STOCK_COMMIT}"
+
+          if [ "${CURRENT_SHORT}" != "${STOCK_COMMIT}" ]; then
+            echo
+            echo "Current branch HEAD is NOT the source revision encoded"
+            echo "by the stock kernel release."
+            echo
+            echo "Fetching the exact stock revision..."
+
+            git fetch \
+              --no-tags \
+              origin \
+              "${STOCK_COMMIT}"
+
+            git checkout --detach "${STOCK_COMMIT}"
+          fi
+
+          FINAL_COMMIT="$(git rev-parse HEAD)"
+          FINAL_SHORT="$(git rev-parse --short=12 HEAD)"
+
+          echo
+          echo "Final kernel commit:"
+          echo "${FINAL_COMMIT}"
+
+          echo
+          echo "Final 12-character commit:"
+          echo "${FINAL_SHORT}"
+
+          test "${FINAL_SHORT}" = "${STOCK_COMMIT}"
+
+          echo
+          echo "EXACT STOCK SOURCE REVISION CONFIRMED."
       # ============================================================
       # 8. VERIFY CORRECT KERNEL BRANCH
       # ============================================================
@@ -281,24 +327,40 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+    
+             cd kernel
 
-          cd kernel
+          STOCK_COMMIT="${CLEAN_RELEASE##*-g}"
 
-          test "$(git branch --show-current)" = "${KERNEL_BRANCH}"
+          CURRENT_COMMIT="$(git rev-parse HEAD)"
+          CURRENT_SHORT="$(git rev-parse --short=12 HEAD)"
+
+           echo "Expected stock source revision:"
+            echo "${STOCK_COMMIT}"
+
+          echo
+          echo "Actual kernel source revision:"
+           echo "${CURRENT_COMMIT}"
+
+          echo
+            echo "Actual 12-character revision:"
+            echo "${CURRENT_SHORT}"
+
+          test "${CURRENT_SHORT}" = "${STOCK_COMMIT}"
 
           test -f Makefile
-          test -d arch/arm64
-          test -d drivers
-
-          test -f \
-            arch/arm64/configs/vendor/bengal-perf_defconfig
-
-          echo
-          echo "Correct cebu kernel source verified."
+           test -d arch/arm64
+            test -d drivers
+   
+           test -f \
+           arch/arm64/configs/vendor/bengal-perf_defconfig
 
           echo
-          echo "Defconfig:"
-          echo "arch/arm64/configs/vendor/bengal-perf_defconfig"
+          echo "Exact cebu kernel source revision verified."
+
+          echo
+           echo "Defconfig:"
+                echo "arch/arm64/configs/vendor/bengal-perf_defconfig"
 
       # ============================================================
       # 9. VERIFY QCACLD3 SOURCE TREE
