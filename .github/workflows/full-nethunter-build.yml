@@ -2903,6 +2903,10 @@ jobs:
 
 
 
+
+
+
+
       - name: Verify stock ABI CRCs against custom kernel
         working-directory: kernel
         shell: bash
@@ -2915,55 +2919,111 @@ jobs:
 
           CONFIG="${OUT_DIR}/.config"
           SYMVERS="${OUT_DIR}/Module.symvers"
-          WLAN_MODULE="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
-          STOCK_VERSIONS="${GITHUB_WORKSPACE}/stock-versions.bin"
+          CUSTOM_WLAN="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
+
+          STOCK_WLAN="${GITHUB_WORKSPACE}/stock-qca_cld3_wlan.ko"
+          STOCK_VERSIONS="${OUT_DIR}/stock-versions.bin"
           CUSTOM_VERSIONS="${OUT_DIR}/custom-versions.bin"
           REPORT="${OUT_DIR}/qca-crc-report.txt"
-
-          REQUIRED=(
-            "module_layout"
-            "cfg80211_unlink_bss"
-            "cfg80211_get_bss"
-            "cfg80211_inform_bss_frame_data"
-            "cfg80211_sched_scan_results"
-          )
 
           echo
           echo "=== Required files ==="
 
-          test -s "${CONFIG}"
-          test -s "${SYMVERS}"
-          test -s "${WLAN_MODULE}"
-          test -s "${STOCK_VERSIONS}"
+          test -s "${CONFIG}" || {
+            echo "ERROR: final .config is missing."
+            exit 1
+          }
 
-          echo "Stock __versions reference:"
-          ls -lh "${STOCK_VERSIONS}"
+          test -s "${SYMVERS}" || {
+            echo "ERROR: Module.symvers is missing."
+            exit 1
+          }
 
-          echo
-          echo "Custom wlan.ko:"
-          ls -lh "${WLAN_MODULE}"
+          test -s "${CUSTOM_WLAN}" || {
+            echo "ERROR: custom wlan.ko is missing."
+            exit 1
+          }
 
-          echo
-          echo "Module.symvers:"
-          ls -lh "${SYMVERS}"
+          test -s "${STOCK_WLAN}" || {
+            echo
+            echo "ERROR: stock-qca_cld3_wlan.ko is missing."
+            echo
+            echo "Place the ACTUAL stock module at:"
+            echo "${GITHUB_WORKSPACE}/stock-qca_cld3_wlan.ko"
+            echo
+            echo "Source:"
+            echo "/vendor/lib/modules/qca_cld3_wlan.ko"
+            exit 1
+          }
+
+          echo "PASS: all required files exist."
 
           echo
           echo "=== CONFIG_MODVERSIONS ==="
 
-          grep -Fxq "CONFIG_MODVERSIONS=y" "${CONFIG}"
+          grep -Fxq \
+            "CONFIG_MODVERSIONS=y" \
+            "${CONFIG}"
 
           echo "PASS: CONFIG_MODVERSIONS=y"
 
           echo
-          echo "=== Verify custom wlan.ko __versions ==="
+          echo "=== Stock module ==="
 
-          if ! "${LLVM_BIN}/llvm-readelf" -S -W "${WLAN_MODULE}" |
+          echo "Stock module:"
+          ls -lh "${STOCK_WLAN}"
+
+          echo
+          echo "Custom module:"
+          ls -lh "${CUSTOM_WLAN}"
+
+          echo
+          echo "=== Verify stock module ELF ==="
+
+          "${LLVM_BIN}/llvm-readelf" -h "${STOCK_WLAN}" |
+            grep -E 'Class:|Data:|Machine:|Type:'
+
+          echo
+          echo "=== Verify custom module ELF ==="
+
+          "${LLVM_BIN}/llvm-readelf" -h "${CUSTOM_WLAN}" |
+            grep -E 'Class:|Data:|Machine:|Type:'
+
+          echo
+          echo "=== Verify stock __versions section ==="
+
+          if ! "${LLVM_BIN}/llvm-readelf" -S -W "${STOCK_WLAN}" |
+            grep -q '[[:space:]]__versions[[:space:]]'; then
+            echo "ERROR: stock qca_cld3_wlan.ko has no __versions section."
+            exit 1
+          fi
+
+          echo "PASS: stock module contains __versions."
+
+          echo
+          echo "=== Verify custom __versions section ==="
+
+          if ! "${LLVM_BIN}/llvm-readelf" -S -W "${CUSTOM_WLAN}" |
             grep -q '[[:space:]]__versions[[:space:]]'; then
             echo "ERROR: custom wlan.ko has no __versions section."
             exit 1
           fi
 
-          echo "PASS: custom wlan.ko contains __versions."
+          echo "PASS: custom module contains __versions."
+
+          echo
+          echo "=== Extract stock __versions ==="
+
+          rm -f "${STOCK_VERSIONS}"
+
+          "${LLVM_BIN}/llvm-objcopy" \
+            --dump-section "__versions=${STOCK_VERSIONS}" \
+            "${STOCK_WLAN}"
+
+          test -s "${STOCK_VERSIONS}"
+
+          echo "Stock __versions:"
+          stat -c '%s bytes' "${STOCK_VERSIONS}"
 
           echo
           echo "=== Extract custom __versions ==="
@@ -2972,24 +3032,21 @@ jobs:
 
           "${LLVM_BIN}/llvm-objcopy" \
             --dump-section "__versions=${CUSTOM_VERSIONS}" \
-            "${WLAN_MODULE}"
+            "${CUSTOM_WLAN}"
 
           test -s "${CUSTOM_VERSIONS}"
 
-          STOCK_SIZE="$(stat -c '%s' "${STOCK_VERSIONS}")"
-          CUSTOM_SIZE="$(stat -c '%s' "${CUSTOM_VERSIONS}")"
-
-          echo "Stock __versions size : ${STOCK_SIZE} bytes"
-          echo "Custom __versions size: ${CUSTOM_SIZE} bytes"
+          echo "Custom __versions:"
+          stat -c '%s bytes' "${CUSTOM_VERSIONS}"
 
           echo
-          echo "=== Parse actual stock and custom __versions ==="
+          echo "=== Direct stock/custom CRC comparison ==="
 
           STOCK_VERSIONS="${STOCK_VERSIONS}" \
           CUSTOM_VERSIONS="${CUSTOM_VERSIONS}" \
           SYMVERS="${SYMVERS}" \
           REPORT="${REPORT}" \
-          python3 - "${REQUIRED[@]}" <<'PY'
+          python3 - <<'PY'
           import os
           import struct
           import sys
@@ -2999,19 +3056,15 @@ jobs:
           symvers_path = os.environ["SYMVERS"]
           report_path = os.environ["REPORT"]
 
-          required = sys.argv[1:]
-
-          # Linux 4.19 arm64:
-          #
-          # struct modversion_info {
-          #     unsigned long crc;       // 8 bytes on arm64
-          #     char name[56];
-          # };
-          #
-          # Total record size = 64 bytes.
+          REQUIRED = {
+              "module_layout",
+              "cfg80211_unlink_bss",
+              "cfg80211_get_bss",
+              "cfg80211_inform_bss_frame_data",
+              "cfg80211_sched_scan_results",
+          }
 
           RECORD_SIZE = 64
-          CRC_SIZE = 8
           NAME_OFFSET = 8
           NAME_SIZE = 56
 
@@ -3021,38 +3074,45 @@ jobs:
 
               if not data:
                   raise RuntimeError(
-                      f"{path}: __versions data is empty"
+                      f"{path}: empty __versions section"
                   )
 
               if len(data) % RECORD_SIZE != 0:
                   raise RuntimeError(
-                      f"{path}: size {len(data)} is not divisible "
-                      f"by {RECORD_SIZE}"
+                      f"{path}: {len(data)} bytes is not "
+                      f"divisible by {RECORD_SIZE}"
                   )
 
-              entries = {}
+              result = {}
 
-              for offset in range(0, len(data), RECORD_SIZE):
-                  crc64 = struct.unpack_from("<Q", data, offset)[0]
-
-                  # Kernel CRC is a 32-bit value carried in
-                  # the unsigned-long field on this arm64 build.
-                  crc = crc64 & 0xffffffff
+              for offset in range(
+                  0,
+                  len(data),
+                  RECORD_SIZE
+              ):
+                  crc = struct.unpack_from(
+                      "<Q",
+                      data,
+                      offset
+                  )[0] & 0xffffffff
 
                   raw_name = data[
                       offset + NAME_OFFSET:
                       offset + NAME_OFFSET + NAME_SIZE
                   ]
 
-                  name = raw_name.split(b"\0", 1)[0].decode(
+                  name = raw_name.split(
+                      b"\0",
+                      1
+                  )[0].decode(
                       "ascii",
                       errors="strict"
                   )
 
                   if name:
-                      entries[name] = crc
+                      result[name] = crc
 
-              return entries, len(data)
+              return result, len(data)
 
           def parse_symvers(path):
               result = {}
@@ -3069,226 +3129,281 @@ jobs:
                       if len(fields) < 2:
                           continue
 
-                      crc_text = fields[0]
-                      symbol = fields[1]
-
-                      if not crc_text.startswith("0x"):
-                          continue
-
                       try:
-                          result[symbol] = int(
-                              crc_text,
+                          crc = int(
+                              fields[0],
                               16
                           ) & 0xffffffff
                       except ValueError:
                           continue
 
+                      result[fields[1]] = crc
+
               return result
 
-          stock, stock_size = parse_versions(stock_path)
-          custom, custom_size = parse_versions(custom_path)
-          symvers = parse_symvers(symvers_path)
+          stock, stock_size = parse_versions(
+              stock_path
+          )
+
+          custom, custom_size = parse_versions(
+              custom_path
+          )
+
+          symvers = parse_symvers(
+              symvers_path
+          )
 
           print()
           print("=" * 78)
           print("QCACLD3 DIRECT STOCK VS CUSTOM ABI")
           print("=" * 78)
 
-          print(f"Stock __versions : {stock_size} bytes")
-          print(f"Custom __versions: {custom_size} bytes")
-          print(f"Stock records    : {len(stock)}")
-          print(f"Custom records   : {len(custom)}")
-          print(f"Module.symvers   : {len(symvers)} symbols")
+          print(
+              f"Stock __versions : {stock_size} bytes"
+          )
 
-          common = sorted(set(stock) & set(custom))
+          print(
+              f"Custom __versions: {custom_size} bytes"
+          )
 
-          matches = 0
-          mismatches = []
+          print(
+              f"Stock symbols    : {len(stock)}"
+          )
 
-          for symbol in common:
-              if stock[symbol] == custom[symbol]:
-                  matches += 1
-              else:
-                  mismatches.append(
-                      (
-                          symbol,
-                          stock[symbol],
-                          custom[symbol]
-                      )
-                  )
+          print(
+              f"Custom symbols   : {len(custom)}"
+          )
 
-          print(f"Common symbols   : {len(common)}")
-          print(f"CRC matches      : {matches}")
-          print(f"CRC mismatches   : {len(mismatches)}")
+          print(
+              f"Module.symvers   : {len(symvers)}"
+          )
+
+          failed = False
 
           print()
           print("-" * 78)
           print("REQUIRED SYMBOLS")
           print("-" * 78)
 
-          failed = False
           report = []
 
-          for symbol in required:
-              stock_crc = stock.get(symbol)
-              custom_crc = custom.get(symbol)
-              symvers_crc = symvers.get(symbol)
+          for symbol in sorted(REQUIRED):
 
-              if stock_crc is None:
+              s = stock.get(symbol)
+              c = custom.get(symbol)
+              v = symvers.get(symbol)
+
+              if s is None:
                   print(
-                      f"{symbol:42} STOCK MISSING"
+                      f"{symbol:42} "
+                      "STOCK MISSING"
                   )
                   failed = True
-                  report.append(
-                      f"{symbol}: STOCK_MISSING"
-                  )
                   continue
 
-              if custom_crc is None:
+              if c is None:
                   print(
-                      f"{symbol:42} CUSTOM MISSING"
+                      f"{symbol:42} "
+                      "CUSTOM MISSING"
                   )
                   failed = True
-                  report.append(
-                      f"{symbol}: CUSTOM_MISSING"
-                  )
                   continue
 
-              stock_text = f"0x{stock_crc:08x}"
-              custom_text = f"0x{custom_crc:08x}"
+              s_text = f"0x{s:08x}"
+              c_text = f"0x{c:08x}"
 
-              symvers_text = (
-                  f"0x{symvers_crc:08x}"
-                  if symvers_crc is not None
+              v_text = (
+                  f"0x{v:08x}"
+                  if v is not None
                   else "MISSING"
               )
 
               print(
                   f"{symbol:42} "
-                  f"stock={stock_text} "
-                  f"custom={custom_text} "
-                  f"symvers={symvers_text}"
+                  f"stock={s_text} "
+                  f"custom={c_text} "
+                  f"symvers={v_text}"
               )
 
-              if stock_crc != custom_crc:
+              if s != c:
                   print(
-                      f"  ERROR: STOCK != CUSTOM"
+                      "  ERROR: STOCK != CUSTOM"
                   )
                   failed = True
 
-              if symvers_crc is None:
+              if v is None:
                   print(
-                      f"  ERROR: missing from Module.symvers"
-                  )
-                  failed = True
-              elif custom_crc != symvers_crc:
-                  print(
-                      f"  ERROR: CUSTOM != Module.symvers"
+                      "  ERROR: missing from Module.symvers"
                   )
                   failed = True
 
-              if (
-                  stock_crc == custom_crc
-                  and symvers_crc == custom_crc
-              ):
-                  print("  PASS: all three CRC values match")
+              elif c != v:
+                  print(
+                      "  ERROR: CUSTOM != Module.symvers"
+                  )
+                  failed = True
+
+              if s == c and v == c:
+                  print(
+                      "  PASS: all three match"
+                  )
 
               report.append(
-                  f"{symbol}: "
-                  f"stock=0x{stock_crc:08x} "
-                  f"custom=0x{custom_crc:08x} "
-                  f"symvers={symvers_text}"
+                  (
+                      symbol,
+                      s,
+                      c,
+                      v
+                  )
               )
 
           print()
           print("-" * 78)
-          print("ALL COMMON SYMBOLS")
+          print("FULL COMMON-SYMBOL COMPARISON")
           print("-" * 78)
 
-          for symbol, stock_crc, custom_crc in mismatches:
-              print(
-                  f"CRC MISMATCH: {symbol}: "
-                  f"stock=0x{stock_crc:08x} "
-                  f"custom=0x{custom_crc:08x}"
-              )
+          common = (
+              set(stock)
+              & set(custom)
+          )
 
-          stock_only = sorted(set(stock) - set(custom))
-          custom_only = sorted(set(custom) - set(stock))
+          common_matches = 0
+          common_mismatches = 0
+
+          for symbol in sorted(common):
+
+              s = stock[symbol]
+              c = custom[symbol]
+
+              if s == c:
+                  common_matches += 1
+              else:
+                  common_mismatches += 1
+
+                  print(
+                      f"CRC MISMATCH: "
+                      f"{symbol}: "
+                      f"stock=0x{s:08x} "
+                      f"custom=0x{c:08x}"
+                  )
 
           print()
-          print(f"Stock-only symbols  : {len(stock_only)}")
-          print(f"Custom-only symbols : {len(custom_only)}")
+          print(
+              f"Common symbols    : {len(common)}"
+          )
 
-          with open(report_path, "w", encoding="utf-8") as f:
+          print(
+              f"Common matches    : {common_matches}"
+          )
+
+          print(
+              f"Common mismatches : {common_mismatches}"
+          )
+
+          with open(
+              report_path,
+              "w",
+              encoding="utf-8"
+          ) as f:
+
               f.write(
                   "QCACLD3 DIRECT STOCK VS CUSTOM ABI REPORT\n"
               )
-              f.write("=" * 78 + "\n")
+
               f.write(
-                  f"Stock __versions size: {stock_size}\n"
+                  "=" * 78 + "\n"
               )
+
               f.write(
-                  f"Custom __versions size: {custom_size}\n"
+                  f"Stock __versions: {stock_size}\n"
               )
+
               f.write(
-                  f"Stock records: {len(stock)}\n"
+                  f"Custom __versions: {custom_size}\n"
               )
+
               f.write(
-                  f"Custom records: {len(custom)}\n"
+                  f"Stock symbols: {len(stock)}\n"
               )
+
+              f.write(
+                  f"Custom symbols: {len(custom)}\n"
+              )
+
               f.write(
                   f"Common symbols: {len(common)}\n"
               )
+
               f.write(
-                  f"CRC matches: {matches}\n"
+                  f"Common matches: {common_matches}\n"
               )
+
               f.write(
-                  f"CRC mismatches: {len(mismatches)}\n"
+                  f"Common mismatches: {common_mismatches}\n"
               )
+
               f.write("\nREQUIRED SYMBOLS\n")
               f.write("-" * 78 + "\n")
 
-              for line in report:
-                  f.write(line + "\n")
+              for symbol, s, c, v in report:
 
-              f.write("\nALL COMMON SYMBOL MISMATCHES\n")
-              f.write("-" * 78 + "\n")
-
-              for symbol, stock_crc, custom_crc in mismatches:
                   f.write(
                       f"{symbol}: "
-                      f"stock=0x{stock_crc:08x} "
-                      f"custom=0x{custom_crc:08x}\n"
+                      f"stock=0x{s:08x} "
+                      f"custom=0x{c:08x} "
                   )
 
-          print()
-          print("=" * 78)
+                  if v is None:
+                      f.write(
+                          "symvers=MISSING\n"
+                      )
+                  else:
+                      f.write(
+                          f"symvers=0x{v:08x}\n"
+                      )
 
-          if failed or mismatches:
-              print("FAIL: STOCK AND CUSTOM QCACLD3 ABI DIFFER")
+              f.write(
+                  "\nALL COMMON MISMATCHES\n"
+              )
+
+              f.write(
+                  "-" * 78 + "\n"
+              )
+
+              for symbol in sorted(common):
+
+                  if stock[symbol] != custom[symbol]:
+
+                      f.write(
+                          f"{symbol}: "
+                          f"stock=0x{stock[symbol]:08x} "
+                          f"custom=0x{custom[symbol]:08x}\n"
+                      )
+
+          print()
+
+          if failed or common_mismatches:
               print(
-                  "The custom WLAN module is NOT ABI-compatible "
-                  "with the stock reference."
+                  "FAIL: STOCK AND CUSTOM QCACLD3 "
+                  "ABI DO NOT MATCH."
               )
               print(
-                  f"Detailed report: {report_path}"
+                  "The build is intentionally stopped."
               )
               sys.exit(1)
 
-          print("PASS: STOCK AND CUSTOM QCACLD3 ABI MATCH")
-          print("=" * 78)
+          print(
+              "PASS: STOCK AND CUSTOM QCACLD3 "
+              "ABI MATCH."
+          )
           PY
+
+          test -s "${REPORT}"
 
           echo
           echo "============================================================"
           echo "QCACLD3 DIRECT ABI CHECK PASSED"
           echo "============================================================"
-
-          test -s "${REPORT}"
-          echo "CRC report created:"
-          ls -lh "${REPORT}"
-                
-
       # ============================================================
       # 39. GENERATE COMPLETE CONFIGURATION DIFFERENCE
       # ============================================================
