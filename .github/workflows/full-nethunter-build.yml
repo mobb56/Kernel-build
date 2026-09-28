@@ -5083,6 +5083,7 @@ jobs:
           echo "========================================"
 
 
+        
       - name: Package verified kernel artifacts
         working-directory: kernel
         shell: bash
@@ -5115,7 +5116,6 @@ jobs:
             exit 1
           fi
 
-          echo "Kernel Image found:"
           ls -lh "${IMAGE}"
 
           echo
@@ -5188,17 +5188,11 @@ jobs:
           echo
           echo "=== Package ABI evidence ==="
 
-          ABI_SOURCE="${SOURCE_AUDIT_DIR}/stock-vs-final.config.diff"
-
-          if [ ! -s "${ABI_SOURCE}" ]; then
-            echo "ERROR: Required configuration diff is missing or empty:"
-            echo "${ABI_SOURCE}"
-            exit 1
-          fi
-
-          cp -f \
-            "${ABI_SOURCE}" \
-            "${ARTIFACT_DIR}/abi/stock-vs-final.config.diff"
+          #
+          # These files are produced directly by the kernel build /
+          # earlier ABI gate. Do not depend on an arbitrary source-audit
+          # filename for the configuration diff.
+          #
 
           for ABI_FILE in \
             "${OUT_DIR}/Module.symvers" \
@@ -5212,6 +5206,48 @@ jobs:
               exit 1
             fi
           done
+
+          #
+          # Re-create the stock-vs-final configuration diff here.
+          #
+          STOCK_CONFIG="${OUT_DIR}/stock-before-nethunter.config"
+          FINAL_CONFIG="${OUT_DIR}/.config"
+          CONFIG_DIFF="${ARTIFACT_DIR}/abi/stock-vs-final.config.diff"
+
+          if [ ! -s "${STOCK_CONFIG}" ]; then
+            echo "ERROR: Stock pre-NetHunter configuration is missing or empty:"
+            echo "${STOCK_CONFIG}"
+            exit 1
+          fi
+
+          echo "Generating stock-vs-final configuration diff..."
+
+          if diff -u \
+              "${STOCK_CONFIG}" \
+              "${FINAL_CONFIG}" \
+              > "${CONFIG_DIFF}"; then
+            :
+          else
+            DIFF_STATUS=$?
+
+            #
+            # diff returns 1 when differences exist.
+            # That is expected because NetHunter intentionally adds
+            # configuration changes.
+            #
+            if [ "${DIFF_STATUS}" -ne 1 ]; then
+              echo "ERROR: Unable to generate configuration diff."
+              exit 1
+            fi
+          fi
+
+          test -s "${CONFIG_DIFF}"
+
+          echo "Configuration diff generated successfully."
+
+          #
+          # Copy the remaining ABI evidence.
+          #
 
           cp -f \
             "${OUT_DIR}/Module.symvers" \
@@ -5228,6 +5264,10 @@ jobs:
           cp -f \
             "${OUT_DIR}/.config" \
             "${ARTIFACT_DIR}/abi/final.config"
+
+          #
+          # Final ABI evidence verification.
+          #
 
           test -s "${ARTIFACT_DIR}/abi/Module.symvers"
           test -s "${ARTIFACT_DIR}/abi/System.map"
