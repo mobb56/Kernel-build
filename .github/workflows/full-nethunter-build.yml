@@ -5151,7 +5151,7 @@ jobs:
                echo
               echo "=== Packaging ABI evidence ==="
 
-              ABI_DIFF="$(find .. -type f -name 'stock-vs-final-config.diff' -print -quit)"
+              ABI_DIFF="$(find . -type f -name 'stock-vs-final-config.diff' -print -quit)"
 
               if [ -z "${ABI_DIFF}" ]; then
               echo "ERROR: stock-vs-final-config.diff was not found anywhere."
