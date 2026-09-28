@@ -5092,7 +5092,7 @@ jobs:
  
                ARTIFACT_DIR="${GITHUB_WORKSPACE}/artifacts/nethunter-cebu"
                MODULE_DIR="${ARTIFACT_DIR}/modules"
-              SOURCE_AUDIT_DIR="${GITHUB_WORKSPACE}/artifacts/source-audit"
+               SOURCE_AUDIT_DIR="${GITHUB_WORKSPACE}/kernel/artifacts/source-audit"
 
                OUT_DIR="${GITHUB_WORKSPACE}/kernel/out"
               IMAGE="${OUT_DIR}/arch/arm64/boot/Image"
