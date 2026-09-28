@@ -150,37 +150,23 @@ jobs:
           "${ANDROID_LLVM_DIR}/bin/clang" --version \
             | grep -q -F "clang version 21.0.0"
 
-          echo
-          echo "=== Verify clang source revision ==="
-
-          CLANG_SOURCE_INFO="${ANDROID_LLVM_DIR}/clang_source_info.md"
-
-           if [ ! -f "${CLANG_SOURCE_INFO}" ]; then
-           echo "ERROR: clang_source_info.md was not found."
-           echo
-           echo "Searching Android LLVM tree:"
-           find "${ANDROID_LLVM_DIR}" \
-           -maxdepth 3 \
-           -name "clang_source_info.md" \
-           -print
-           exit 1
-           fi
-
-             echo "Found:"
-             echo "${CLANG_SOURCE_INFO}"
-
              echo
-             echo "=== clang_source_info.md ==="
-              cat "${CLANG_SOURCE_INFO}"
+             echo "=== Verify clang source revision ==="
 
-             echo
-             echo "=== Verify r563880c ==="
+             echo "Checking compiler identity..."
 
-             grep -F "r563880c" "${CLANG_SOURCE_INFO}"
+             CLANG_VERSION="$("${ANDROID_LLVM_DIR}/bin/clang" --version)"
 
-             echo
-             echo "Android clang-r563880c source revision verified."
+              echo "${CLANG_VERSION}"
 
+               echo
+               echo "=== Verify clang-r563880c ==="
+
+               echo "${CLANG_VERSION}" | grep -F "clang version 21.0.0"
+               echo "${CLANG_VERSION}" | grep -F "based on r563880c"
+
+                echo
+                echo "Android clang-r563880c source revision verified."
       # ============================================================
       # 4. PREPARE DETERMINISTIC LLVM TOOLCHAIN
       # ============================================================
