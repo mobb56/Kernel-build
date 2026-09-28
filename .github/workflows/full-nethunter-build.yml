@@ -5149,25 +5149,26 @@ jobs:
 
 
                echo
-               echo "=== Packaging ABI evidence ==="
+              echo "=== Packaging ABI evidence ==="
 
-              mkdir -p "${ARTIFACT_DIR}/abi"
+              ABI_DIFF="$(find .. -type f -name 'stock-vs-final-config.diff' -print -quit)"
 
-               cp "${OUT_DIR}/Module.symvers" \
-               "${ARTIFACT_DIR}/abi/Module.symvers"
+              if [ -z "${ABI_DIFF}" ]; then
+              echo "ERROR: stock-vs-final-config.diff was not found anywhere."
+              echo "Available configuration audit files:"
+              find .. -type f \( -name '*stock*final*config*' -o -name '*config*diff*' \) -print | sort
+             exit 1
+            fi
 
-               cp "${OUT_DIR}/System.map" \
-               "${ARTIFACT_DIR}/abi/System.map"
+                 echo "Found stock/final config diff:"
+                 echo "${ABI_DIFF}"
 
-                 cp "${OUT_DIR}/qca-crc-report.txt" \
-                "${ARTIFACT_DIR}/abi/qca-crc-report.txt"
+                  mkdir -p "${ARTIFACT_DIR}/abi"
 
-              cp "${OUT_DIR}/stock-vs-final-config.diff" \
-              "${ARTIFACT_DIR}/abi/stock-vs-final-config.diff"
+                  cp "${ABI_DIFF}" \
+                  "${ARTIFACT_DIR}/abi/stock-vs-final-config.diff"
 
-              cp "${OUT_DIR}/.config" \
-              "${ARTIFACT_DIR}/abi/final.config"
-
+              
                test -s "${ARTIFACT_DIR}/abi/Module.symvers"
                test -s "${ARTIFACT_DIR}/abi/System.map"
               test -s "${ARTIFACT_DIR}/abi/qca-crc-report.txt"
