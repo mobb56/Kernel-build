@@ -5084,190 +5084,271 @@ jobs:
 
 
        
-      - name: Package verified kernel artifacts
-        working-directory: kernel
-        shell: bash
-        run: |
-          set -euo pipefail
+          - name: Package verified kernel artifacts
+           working-directory: kernel
+           shell: bash
+           run: |
+               set -euo pipefail
 
-          echo "=== Part 8: artifact packaging ==="
+               echo "=== Part 8: artifact packaging ==="
+ 
+               ARTIFACT_DIR="${GITHUB_WORKSPACE}/artifacts/nethunter-cebu"
+               MODULE_DIR="${ARTIFACT_DIR}/modules"
+              SOURCE_AUDIT_DIR="${GITHUB_WORKSPACE}/artifacts/source-audit"
 
-          ARTIFACT_DIR="../artifacts/nethunter-cebu"
-          MODULE_DIR="${ARTIFACT_DIR}/modules"
+               OUT_DIR="${GITHUB_WORKSPACE}/kernel/out"
+              IMAGE="${OUT_DIR}/arch/arm64/boot/Image"
 
-          rm -rf "${ARTIFACT_DIR}"
-          mkdir -p "${MODULE_DIR}"
+               rm -rf "${ARTIFACT_DIR}"
+               mkdir -p \
+                "${ARTIFACT_DIR}" \
+                "${MODULE_DIR}" \
+                "${ARTIFACT_DIR}/abi"
+ 
+                 echo "Artifact directory:"
+                 echo "${ARTIFACT_DIR}"
 
-          IMAGE="${OUT_DIR}/arch/arm64/boot/Image"
+             echo
+            echo "=== Verify kernel Image ==="
 
-          test -s "${IMAGE}"
-          test -f "../artifacts/source-audit/part7-result.txt"
-
-          echo
-          echo "=== Copy kernel ==="
-
-          cp -f "${IMAGE}" "${ARTIFACT_DIR}/Image"
-
-          echo
-          echo "=== Copy compiled modules ==="
-
-          MODULE_COUNT=0
-
-          while IFS= read -r module; do
-            [ -n "${module}" ] || continue
-
-            relative="${module#${OUT_DIR}/}"
-
-            mkdir -p \
-              "${MODULE_DIR}/$(dirname "${relative}")"
-
-            cp -f \
-              "${module}" \
-              "${MODULE_DIR}/${relative}"
-
-            MODULE_COUNT=$((MODULE_COUNT + 1))
-          done < <(find "${OUT_DIR}" -type f -name '*.ko' | sort)
-
-          if [ "${MODULE_COUNT}" -eq 0 ]; then
-            echo "ERROR: No modules were packaged."
-            exit 1
-          fi
-
-          echo "Packaged modules: ${MODULE_COUNT}"
-
-          echo
-          echo "=== Copy verification reports ==="
-
-          cp -f \
-            ../artifacts/source-audit/part7-result.txt \
-            "${ARTIFACT_DIR}/part7-result.txt"
-
-          cp -f \
-            ../artifacts/source-audit/qcacld3-symbols.txt \
-            "${ARTIFACT_DIR}/qcacld3-symbols.txt"
-
-
-
-               echo
-              echo "=== Packaging ABI evidence ==="
-
-              ABI_DIFF="$(find . -type f -name 'stock-vs-final-config.diff' -print -quit)"
-
-              if [ -z "${ABI_DIFF}" ]; then
-              echo "ERROR: stock-vs-final-config.diff was not found anywhere."
-              echo "Available configuration audit files:"
-              find .. -type f \( -name '*stock*final*config*' -o -name '*config*diff*' \) -print | sort
+                 if [ ! -s "${IMAGE}" ]; then
+                echo "ERROR: Kernel Image is missing or empty."
              exit 1
-            fi
+             fi
 
-                 echo "Found stock/final config diff:"
-                 echo "${ABI_DIFF}"
+               echo "Kernel Image found:"
+                ls -lh "${IMAGE}"
 
-                  mkdir -p "${ARTIFACT_DIR}/abi"
+                echo
+                echo "=== Copy kernel Image ==="
+   
+               cp -f \
+                 "${IMAGE}" \
+                  "${ARTIFACT_DIR}/Image"
 
-                  cp "${ABI_DIFF}" \
-                  "${ARTIFACT_DIR}/abi/stock-vs-final-config.diff"
+                   test -s "${ARTIFACT_DIR}/Image"
 
-              
-               test -s "${ARTIFACT_DIR}/abi/Module.symvers"
-               test -s "${ARTIFACT_DIR}/abi/System.map"
-              test -s "${ARTIFACT_DIR}/abi/qca-crc-report.txt"
-               test -s "${ARTIFACT_DIR}/abi/stock-vs-final-config.diff"
-                test -s "${ARTIFACT_DIR}/abi/final.config"
+                  echo
+                  echo "=== Copy compiled modules ==="
 
-             echo "ABI evidence packaged successfully."
+                 MODULE_COUNT=0
 
+                    while IFS= read -r MODULE; do
+                      [ -n "${MODULE}" ] || continue
 
+                     case "${MODULE}" in
+                    "${OUT_DIR}"/*.ko)
+                  RELATIVE="${MODULE#${OUT_DIR}/}"
+              ;;
+                *)
+                echo "ERROR: Module is outside OUT_DIR:"
+                echo "${MODULE}"
+               exit 1
+                ;;
+              esac
+ 
+                   DEST="${MODULE_DIR}/${RELATIVE}"
 
-            echo "=== Generate built module manifest ==="
+                    mkdir -p "$(dirname "${DEST}")"
 
-          find "${OUT_DIR}" \
-          -type f \
-          -name '*.ko' \
-          -print \
-          | sort \
-          > ../artifacts/source-audit/built-modules.txt
+                    cp -f \
+                   "${MODULE}" \
+                   "${DEST}"
 
-          test -s ../artifacts/source-audit/built-modules.txt
+                     MODULE_COUNT=$((MODULE_COUNT + 1))
+                     done < <(
+                     find "${OUT_DIR}" \
+                     -type f \
+                     -name '*.ko' \
+                      -print \
+                      | sort
+                   )
 
-           echo "Built module manifest:"
-           cat ../artifacts/source-audit/built-modules.txt
+                  if [ "${MODULE_COUNT}" -eq 0 ]; then
+                  echo "ERROR: No kernel modules were found."
+                exit 1
+               fi
+ 
+                 echo "Packaged modules: ${MODULE_COUNT}"
 
-            
+                   echo
+                   echo "=== Copy verification reports ==="
+  
+                 test -s "${SOURCE_AUDIT_DIR}/part7-result.txt"
+                 test -s "${SOURCE_AUDIT_DIR}/qcacld3-symbols.txt"
 
-          cp -f \
-            ../artifacts/source-audit/built-modules.txt \
-            "${ARTIFACT_DIR}/built-modules.txt"
+                cp -f \
+                 "${SOURCE_AUDIT_DIR}/part7-result.txt" \
+                 "${ARTIFACT_DIR}/part7-result.txt"
 
+                  cp -f \
+                 "${SOURCE_AUDIT_DIR}/qcacld3-symbols.txt" \
+                  "${ARTIFACT_DIR}/qcacld3-symbols.txt"
+
+                  echo
+                  echo "=== Package ABI evidence ==="
+
+                   ABI_SOURCE="${SOURCE_AUDIT_DIR}/stock-vs-final-config.diff"
+
+                    if [ ! -s "${ABI_SOURCE}" ]; then
+                    echo "ERROR: Required stock-vs-final-config.diff is missing or empty."
+               echo "Expected:"
+               echo "${ABI_SOURCE}"
+                exit 1
+                fi
+
+                      cp -f \
+                     "${ABI_SOURCE}" \
+                     "${ARTIFACT_DIR}/abi/stock-vs-final-config.diff"
+
+                        for ABI_FILE in \
+                        "${OUT_DIR}/Module.symvers" \
+                        "${OUT_DIR}/System.map" \
+                        "${OUT_DIR}/qca-crc-report.txt" \
+                        "${OUT_DIR}/final.config"
+                   do
+                       if [ ! -s "${ABI_FILE}" ]; then
+                    echo "ERROR: Required ABI evidence is missing or empty:"
+                   echo "${ABI_FILE}"
+                  exit 1
+                 fi
+                    done
+
+                 cp -f \
+                  "${OUT_DIR}/Module.symvers" \
+                  "${ARTIFACT_DIR}/abi/Module.symvers"
+
+                 cp -f \
+                 "${OUT_DIR}/System.map" \
+                 "${ARTIFACT_DIR}/abi/System.map"
+
+                  cp -f \
+                  "${OUT_DIR}/qca-crc-report.txt" \
+                  "${ARTIFACT_DIR}/abi/qca-crc-report.txt"
+
+                  cp -f \
+                   "${OUT_DIR}/final.config" \
+                   "${ARTIFACT_DIR}/abi/final.config"
+
+                 test -s "${ARTIFACT_DIR}/abi/Module.symvers"
+                 test -s "${ARTIFACT_DIR}/abi/System.map"
+                 test -s "${ARTIFACT_DIR}/abi/qca-crc-report.txt"
+                 test -s "${ARTIFACT_DIR}/abi/stock-vs-final-config.diff"
+                 test -s "${ARTIFACT_DIR}/abi/final.config"
+
+                  echo "ABI evidence packaged successfully."
+ 
+                 echo
+                 echo "=== Generate built module manifest ==="
+
+                find "${OUT_DIR}" \
+                -type f \
+                -name '*.ko' \
+                  -print \
+                | sed "s#^${OUT_DIR}/##" \
+               | sort \
+            > "${SOURCE_AUDIT_DIR}/built-modules.txt"
+
+            test -s "${SOURCE_AUDIT_DIR}/built-modules.txt"
+
+               cp -f \
+              "${SOURCE_AUDIT_DIR}/built-modules.txt" \
+              "${ARTIFACT_DIR}/built-modules.txt"
+
+               echo "Built module manifest:"
+               cat "${ARTIFACT_DIR}/built-modules.txt"
+
+             echo
              echo "=== Generate kernel Image checksum ==="
-
-             test -f "${OUT_DIR}/arch/arm64/boot/Image"
-
+ 
              sha256sum \
-              "${OUT_DIR}/arch/arm64/boot/Image" \
-              > ../artifacts/source-audit/kernel-Image.sha256
+             "${IMAGE}" \
+              > "${SOURCE_AUDIT_DIR}/kernel-Image.sha256"
+ 
+               test -s "${SOURCE_AUDIT_DIR}/kernel-Image.sha256"
 
-            cat ../artifacts/source-audit/kernel-Image.sha256
+          cat "${SOURCE_AUDIT_DIR}/kernel-Image.sha256"
 
-          cp -f \
-            ../artifacts/source-audit/kernel-Image.sha256 \
-            "${ARTIFACT_DIR}/kernel-Image.sha256"
+              cp -f \
+             "${SOURCE_AUDIT_DIR}/kernel-Image.sha256" \
+             "${ARTIFACT_DIR}/kernel-Image.sha256"
 
-          echo
+            echo
             echo "=== Generate artifact checksums ==="
 
-              (
-            cd "${ARTIFACT_DIR}"
-          find . \
+               (
+                cd "${ARTIFACT_DIR}"
+
+             find . \
             -type f \
             ! -name 'SHA256SUMS' \
-           -print0 \
-           | sort -z \
-            | xargs -0 sha256sum
+              -print0 \
+              | sort -z \
+             | xargs -0 sha256sum
            ) > "${ARTIFACT_DIR}/SHA256SUMS"
 
-             test -s "${ARTIFACT_DIR}/SHA256SUMS"
+            test -s "${ARTIFACT_DIR}/SHA256SUMS"
 
-            echo "=== SHA256SUMS ==="
-           cat "${ARTIFACT_DIR}/SHA256SUMS"
+              echo "=== SHA256SUMS ==="
+             cat "${ARTIFACT_DIR}/SHA256SUMS"
 
-          echo
-          echo "=== Generate artifact manifest ==="
+             echo
+             echo "=== Generate artifact manifest ==="
 
-          {
-            echo "Device: Motorola Moto G9 Power (cebu)"
-            echo "ROM: LineageOS 23.2 / Android 16"
-            echo "Kernel base: Linux 4.19.325"
-            echo "Architecture: arm64"
-            echo "Artifact type: verified kernel build output"
-            echo "Flashable boot image: NO"
-            echo "AnyKernel3: NO"
-            echo "Flashing performed by workflow: NO"
-            echo "Reboot performed by workflow: NO"
-            echo "Compiled modules: ${MODULE_COUNT}"
-            echo
-            echo "Kernel SHA256:"
-            sha256sum "${ARTIFACT_DIR}/Image"
+              {
+             echo "Device: Motorola Moto G9 Power (cebu)"
+             echo "ROM: LineageOS 23.2 / Android 16"
+             echo "Kernel base: Linux 4.19.325"
+             echo "Architecture: arm64"
+             echo "Artifact type: verified kernel build output"
+             echo "Flashable boot image: NO"
+             echo "AnyKernel3: NO"
+             echo "Flashing performed by workflow: NO"
+             echo "Reboot performed by workflow: NO"
+             echo "Compiled modules: ${MODULE_COUNT}"
+           echo
+           echo "Kernel SHA256:"
+           sha256sum "${ARTIFACT_DIR}/Image"
             echo
             echo "Contents:"
-            find "${ARTIFACT_DIR}" -type f -printf '%P\n' | sort
-          } > "${ARTIFACT_DIR}/MANIFEST.txt"
+            find "${ARTIFACT_DIR}" \
+               -type f \
+               -printf '%P\n' \
+             | sort
+           } > "${ARTIFACT_DIR}/MANIFEST.txt"
 
-          echo
-          echo "=== Verify packaged kernel ==="
-
-          test -s "${ARTIFACT_DIR}/Image"
-          test -s "${ARTIFACT_DIR}/SHA256SUMS"
           test -s "${ARTIFACT_DIR}/MANIFEST.txt"
 
-          echo
-          echo "=== Artifact tree ==="
+           echo
+           echo "=== Verify packaged kernel ==="
 
-          find "${ARTIFACT_DIR}" -type f -printf '%P\n' | sort
+            test -s "${ARTIFACT_DIR}/Image"
+             test -s "${ARTIFACT_DIR}/SHA256SUMS"
+            test -s "${ARTIFACT_DIR}/MANIFEST.txt"
 
-          echo
-          echo "=== PART 10 PASSED ==="background: 
+            echo
+            echo "=== Verify packaged ABI evidence ==="
 
+            test -s "${ARTIFACT_DIR}/abi/Module.symvers"
+           test -s "${ARTIFACT_DIR}/abi/System.map"
+          test -s "${ARTIFACT_DIR}/abi/qca-crc-report.txt"
+          test -s "${ARTIFACT_DIR}/abi/stock-vs-final-config.diff"
+           test -s "${ARTIFACT_DIR}/abi/final.config"
+
+            echo
+           echo "=== Artifact tree ==="
+
+              find "${ARTIFACT_DIR}" \
+             -type f \
+              -printf '%P\n' \
+               | sort
+
+              echo
+              echo "=== PART 10 PASSED ==="
+              echo "Verified kernel artifacts packaged successfully."
+              echo "No flashing performed."
+              echo "No reboot performed."
+              echo "No AnyKernel3 artifact produced."
 
 
       - name: Upload verified kernel artifacts
