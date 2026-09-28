@@ -4497,11 +4497,11 @@ jobs:
           echo "EXPECTED STOCK CRCS"
           echo "============================================================"
 
-          STOCK_MODULE_LAYOUT="0xefc8997b"
-          STOCK_CFG80211_UNLINK_BSS="0xf190a484"
-          STOCK_CFG80211_GET_BSS="0x078af9da"
-          STOCK_CFG80211_INFORM_BSS_FRAME_DATA="0xaf0332f3"
-          STOCK_CFG80211_SCHED_SCAN_RESULTS="0x73e1515f"
+          STOCK_MODULE_LAYOUT="0x7b99c8ef"
+          STOCK_CFG80211_UNLINK_BSS="0x84a490f1"
+          STOCK_CFG80211_GET_BSS="0xdaf98a07"
+          STOCK_CFG80211_INFORM_BSS_FRAME_DATA="0xf33203af"
+          STOCK_CFG80211_SCHED_SCAN_RESULTS="0x5f51e173"
 
           echo "module_layout                  = ${STOCK_MODULE_LAYOUT}"
           echo "cfg80211_unlink_bss            = ${STOCK_CFG80211_UNLINK_BSS}"
