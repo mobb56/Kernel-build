@@ -4865,25 +4865,30 @@ jobs:
 
           echo "Kernel Image fits within the boot partition."
 
-           =============KERNEL RELEASE==========
-          
-          KERNEL_RELEASE="$(
-           make -s \
-          O="${OUT_DIR}" \
-          ARCH="${ARCH}" \
-           LLVM=1 \
-           LLVM_IAS=1 \
-           CROSS_COMPILE="${CROSS_COMPILE}" \
-            LOCALVERSION="-g39bcecd5c63d" \
-            kernelrelease
-           )"
 
-           echo "Kernel release: ${KERNEL_RELEASE}"
 
-             test "${KERNEL_RELEASE}" = \
-            "4.19.325-cip135-st19-perf-g39bcecd5c63d"
 
-                echo "Exact stock kernel release confirmed."
+               echo
+               echo "================ KERNEL RELEASE ================"
+
+               KERNEL_RELEASE="$(
+               make -s \
+               O="${OUT_DIR}" \
+               ARCH="${ARCH}" \
+               LLVM=1 \
+               LLVM_IAS=1 \
+               CROSS_COMPILE="${CROSS_COMPILE}" \
+               LOCALVERSION="-g39bcecd5c63d" \
+               kernelrelease
+                )"
+
+              echo "Kernel release: ${KERNEL_RELEASE}"
+
+              test "${KERNEL_RELEASE}" = \
+              "4.19.325-cip135-st19-perf-g39bcecd5c63d"
+
+              echo "Exact stock kernel release confirmed."
+              
           echo
           echo "=== Module ABI safety ==="
 
