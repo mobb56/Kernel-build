@@ -153,23 +153,33 @@ jobs:
           echo
           echo "=== Verify clang source revision ==="
 
-          if [ -f "${ANDROID_LLVM_DIR}/clang_source_info.md" ]; then
-            grep -F "clang-r563880c" \
-              "${ANDROID_LLVM_DIR}/clang_source_info.md"
-          else
-            echo "ERROR: clang_source_info.md is missing."
-            exit 1
-          fi
+          CLANG_SOURCE_INFO="${ANDROID_LLVM_DIR}/clang_source_info.md"
 
-          echo
-          echo "=== Android LLVM tools verified ==="
+           if [ ! -f "${CLANG_SOURCE_INFO}" ]; then
+           echo "ERROR: clang_source_info.md was not found."
+           echo
+           echo "Searching Android LLVM tree:"
+           find "${ANDROID_LLVM_DIR}" \
+           -maxdepth 3 \
+           -name "clang_source_info.md" \
+           -print
+           exit 1
+           fi
 
-          echo "LLVM_DIR=${ANDROID_LLVM_DIR}" >> "${GITHUB_ENV}"
-          echo "LLVM_BIN=${ANDROID_LLVM_DIR}/bin" >> "${GITHUB_ENV}"
-          echo "PATH=${ANDROID_LLVM_DIR}/bin:${PATH}" >> "${GITHUB_ENV}"
+             echo "Found:"
+             echo "${CLANG_SOURCE_INFO}"
 
-          echo
-          echo "Android clang-r563880c activated successfully."
+             echo
+             echo "=== clang_source_info.md ==="
+              cat "${CLANG_SOURCE_INFO}"
+
+             echo
+             echo "=== Verify r563880c ==="
+
+             grep -F "r563880c" "${CLANG_SOURCE_INFO}"
+
+             echo
+             echo "Android clang-r563880c source revision verified."
 
       # ============================================================
       # 4. PREPARE DETERMINISTIC LLVM TOOLCHAIN
