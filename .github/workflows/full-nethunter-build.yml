@@ -2930,6 +2930,7 @@ jobs:
 
 
       - name: Verify stock ABI CRCs against custom kernel
+        if: ${{ inputs.build_kernel }}
         working-directory: kernel
         shell: bash
         run: |
