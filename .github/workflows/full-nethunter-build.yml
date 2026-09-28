@@ -74,46 +74,64 @@ jobs:
       # ============================================================
       # 3. INSTALL LLVM / CLANG 21
       # ============================================================
+
       - name: Install Android LLVM clang-r563880c
         shell: bash
         run: |
           set -euo pipefail
 
+          NDK_VERSION="r29"
+          NDK_ARCHIVE="android-ndk-r29-linux.zip"
+          NDK_URL="https://dl.google.com/android/repository/${NDK_ARCHIVE}"
+          NDK_SHA1="87e2bb7e9be5d6a1c6cdf5ec40dd4e0c6d07c30b"
+
+          NDK_ROOT="${GITHUB_WORKSPACE}/android-ndk-r29"
           ANDROID_LLVM_DIR="${GITHUB_WORKSPACE}/android-llvm"
-          LLVM_ARCHIVE_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/9916fb51ccb914d62d35ad9a7b9b21d2ef046928/clang-r563880c.tar.gz"
+          NDK_ZIP="${RUNNER_TEMP}/${NDK_ARCHIVE}"
 
+          echo "============================================================"
+          echo "ANDROID NDK r29 / CLANG-r563880c"
+          echo "============================================================"
+
+          rm -rf "${NDK_ROOT}"
           rm -rf "${ANDROID_LLVM_DIR}"
-          mkdir -p "${ANDROID_LLVM_DIR}"
-
+          rm -f "${NDK_ZIP}"
 
           echo
+          echo "=== Downloading official Google Android NDK r29 ==="
 
-          echo "=== Fetching Android clang-r563880c from AOSP ==="
+          curl -fL \
+            --retry 5 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            -o "${NDK_ZIP}" \
+            "${NDK_URL}"
 
-          rm -rf /tmp/android-clang
+          test -s "${NDK_ZIP}"
 
-          git clone \
-            --depth=1 \
-            --filter=blob:none \
-            --no-checkout \
-            https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
-            /tmp/android-clang
+          echo
+          echo "=== Verifying NDK SHA-1 ==="
 
-          cd /tmp/android-clang
+          echo "${NDK_SHA1}  ${NDK_ZIP}" | sha1sum -c -
 
-          git fetch --depth=1 origin \
-            531a564ba5426707dee226eccb19f104a7af5a5f
+          echo
+          echo "NDK archive verified."
 
-          git checkout \
-            531a564ba5426707dee226eccb19f104a7af5a5f \
-            -- clang-r563880c
+          echo
+          echo "=== Extracting Android NDK r29 ==="
 
-          rm -rf "${ANDROID_LLVM_DIR}"
-          mkdir -p "${ANDROID_LLVM_DIR}"
+          unzip -q "${NDK_ZIP}" -d "${GITHUB_WORKSPACE}"
 
-          cp -a clang-r563880c/. "${ANDROID_LLVM_DIR}/"
+          test -d "${NDK_ROOT}"
 
-          cd "${GITHUB_WORKSPACE}"
+          echo
+          echo "=== Selecting LLVM toolchain ==="
+
+          LLVM_SOURCE="${NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64"
+
+          test -d "${LLVM_SOURCE}"
+
+          cp -a "${LLVM_SOURCE}" "${ANDROID_LLVM_DIR}"
 
           test -x "${ANDROID_LLVM_DIR}/bin/clang"
           test -x "${ANDROID_LLVM_DIR}/bin/ld.lld"
@@ -124,30 +142,35 @@ jobs:
           test -x "${ANDROID_LLVM_DIR}/bin/llvm-readelf"
           test -x "${ANDROID_LLVM_DIR}/bin/llvm-objdump"
 
-          echo "=== Android Clang version ==="
+          echo
+          echo "=== Verify clang version ==="
 
           "${ANDROID_LLVM_DIR}/bin/clang" --version
 
           "${ANDROID_LLVM_DIR}/bin/clang" --version \
-            | grep -q "clang version 21.0.0"
-
-          echo "Android clang-r563880c verified."
-          echo
-          echo "=== Android Clang version ==="
-
-          "${ANDROID_LLVM_DIR}/bin/clang" --version
-
-          "${ANDROID_LLVM_DIR}/bin/clang" --version \
-            | grep -q -F 'clang version 21.0.0'
+            | grep -q -F "clang version 21.0.0"
 
           echo
-          echo "=== Activating Android LLVM ==="
+          echo "=== Verify clang source revision ==="
+
+          if [ -f "${ANDROID_LLVM_DIR}/clang_source_info.md" ]; then
+            grep -F "clang-r563880c" \
+              "${ANDROID_LLVM_DIR}/clang_source_info.md"
+          else
+            echo "ERROR: clang_source_info.md is missing."
+            exit 1
+          fi
+
+          echo
+          echo "=== Android LLVM tools verified ==="
 
           echo "LLVM_DIR=${ANDROID_LLVM_DIR}" >> "${GITHUB_ENV}"
+          echo "LLVM_BIN=${ANDROID_LLVM_DIR}/bin" >> "${GITHUB_ENV}"
           echo "PATH=${ANDROID_LLVM_DIR}/bin:${PATH}" >> "${GITHUB_ENV}"
 
           echo
-          echo "Android clang-r563880c activated."
+          echo "Android clang-r563880c activated successfully."
+
       # ============================================================
       # 4. PREPARE DETERMINISTIC LLVM TOOLCHAIN
       # ============================================================
