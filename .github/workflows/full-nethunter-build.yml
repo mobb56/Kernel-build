@@ -5083,13 +5083,11 @@ jobs:
           echo "========================================"
 
 
-       
-          - name: Package verified kernel artifacts
-           working-directory: kernel
-           shell: bash
-           run: |
-               set -euo pipefail
-
+      - name: Package verified kernel artifacts
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
                echo "=== Part 8: artifact packaging ==="
  
                ARTIFACT_DIR="${GITHUB_WORKSPACE}/artifacts/nethunter-cebu"
