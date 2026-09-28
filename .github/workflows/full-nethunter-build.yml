@@ -86,49 +86,52 @@ jobs:
           mkdir -p "${ANDROID_LLVM_DIR}"
 
 
+          echo
 
+          echo "=== Fetching Android clang-r563880c from AOSP ==="
 
-           echo "=== Downloading Android clang-r563880c ==="
+          rm -rf /tmp/android-clang
 
-           LLVM_ARCHIVE_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android16-qpr2-release/clang-r563880c.tar.gz"
+          git clone \
+            --depth=1 \
+            --filter=blob:none \
+            --no-checkout \
+            https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
+            /tmp/android-clang
 
-            rm -f /tmp/clang-r563880c.tar.gz
+          cd /tmp/android-clang
 
-                curl -fL \
-                --http1.1 \
-                --retry 10 \
-                --retry-all-errors \
-                --retry-delay 10 \
-                --retry-max-time 900 \
-                --connect-timeout 30 \
-                --max-time 1800 \
-                 "${LLVM_ARCHIVE_URL}" \
-                  -o /tmp/clang-r563880c.tar.gz
+          git fetch --depth=1 origin \
+            531a564ba5426707dee226eccb19f104a7af5a5f
 
-                test -s /tmp/clang-r563880c.tar.gz
+          git checkout \
+            531a564ba5426707dee226eccb19f104a7af5a5f \
+            -- clang-r563880c
 
-                 echo "=== Extracting Android LLVM ==="
+          rm -rf "${ANDROID_LLVM_DIR}"
+          mkdir -p "${ANDROID_LLVM_DIR}"
 
-                  tar -xzf /tmp/clang-r563880c.tar.gz \
-                       -C "${ANDROID_LLVM_DIR}"
+          cp -a clang-r563880c/. "${ANDROID_LLVM_DIR}/"
 
-                   test -x "${ANDROID_LLVM_DIR}/bin/clang"
-                   test -x "${ANDROID_LLVM_DIR}/bin/ld.lld"
-                   test -x "${ANDROID_LLVM_DIR}/bin/llvm-ar"
-                   test -x "${ANDROID_LLVM_DIR}/bin/llvm-nm"
-                   test -x "${ANDROID_LLVM_DIR}/bin/llvm-objcopy"
-                   test -x "${ANDROID_LLVM_DIR}/bin/llvm-strip"
-                   test -x "${ANDROID_LLVM_DIR}/bin/llvm-readelf"
-                   test -x "${ANDROID_LLVM_DIR}/bin/llvm-objdump"
+          cd "${GITHUB_WORKSPACE}"
 
-                  echo "=== Android Clang version ==="
+          test -x "${ANDROID_LLVM_DIR}/bin/clang"
+          test -x "${ANDROID_LLVM_DIR}/bin/ld.lld"
+          test -x "${ANDROID_LLVM_DIR}/bin/llvm-ar"
+          test -x "${ANDROID_LLVM_DIR}/bin/llvm-nm"
+          test -x "${ANDROID_LLVM_DIR}/bin/llvm-objcopy"
+          test -x "${ANDROID_LLVM_DIR}/bin/llvm-strip"
+          test -x "${ANDROID_LLVM_DIR}/bin/llvm-readelf"
+          test -x "${ANDROID_LLVM_DIR}/bin/llvm-objdump"
 
-                   "${ANDROID_LLVM_DIR}/bin/clang" --version
+          echo "=== Android Clang version ==="
 
-                  "${ANDROID_LLVM_DIR}/bin/clang" --version \
-                     | grep -q "clang version 21.0.0"
+          "${ANDROID_LLVM_DIR}/bin/clang" --version
 
-                  echo "Android clang-r563880c verified."
+          "${ANDROID_LLVM_DIR}/bin/clang" --version \
+            | grep -q "clang version 21.0.0"
+
+          echo "Android clang-r563880c verified."
           echo
           echo "=== Android Clang version ==="
 
