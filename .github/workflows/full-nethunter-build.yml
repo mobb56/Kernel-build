@@ -4818,7 +4818,7 @@ jobs:
 
 
 
-            
+
       - name: Verify stock ABI CRCs against custom kernel
         working-directory: kernel
         shell: bash
@@ -4826,102 +4826,149 @@ jobs:
           set -euo pipefail
 
           echo "============================================================"
-          echo "STOCK -> CUSTOM QCACLD3 ABI CRC CHECK"
+          echo "DIRECT STOCK -> CUSTOM QCACLD3 ABI CRC CHECK"
           echo "============================================================"
 
           CONFIG="${OUT_DIR}/.config"
           SYMVERS="${OUT_DIR}/Module.symvers"
+          CUSTOM_WLAN="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
+
+          STOCK_WLAN="${GITHUB_WORKSPACE}/stock-qca_cld3_wlan.ko"
+          STOCK_VERSIONS="${OUT_DIR}/stock-versions.bin"
+          CUSTOM_VERSIONS="${OUT_DIR}/custom-versions.bin"
           REPORT="${OUT_DIR}/qca-crc-report.txt"
 
-          test -s "${CONFIG}"
-          test -s "${SYMVERS}"
+          echo
+          echo "=== Required files ==="
 
-          grep -Fxq "CONFIG_MODVERSIONS=y" "${CONFIG}"
+          test -s "${CONFIG}" || {
+            echo "ERROR: final .config is missing."
+            exit 1
+          }
 
-          echo "CONFIG_MODVERSIONS=y confirmed."
-          echo "Module.symvers:"
-          ls -lh "${SYMVERS}"
+          test -s "${SYMVERS}" || {
+            echo "ERROR: Module.symvers is missing."
+            exit 1
+          }
+
+          test -s "${CUSTOM_WLAN}" || {
+            echo "ERROR: custom wlan.ko is missing."
+            exit 1
+          }
+
+          test -s "${STOCK_WLAN}" || {
+            echo
+            echo "ERROR: stock-qca_cld3_wlan.ko is missing."
+            echo
+            echo "Place the ACTUAL stock module at:"
+            echo "${GITHUB_WORKSPACE}/stock-qca_cld3_wlan.ko"
+            echo
+            echo "Source:"
+            echo "/vendor/lib/modules/qca_cld3_wlan.ko"
+            exit 1
+          }
+
+          echo "PASS: all required files exist."
 
           echo
-          echo "============================================================"
-          echo "LOCATE CUSTOM QCACLD3 MODULE"
-          echo "============================================================"
+          echo "=== CONFIG_MODVERSIONS ==="
 
-          WLAN_MODULE="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
+          grep -Fxq \
+            "CONFIG_MODVERSIONS=y" \
+            "${CONFIG}"
 
-          if [ ! -s "${WLAN_MODULE}" ]; then
-            WLAN_MODULE="$(find "${OUT_DIR}" \
-              -type f \
-              -name 'wlan.ko' \
-              -print -quit)"
-          fi
-
-          test -n "${WLAN_MODULE}"
-          test -s "${WLAN_MODULE}"
-
-          echo "Custom WLAN module:"
-          echo "${WLAN_MODULE}"
-          ls -lh "${WLAN_MODULE}"
+          echo "PASS: CONFIG_MODVERSIONS=y"
 
           echo
-          echo "============================================================"
-          echo "INSPECT CUSTOM wlan.ko VERSIONING FORMAT"
-          echo "============================================================"
+          echo "=== Stock module ==="
 
-          echo "ELF identity:"
-          "${LLVM_BIN}/llvm-readelf" -h "${WLAN_MODULE}" | \
+          echo "Stock module:"
+          ls -lh "${STOCK_WLAN}"
+
+          echo
+          echo "Custom module:"
+          ls -lh "${CUSTOM_WLAN}"
+
+          echo
+          echo "=== Verify stock module ELF ==="
+
+          "${LLVM_BIN}/llvm-readelf" -h "${STOCK_WLAN}" |
             grep -E 'Class:|Data:|Machine:|Type:'
 
           echo
-          echo "Version-related ELF sections:"
-          "${LLVM_BIN}/llvm-readelf" -S -W "${WLAN_MODULE}" | \
-            grep -E '__versions|__version_ext_names|__version_ext_crcs' || true
+          echo "=== Verify custom module ELF ==="
+
+          "${LLVM_BIN}/llvm-readelf" -h "${CUSTOM_WLAN}" |
+            grep -E 'Class:|Data:|Machine:|Type:'
 
           echo
-          echo "Kernel versioning configuration:"
-          for SYMBOL in BASIC_MODVERSIONS EXTENDED_MODVERSIONS MODVERSIONS
-          do
-            printf '%-24s' "${SYMBOL}: "
-            scripts/config --file "${CONFIG}" --state "${SYMBOL}" || true
-          done
+          echo "=== Verify stock __versions section ==="
 
-          echo
-          echo "============================================================"
-          echo "LOCATE GENERATED wlan.mod.c"
-          echo "============================================================"
-
-          WLAN_MOD_C="$(find "${OUT_DIR}" \
-            -type f \
-            -name 'wlan.mod.c' \
-            -print -quit)"
-
-          if [ -z "${WLAN_MOD_C}" ]; then
-            echo "ERROR: Generated wlan.mod.c was not found."
+          if ! "${LLVM_BIN}/llvm-readelf" -S -W "${STOCK_WLAN}" |
+            grep -q '[[:space:]]__versions[[:space:]]'; then
+            echo "ERROR: stock qca_cld3_wlan.ko has no __versions section."
             exit 1
           fi
 
-          test -s "${WLAN_MOD_C}"
-
-          echo "Generated module metadata:"
-          echo "${WLAN_MOD_C}"
-          ls -lh "${WLAN_MOD_C}"
+          echo "PASS: stock module contains __versions."
 
           echo
-          echo "============================================================"
-          echo "EXTRACT CRCs FROM GENERATED wlan.mod.c"
-          echo "============================================================"
+          echo "=== Verify custom __versions section ==="
 
-          WLAN_MOD_C="${WLAN_MOD_C}" \
+          if ! "${LLVM_BIN}/llvm-readelf" -S -W "${CUSTOM_WLAN}" |
+            grep -q '[[:space:]]__versions[[:space:]]'; then
+            echo "ERROR: custom wlan.ko has no __versions section."
+            exit 1
+          fi
+
+          echo "PASS: custom module contains __versions."
+
+          echo
+          echo "=== Extract stock __versions ==="
+
+          rm -f "${STOCK_VERSIONS}"
+
+          "${LLVM_BIN}/llvm-objcopy" \
+            --dump-section "__versions=${STOCK_VERSIONS}" \
+            "${STOCK_WLAN}"
+
+          test -s "${STOCK_VERSIONS}"
+
+          echo "Stock __versions:"
+          stat -c '%s bytes' "${STOCK_VERSIONS}"
+
+          echo
+          echo "=== Extract custom __versions ==="
+
+          rm -f "${CUSTOM_VERSIONS}"
+
+          "${LLVM_BIN}/llvm-objcopy" \
+            --dump-section "__versions=${CUSTOM_VERSIONS}" \
+            "${CUSTOM_WLAN}"
+
+          test -s "${CUSTOM_VERSIONS}"
+
+          echo "Custom __versions:"
+          stat -c '%s bytes' "${CUSTOM_VERSIONS}"
+
+          echo
+          echo "=== Direct stock/custom CRC comparison ==="
+
+          STOCK_VERSIONS="${STOCK_VERSIONS}" \
+          CUSTOM_VERSIONS="${CUSTOM_VERSIONS}" \
           SYMVERS="${SYMVERS}" \
+          REPORT="${REPORT}" \
           python3 - <<'PY'
           import os
-          import re
+          import struct
           import sys
 
-          mod_c_path = os.environ["WLAN_MOD_C"]
+          stock_path = os.environ["STOCK_VERSIONS"]
+          custom_path = os.environ["CUSTOM_VERSIONS"]
           symvers_path = os.environ["SYMVERS"]
+          report_path = os.environ["REPORT"]
 
-          wanted = {
+          REQUIRED = {
               "module_layout",
               "cfg80211_unlink_bss",
               "cfg80211_get_bss",
@@ -4929,242 +4976,348 @@ jobs:
               "cfg80211_sched_scan_results",
           }
 
-          with open(mod_c_path, "r", encoding="utf-8", errors="replace") as f:
-              text = f.read()
+          RECORD_SIZE = 64
+          NAME_OFFSET = 8
+          NAME_SIZE = 56
 
-          generated = {}
+          def parse_versions(path):
+              with open(path, "rb") as f:
+                  data = f.read()
 
-          pattern = re.compile(
-              r'\{\s*(0x[0-9a-fA-F]+)\s*,\s*"([^"]+)"\s*\}'
+              if not data:
+                  raise RuntimeError(
+                      f"{path}: empty __versions section"
+                  )
+
+              if len(data) % RECORD_SIZE != 0:
+                  raise RuntimeError(
+                      f"{path}: {len(data)} bytes is not "
+                      f"divisible by {RECORD_SIZE}"
+                  )
+
+              result = {}
+
+              for offset in range(
+                  0,
+                  len(data),
+                  RECORD_SIZE
+              ):
+                  crc = struct.unpack_from(
+                      "<Q",
+                      data,
+                      offset
+                  )[0] & 0xffffffff
+
+                  raw_name = data[
+                      offset + NAME_OFFSET:
+                      offset + NAME_OFFSET + NAME_SIZE
+                  ]
+
+                  name = raw_name.split(
+                      b"\0",
+                      1
+                  )[0].decode(
+                      "ascii",
+                      errors="strict"
+                  )
+
+                  if name:
+                      result[name] = crc
+
+              return result, len(data)
+
+          def parse_symvers(path):
+              result = {}
+
+              with open(
+                  path,
+                  "r",
+                  encoding="utf-8",
+                  errors="replace"
+              ) as f:
+                  for line in f:
+                      fields = line.rstrip("\n").split()
+
+                      if len(fields) < 2:
+                          continue
+
+                      try:
+                          crc = int(
+                              fields[0],
+                              16
+                          ) & 0xffffffff
+                      except ValueError:
+                          continue
+
+                      result[fields[1]] = crc
+
+              return result
+
+          stock, stock_size = parse_versions(
+              stock_path
           )
 
-          for match in pattern.finditer(text):
-              crc_text = match.group(1)
-              symbol = match.group(2)
+          custom, custom_size = parse_versions(
+              custom_path
+          )
 
-              if symbol in wanted:
-                  generated[symbol] = int(crc_text, 16) & 0xffffffff
-
-          symvers = {}
-
-          with open(symvers_path, "r", encoding="utf-8", errors="replace") as f:
-              for line in f:
-                  fields = line.rstrip("\n").split("\t")
-
-                  if len(fields) >= 2 and fields[1] in wanted:
-                      symvers[fields[1]] = int(fields[0], 16) & 0xffffffff
+          symvers = parse_symvers(
+              symvers_path
+          )
 
           print()
+          print("=" * 78)
+          print("QCACLD3 DIRECT STOCK VS CUSTOM ABI")
+          print("=" * 78)
+
           print(
-              f"{'SYMBOL':42} "
-              f"{'Module.symvers':18} "
-              f"{'wlan.mod.c':18}"
+              f"Stock __versions : {stock_size} bytes"
           )
-          print("-" * 82)
+
+          print(
+              f"Custom __versions: {custom_size} bytes"
+          )
+
+          print(
+              f"Stock symbols    : {len(stock)}"
+          )
+
+          print(
+              f"Custom symbols   : {len(custom)}"
+          )
+
+          print(
+              f"Module.symvers   : {len(symvers)}"
+          )
 
           failed = False
 
-          for symbol in sorted(wanted):
-              sym_crc = symvers.get(symbol)
-              gen_crc = generated.get(symbol)
+          print()
+          print("-" * 78)
+          print("REQUIRED SYMBOLS")
+          print("-" * 78)
 
-              if sym_crc is None:
+          report = []
+
+          for symbol in sorted(REQUIRED):
+
+              s = stock.get(symbol)
+              c = custom.get(symbol)
+              v = symvers.get(symbol)
+
+              if s is None:
                   print(
                       f"{symbol:42} "
-                      f"MISSING FROM Module.symvers"
+                      "STOCK MISSING"
                   )
                   failed = True
                   continue
 
-              if gen_crc is None:
+              if c is None:
                   print(
                       f"{symbol:42} "
-                      f"MISSING FROM wlan.mod.c"
+                      "CUSTOM MISSING"
                   )
                   failed = True
                   continue
+
+              s_text = f"0x{s:08x}"
+              c_text = f"0x{c:08x}"
+
+              v_text = (
+                  f"0x{v:08x}"
+                  if v is not None
+                  else "MISSING"
+              )
 
               print(
                   f"{symbol:42} "
-                  f"0x{sym_crc:08x}          "
-                  f"0x{gen_crc:08x}"
+                  f"stock={s_text} "
+                  f"custom={c_text} "
+                  f"symvers={v_text}"
               )
 
-              if sym_crc == gen_crc:
-                  print(f"  INTERNAL MATCH: {symbol}")
-              else:
-                  print(f"  INTERNAL MISMATCH: {symbol}")
+              if s != c:
+                  print(
+                      "  ERROR: STOCK != CUSTOM"
+                  )
                   failed = True
+
+              if v is None:
+                  print(
+                      "  ERROR: missing from Module.symvers"
+                  )
+                  failed = True
+
+              elif c != v:
+                  print(
+                      "  ERROR: CUSTOM != Module.symvers"
+                  )
+                  failed = True
+
+              if s == c and v == c:
+                  print(
+                      "  PASS: all three match"
+                  )
+
+              report.append(
+                  (
+                      symbol,
+                      s,
+                      c,
+                      v
+                  )
+              )
+
+          print()
+          print("-" * 78)
+          print("FULL COMMON-SYMBOL COMPARISON")
+          print("-" * 78)
+
+          common = (
+              set(stock)
+              & set(custom)
+          )
+
+          common_matches = 0
+          common_mismatches = 0
+
+          for symbol in sorted(common):
+
+              s = stock[symbol]
+              c = custom[symbol]
+
+              if s == c:
+                  common_matches += 1
+              else:
+                  common_mismatches += 1
+
+                  print(
+                      f"CRC MISMATCH: "
+                      f"{symbol}: "
+                      f"stock=0x{s:08x} "
+                      f"custom=0x{c:08x}"
+                  )
+
+          print()
+          print(
+              f"Common symbols    : {len(common)}"
+          )
+
+          print(
+              f"Common matches    : {common_matches}"
+          )
+
+          print(
+              f"Common mismatches : {common_mismatches}"
+          )
+
+          with open(
+              report_path,
+              "w",
+              encoding="utf-8"
+          ) as f:
+
+              f.write(
+                  "QCACLD3 DIRECT STOCK VS CUSTOM ABI REPORT\n"
+              )
+
+              f.write(
+                  "=" * 78 + "\n"
+              )
+
+              f.write(
+                  f"Stock __versions: {stock_size}\n"
+              )
+
+              f.write(
+                  f"Custom __versions: {custom_size}\n"
+              )
+
+              f.write(
+                  f"Stock symbols: {len(stock)}\n"
+              )
+
+              f.write(
+                  f"Custom symbols: {len(custom)}\n"
+              )
+
+              f.write(
+                  f"Common symbols: {len(common)}\n"
+              )
+
+              f.write(
+                  f"Common matches: {common_matches}\n"
+              )
+
+              f.write(
+                  f"Common mismatches: {common_mismatches}\n"
+              )
+
+              f.write("\nREQUIRED SYMBOLS\n")
+              f.write("-" * 78 + "\n")
+
+              for symbol, s, c, v in report:
+
+                  f.write(
+                      f"{symbol}: "
+                      f"stock=0x{s:08x} "
+                      f"custom=0x{c:08x} "
+                  )
+
+                  if v is None:
+                      f.write(
+                          "symvers=MISSING\n"
+                      )
+                  else:
+                      f.write(
+                          f"symvers=0x{v:08x}\n"
+                      )
+
+              f.write(
+                  "\nALL COMMON MISMATCHES\n"
+              )
+
+              f.write(
+                  "-" * 78 + "\n"
+              )
+
+              for symbol in sorted(common):
+
+                  if stock[symbol] != custom[symbol]:
+
+                      f.write(
+                          f"{symbol}: "
+                          f"stock=0x{stock[symbol]:08x} "
+                          f"custom=0x{custom[symbol]:08x}\n"
+                      )
 
           print()
 
-          if failed:
+          if failed or common_mismatches:
               print(
-                  "ERROR: Generated wlan.mod.c and Module.symvers "
-                  "do not agree."
+                  "FAIL: STOCK AND CUSTOM QCACLD3 "
+                  "ABI DO NOT MATCH."
               )
               print(
-                  "The CRC generation pipeline must be fixed before "
-                  "stock ABI comparison."
+                  "The build is intentionally stopped."
               )
               sys.exit(1)
 
           print(
-              "PASS: Generated wlan.mod.c and Module.symvers "
-              "use the same CRC values."
+              "PASS: STOCK AND CUSTOM QCACLD3 "
+              "ABI MATCH."
           )
           PY
 
-          echo
-          echo "============================================================"
-          echo "RAW __versions SECTION INFORMATION"
-          echo "============================================================"
-
-          WLAN_VERSIONS="${OUT_DIR}/wlan-custom-versions.bin"
-
-          "${LLVM_BIN}/llvm-objcopy" \
-            --dump-section "__versions=${WLAN_VERSIONS}" \
-            "${WLAN_MODULE}" 2>/dev/null || true
-
-          if [ -s "${WLAN_VERSIONS}" ]; then
-            echo "Extracted __versions:"
-            ls -lh "${WLAN_VERSIONS}"
-
-            echo
-            echo "First 128 bytes of __versions:"
-            "${LLVM_BIN}/llvm-objdump" \
-              -s \
-              -j __versions \
-              "${WLAN_MODULE}" | head -n 20 || true
-          else
-            echo "No basic __versions section was extracted."
-            echo "This may indicate extended module versioning."
-          fi
+          test -s "${REPORT}"
 
           echo
           echo "============================================================"
-          echo "EXPECTED STOCK CRCS"
-          echo "============================================================"
-
-          STOCK_MODULE_LAYOUT="0x7b99c8ef"
-          STOCK_CFG80211_UNLINK_BSS="0x84a490f1"
-          STOCK_CFG80211_GET_BSS="0xdaf98a07"
-          STOCK_CFG80211_INFORM_BSS_FRAME_DATA="0xf33203af"
-          STOCK_CFG80211_SCHED_SCAN_RESULTS="0x5f51e173"
-
-          echo "module_layout                  = ${STOCK_MODULE_LAYOUT}"
-          echo "cfg80211_unlink_bss            = ${STOCK_CFG80211_UNLINK_BSS}"
-          echo "cfg80211_get_bss               = ${STOCK_CFG80211_GET_BSS}"
-          echo "cfg80211_inform_bss_frame_data = ${STOCK_CFG80211_INFORM_BSS_FRAME_DATA}"
-          echo "cfg80211_sched_scan_results    = ${STOCK_CFG80211_SCHED_SCAN_RESULTS}"
-
-          echo
-          echo "============================================================"
-          echo "CUSTOM KERNEL CRCS FROM Module.symvers"
-          echo "============================================================"
-
-          get_crc() {
-            local symbol="$1"
-
-            awk -v wanted="${symbol}" '
-              $2 == wanted {
-                print $1
-                found=1
-                exit
-              }
-              END {
-                if (!found)
-                  exit 2
-              }
-            ' "${SYMVERS}"
-          }
-
-          CUSTOM_MODULE_LAYOUT="$(get_crc "module_layout")"
-          CUSTOM_CFG80211_UNLINK_BSS="$(get_crc "cfg80211_unlink_bss")"
-          CUSTOM_CFG80211_GET_BSS="$(get_crc "cfg80211_get_bss")"
-          CUSTOM_CFG80211_INFORM_BSS_FRAME_DATA="$(get_crc "cfg80211_inform_bss_frame_data")"
-          CUSTOM_CFG80211_SCHED_SCAN_RESULTS="$(get_crc "cfg80211_sched_scan_results")"
-
-          echo "module_layout                  = ${CUSTOM_MODULE_LAYOUT}"
-          echo "cfg80211_unlink_bss            = ${CUSTOM_CFG80211_UNLINK_BSS}"
-          echo "cfg80211_get_bss               = ${CUSTOM_CFG80211_GET_BSS}"
-          echo "cfg80211_inform_bss_frame_data = ${CUSTOM_CFG80211_INFORM_BSS_FRAME_DATA}"
-          echo "cfg80211_sched_scan_results    = ${CUSTOM_CFG80211_SCHED_SCAN_RESULTS}"
-
-          echo
-          echo "============================================================"
-          echo "STOCK -> CUSTOM CRC COMPARISON"
-          echo "============================================================"
-
-          : > "${REPORT}"
-
-          FAILED=0
-
-          check_crc() {
-            local symbol="$1"
-            local expected="$2"
-            local actual="$3"
-
-            printf '%-40s stock=%-12s custom=%-12s\n' \
-              "${symbol}" "${expected}" "${actual}" \
-              | tee -a "${REPORT}"
-
-            if [ "${actual}" = "${expected}" ]; then
-              echo "MATCH: ${symbol}" | tee -a "${REPORT}"
-            else
-              echo "MISMATCH: ${symbol}" | tee -a "${REPORT}"
-              FAILED=1
-            fi
-          }
-
-          check_crc \
-            "module_layout" \
-            "${STOCK_MODULE_LAYOUT}" \
-            "${CUSTOM_MODULE_LAYOUT}"
-
-          check_crc \
-            "cfg80211_unlink_bss" \
-            "${STOCK_CFG80211_UNLINK_BSS}" \
-            "${CUSTOM_CFG80211_UNLINK_BSS}"
-
-          check_crc \
-            "cfg80211_get_bss" \
-            "${STOCK_CFG80211_GET_BSS}" \
-            "${CUSTOM_CFG80211_GET_BSS}"
-
-          check_crc \
-            "cfg80211_inform_bss_frame_data" \
-            "${STOCK_CFG80211_INFORM_BSS_FRAME_DATA}" \
-            "${CUSTOM_CFG80211_INFORM_BSS_FRAME_DATA}"
-
-          check_crc \
-            "cfg80211_sched_scan_results" \
-            "${STOCK_CFG80211_SCHED_SCAN_RESULTS}" \
-            "${CUSTOM_CFG80211_SCHED_SCAN_RESULTS}"
-
-          echo
-          echo "============================================================"
-          echo "FINAL CRC RESULT"
-          echo "============================================================"
-
-          cat "${REPORT}"
-
-          if [ "${FAILED}" -ne 0 ]; then
-            echo
-            echo "ERROR: CUSTOM KERNEL ABI DOES NOT MATCH STOCK."
-            echo
-            echo "The CRC comparison completed after verifying that"
-            echo "Module.symvers and wlan.ko use the same representation."
-            echo
-            echo "The kernel build is intentionally stopped."
-            exit 1
-          fi
-
-          echo
-          echo "============================================================"
-          echo "QCACLD3 STOCK ABI MATCH PASSED"
+          echo "QCACLD3 DIRECT ABI CHECK PASSED"
           echo "============================================================"
         
+                
         
       - name: Verify kernel and NetHunter build outputs
         working-directory: kernel
