@@ -2199,6 +2199,84 @@ jobs:
 
           echo
           echo "=== Frame-injection deinitialization passed ==="
+
+
+
+      # ============================================================
+      # 32A. VERIFY QCACLD3 MODULE LIFECYCLE / STATE CLEANUP
+      # ============================================================
+
+      - name: Verify QCACLD3 module lifecycle cleanup
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MAIN_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+
+          test -f "${MAIN_C}"
+
+          echo "=== QCACLD3 WLAN state-device lifecycle ==="
+
+          echo
+          echo "--- CREATE ---"
+          grep -n -A12 -B5 \
+            'static int wlan_hdd_state_ctrl_param_create' \
+            "${MAIN_C}"
+
+          echo
+          echo "--- DESTROY ---"
+          grep -n -A12 -B5 \
+            'static void wlan_hdd_state_ctrl_param_destroy' \
+            "${MAIN_C}"
+
+          echo
+          echo "--- MODULE INIT/EXIT ---"
+          grep -n -A45 -B5 \
+            '__hdd_module_init' \
+            "${MAIN_C}" \
+            | head -n 100
+
+          grep -n -A30 -B5 \
+            '__hdd_module_exit' \
+            "${MAIN_C}" \
+            | head -n 80
+
+          echo
+          echo "=== Required cleanup calls ==="
+
+          grep -Fq \
+            'wlan_hdd_state_ctrl_param_destroy();' \
+            "${MAIN_C}"
+
+          grep -Fq \
+            'hdd_deinit();' \
+            "${MAIN_C}"
+
+          grep -Fq \
+            'pld_deinit();' \
+            "${MAIN_C}"
+
+          echo "QCACLD3 state-device destroy call: PRESENT"
+          echo "QCACLD3 HDD deinit call: PRESENT"
+          echo "QCACLD3 PLD deinit call: PRESENT"
+
+          echo
+          echo "=== Frame-injection lifecycle ==="
+
+          grep -Fq \
+            'hdd_init_frame_injection(adapter);' \
+            "${MAIN_C}"
+
+          grep -Fq \
+            'hdd_deinit_frame_injection(adapter);' \
+            "${MAIN_C}"
+
+          echo "Frame-injection init: PRESENT"
+          echo "Frame-injection deinit: PRESENT"
+
+          echo
+          echo "=== QCACLD3 lifecycle verification passed ==="
           
       # ============================================================
       # 33. APPLY 4.19 CAP_NET_RAW COMPATIBILITY
