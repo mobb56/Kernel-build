@@ -5600,6 +5600,150 @@ jobs:
 
           echo "Packaged modules: ${MODULE_COUNT}"
 
+                     echo
+          echo "=== Prepare Android vendor module runtime tree ==="
+
+          RUNTIME_DIR="${ARTIFACT_DIR}/runtime"
+          VENDOR_MODULE_DIR="${RUNTIME_DIR}/vendor/lib/modules"
+
+          rm -rf "${RUNTIME_DIR}"
+
+          mkdir -p "${VENDOR_MODULE_DIR}"
+
+          echo "Runtime module directory:"
+          echo "${VENDOR_MODULE_DIR}"
+
+          echo
+          echo "=== Install NetHunter modules into Android vendor path ==="
+
+          # Bluetooth / USB / NetHunter modules.
+          RUNTIME_MODULES=(
+            "net/bluetooth/bnep.ko"
+            "net/bluetooth/hidp/hidp.ko"
+            "drivers/bluetooth/hci_uart.ko"
+            "drivers/bluetooth/hci_vhci.ko"
+            "drivers/usb/serial/usbserial.ko"
+            "drivers/usb/serial/option.ko"
+            "drivers/usb/class/cdc-acm.ko"
+            "drivers/net/usb/usbnet.ko"
+            "drivers/net/usb/cdc_ether.ko"
+            "drivers/net/usb/cdc_ncm.ko"
+          )
+
+          for RELATIVE_MODULE in "${RUNTIME_MODULES[@]}"; do
+            SOURCE_MODULE="${OUT_DIR}/${RELATIVE_MODULE}"
+
+            if [ -f "${SOURCE_MODULE}" ]; then
+              cp -f \
+                "${SOURCE_MODULE}" \
+                "${VENDOR_MODULE_DIR}/$(basename "${RELATIVE_MODULE}")"
+
+              echo "Installed: $(basename "${RELATIVE_MODULE}")"
+            else
+              echo "Not built: ${RELATIVE_MODULE}"
+            fi
+          done
+
+          echo
+          echo "=== Install custom QCACLD3 WLAN module ==="
+
+          CUSTOM_WLAN="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
+          RUNTIME_WLAN="${VENDOR_MODULE_DIR}/qca_cld3_wlan.ko"
+
+          test -s "${CUSTOM_WLAN}"
+
+          cp -f \
+            "${CUSTOM_WLAN}" \
+            "${RUNTIME_WLAN}"
+
+          test -s "${RUNTIME_WLAN}"
+
+          echo "Custom QCACLD3 module installed as:"
+          echo "${RUNTIME_WLAN}"
+
+          echo
+          echo "=== Verify runtime WLAN module ==="
+
+          test -s "${RUNTIME_WLAN}"
+
+          "${LLVM_BIN}/llvm-readelf" -h "${RUNTIME_WLAN}" |
+            grep -E 'Class:|Data:|Machine:|Type:'
+
+          echo
+          echo "=== Runtime module inventory ==="
+
+          find "${VENDOR_MODULE_DIR}" \
+            -maxdepth 1 \
+            -type f \
+            -name '*.ko' \
+            -printf '%f\n' \
+            | sort
+
+          RUNTIME_MODULE_COUNT="$(
+            find "${VENDOR_MODULE_DIR}" \
+              -maxdepth 1 \
+              -type f \
+              -name '*.ko' \
+              | wc -l
+          )"
+
+          test "${RUNTIME_MODULE_COUNT}" -gt 0
+
+          echo
+          echo "Runtime modules prepared: ${RUNTIME_MODULE_COUNT}"
+
+          echo
+          echo "=== Verify custom WLAN is the runtime WLAN ==="
+
+          test -f "${VENDOR_MODULE_DIR}/qca_cld3_wlan.ko"
+
+          RUNTIME_WLAN_SHA256="$(
+            sha256sum "${VENDOR_MODULE_DIR}/qca_cld3_wlan.ko" |
+              awk '{print $1}'
+          )"
+
+          BUILD_WLAN_SHA256="$(
+            sha256sum "${CUSTOM_WLAN}" |
+              awk '{print $1}'
+          )"
+
+          test "${RUNTIME_WLAN_SHA256}" = "${BUILD_WLAN_SHA256}"
+
+          echo "Runtime WLAN SHA256 matches built custom wlan.ko."
+
+          echo
+          echo "=== Generate Android vendor module manifest ==="
+
+          find "${VENDOR_MODULE_DIR}" \
+            -maxdepth 1 \
+            -type f \
+            -name '*.ko' \
+            -printf '%f\n' \
+            | sort \
+            > "${RUNTIME_DIR}/vendor-modules.list"
+
+          test -s "${RUNTIME_DIR}/vendor-modules.list"
+
+          echo
+          echo "=== Generate runtime module checksums ==="
+
+          (
+            cd "${VENDOR_MODULE_DIR}"
+
+            find . \
+              -type f \
+              -name '*.ko' \
+              -print0 \
+              | sort -z \
+              | xargs -0 sha256sum
+
+          ) > "${RUNTIME_DIR}/vendor-modules.sha256"
+
+          test -s "${RUNTIME_DIR}/vendor-modules.sha256"
+
+          echo
+          echo "Android vendor module runtime tree prepared successfully."
+
           echo
           echo "=== Copy verification reports ==="
 
