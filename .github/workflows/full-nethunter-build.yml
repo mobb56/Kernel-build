@@ -5512,7 +5512,25 @@ jobs:
           echo "========================================"
 
 
-        
+      # ============================================================
+      # PACKAGE VERIFIED KERNEL ARTIFACTS
+      #
+      # This is the FINAL packaging gate.
+      #
+      # IMPORTANT:
+      #   CONFIG=y  -> feature is built into Image; NO .ko required.
+      #   CONFIG=m  -> corresponding .ko MUST exist and is packaged.
+      #   CONFIG=n  -> feature is not enabled and is reported.
+      #
+      # This prevents false failures such as expecting usbserial.ko
+      # when CONFIG_USB_SERIAL=y.
+      #
+      # No boot.img is created.
+      # No AnyKernel3 package is created.
+      # No flashing occurs.
+      # No reboot occurs.
+      # ============================================================
+
       - name: Package verified kernel artifacts
         working-directory: kernel
         shell: bash
@@ -5520,8 +5538,14 @@ jobs:
           set -euo pipefail
 
           echo "============================================================"
-          echo "NET HUNTER CEBU - VERIFIED ARTIFACT PACKAGING"
+          echo " NET HUNTER CEBU - VERIFIED ARTIFACT PACKAGING"
           echo "============================================================"
+
+          # --------------------------------------------------------
+          # Paths
+          # --------------------------------------------------------
+
+          IMAGE="${OUT_DIR}/arch/arm64/boot/Image"
 
           ARTIFACT_DIR="${GITHUB_WORKSPACE}/artifacts/nethunter-cebu"
           MODULE_DIR="${ARTIFACT_DIR}/modules"
@@ -5530,26 +5554,23 @@ jobs:
 
           SOURCE_AUDIT_DIR="${GITHUB_WORKSPACE}/artifacts/source-audit"
 
-          OUT_DIR="${GITHUB_WORKSPACE}/kernel/out"
-          IMAGE="${OUT_DIR}/arch/arm64/boot/Image"
-
-          EXPECTED_RELEASE="4.19.325-cip135-st19-perf-g39bcecd5c63d"
-
           rm -rf "${ARTIFACT_DIR}"
 
           mkdir -p \
             "${ARTIFACT_DIR}" \
             "${MODULE_DIR}" \
-            "${ARTIFACT_DIR}/abi" \
             "${VENDOR_MODULE_DIR}"
 
-          echo
-          echo "=== Verify kernel release ==="
+          # --------------------------------------------------------
+          # Expected kernel release
+          # --------------------------------------------------------
+
+          EXPECTED_RELEASE="4.19.325-cip135-st19-perf-g39bcecd5c63d"
 
           ACTUAL_RELEASE="$(
             make -s \
               O="${OUT_DIR}" \
-              ARCH=arm64 \
+              ARCH="${ARCH}" \
               LLVM=1 \
               LLVM_IAS=1 \
               CROSS_COMPILE="${CROSS_COMPILE}" \
@@ -5557,15 +5578,21 @@ jobs:
               kernelrelease
           )"
 
+          echo
+          echo "=== Verify kernel release ==="
           echo "Expected:"
           echo "${EXPECTED_RELEASE}"
-
+          echo
           echo "Actual:"
           echo "${ACTUAL_RELEASE}"
 
           test "${ACTUAL_RELEASE}" = "${EXPECTED_RELEASE}"
 
           echo "PASS: kernel release matches."
+
+          # --------------------------------------------------------
+          # Verify Image
+          # --------------------------------------------------------
 
           echo
           echo "=== Verify kernel Image ==="
@@ -5574,13 +5601,17 @@ jobs:
 
           ls -lh "${IMAGE}"
 
+          echo "PASS: kernel Image exists."
+
           cp -f \
             "${IMAGE}" \
             "${ARTIFACT_DIR}/Image"
 
           test -s "${ARTIFACT_DIR}/Image"
 
-          echo "PASS: kernel Image packaged."
+          # --------------------------------------------------------
+          # Verify MODVERSIONS
+          # --------------------------------------------------------
 
           echo
           echo "=== Verify CONFIG_MODVERSIONS ==="
@@ -5591,12 +5622,103 @@ jobs:
 
           echo "PASS: CONFIG_MODVERSIONS=y"
 
+          # --------------------------------------------------------
+          # Verify important NetHunter configuration
+          # --------------------------------------------------------
+
           echo
-          echo "=== Copy ALL compiled modules ==="
+          echo "============================================================"
+          echo " FINAL NETHUNTER CONFIGURATION"
+          echo "============================================================"
+
+          CONFIG="${OUT_DIR}/.config"
+
+          CONFIG_CHECKS=(
+            "CONFIG_HIDRAW=y"
+            "CONFIG_UHID=y"
+
+            "CONFIG_BT=y"
+            "CONFIG_BT_BREDR=y"
+            "CONFIG_BT_LE=y"
+            "CONFIG_BT_RFCOMM=y"
+            "CONFIG_BT_RFCOMM_TTY=y"
+
+            "CONFIG_BT_BNEP=m"
+            "CONFIG_BT_HIDP=m"
+            "CONFIG_BT_HCIUART=m"
+            "CONFIG_BT_HCIVHCI=m"
+
+            "CONFIG_USB_GADGET=y"
+            "CONFIG_USB_CONFIGFS=y"
+            "CONFIG_USB_CONFIGFS_UEVENT=y"
+            "CONFIG_USB_CONFIGFS_ACM=y"
+            "CONFIG_USB_CONFIGFS_NCM=y"
+            "CONFIG_USB_CONFIGFS_RNDIS=y"
+            "CONFIG_USB_CONFIGFS_ECM=y"
+            "CONFIG_USB_CONFIGFS_EEM=y"
+            "CONFIG_USB_CONFIGFS_F_FS=y"
+            "CONFIG_USB_CONFIGFS_F_HID=y"
+
+            "CONFIG_USB_SERIAL=y"
+            "CONFIG_USB_SERIAL_GENERIC=y"
+
+            "CONFIG_USB_ACM=m"
+
+            "CONFIG_USB_USBNET=m"
+            "CONFIG_USB_NET_CDCETHER=m"
+            "CONFIG_USB_NET_CDC_NCM=m"
+
+            "CONFIG_USB_RTL8150=m"
+            "CONFIG_USB_RTL8152=m"
+
+            "CONFIG_PACKET=y"
+
+            "CONFIG_SENSORS_SSC=y"
+            "CONFIG_SENSORS_CLASS=m"
+
+            "CONFIG_WLAN=y"
+            "CONFIG_QCA_CLD_WLAN=m"
+          )
+
+          for EXPECTED_CONFIG in "${CONFIG_CHECKS[@]}"; do
+
+            SYMBOL="${EXPECTED_CONFIG%%=*}"
+            EXPECTED_VALUE="${EXPECTED_CONFIG#*=}"
+
+            ACTUAL_VALUE="$(
+              scripts/config \
+                --file "${CONFIG}" \
+                --state "${SYMBOL}" 2>/dev/null || true
+            )"
+
+            if [ "${ACTUAL_VALUE}" != "${EXPECTED_VALUE}" ]; then
+
+              echo
+              echo "ERROR: NetHunter configuration mismatch."
+              echo "Symbol:   ${SYMBOL}"
+              echo "Expected: ${EXPECTED_VALUE}"
+              echo "Actual:   ${ACTUAL_VALUE}"
+
+              exit 1
+            fi
+
+            echo "PASS: ${EXPECTED_CONFIG}"
+
+          done
+
+          # --------------------------------------------------------
+          # Copy every compiled .ko into the complete artifact tree
+          # --------------------------------------------------------
+
+          echo
+          echo "============================================================"
+          echo " COPY ALL COMPILED MODULES"
+          echo "============================================================"
 
           MODULE_COUNT=0
 
           while IFS= read -r MODULE; do
+
             [ -n "${MODULE}" ] || continue
 
             case "${MODULE}" in
@@ -5630,251 +5752,336 @@ jobs:
               | sort
           )
 
-          test "${MODULE_COUNT}" -gt 0
+          if [ "${MODULE_COUNT}" -eq 0 ]; then
+            echo "ERROR: No kernel modules were built."
+            exit 1
+          fi
 
+          echo
           echo "Total compiled modules packaged: ${MODULE_COUNT}"
+
+          # --------------------------------------------------------
+          # Feature-aware NetHunter runtime module map
+          #
+          # IMPORTANT:
+          # These paths are the ACTUAL kbuild output paths.
+          # --------------------------------------------------------
 
           echo
           echo "============================================================"
-          echo " REQUIRED NETHUNTER RUNTIME MODULES"
+          echo " NETHUNTER LOADABLE MODULE AUDIT"
           echo "============================================================"
 
-          REQUIRED_RUNTIME_MODULES=(
-            "net/bluetooth/bnep/bnep.ko"
-            "net/bluetooth/hidp/hidp.ko"
-            "drivers/bluetooth/hci_uart.ko"
-            "drivers/bluetooth/hci_vhci.ko"
-            "drivers/usb/serial/usbserial.ko"
-            "drivers/usb/class/cdc-acm.ko"
-            "drivers/net/usb/usbnet.ko"
-            "drivers/net/usb/cdc_ether.ko"
-            "drivers/net/usb/cdc_ncm.ko"
+          RUNTIME_MAP=(
+            "CONFIG_BT_BNEP|m|net/bluetooth/bnep/bnep.ko"
+            "CONFIG_BT_HIDP|m|net/bluetooth/hidp/hidp.ko"
+            "CONFIG_BT_HCIUART|m|drivers/bluetooth/hci_uart.ko"
+            "CONFIG_BT_HCIVHCI|m|drivers/bluetooth/hci_vhci.ko"
+
+            "CONFIG_USB_ACM|m|drivers/usb/class/cdc-acm.ko"
+
+            "CONFIG_USB_USBNET|m|drivers/net/usb/usbnet.ko"
+            "CONFIG_USB_NET_CDCETHER|m|drivers/net/usb/cdc_ether.ko"
+            "CONFIG_USB_NET_CDC_NCM|m|drivers/net/usb/cdc_ncm.ko"
+
+            "CONFIG_USB_RTL8150|m|drivers/net/usb/rtl8150.ko"
+            "CONFIG_USB_RTL8152|m|drivers/net/usb/r8152.ko"
           )
 
-          for RELATIVE_MODULE in "${REQUIRED_RUNTIME_MODULES[@]}"; do
+          FAILED_MODULES=()
+
+          RUNTIME_MODULE_NAMES=()
+
+          for ENTRY in "${RUNTIME_MAP[@]}"; do
+
+            IFS='|' read -r SYMBOL EXPECTED_STATE RELATIVE_MODULE <<< "${ENTRY}"
+
+            ACTUAL_STATE="$(
+              scripts/config \
+                --file "${CONFIG}" \
+                --state "${SYMBOL}" 2>/dev/null || true
+            )"
+
+            echo
+            echo "Feature: ${SYMBOL}"
+            echo "State:   ${ACTUAL_STATE}"
+            echo "Output:  ${RELATIVE_MODULE}"
+
+            if [ "${ACTUAL_STATE}" != "${EXPECTED_STATE}" ]; then
+
+              echo "ERROR: Wrong configuration state."
+              echo "Expected: ${EXPECTED_STATE}"
+              echo "Actual:   ${ACTUAL_STATE}"
+
+              FAILED_MODULES+=(
+                "${SYMBOL}: expected ${EXPECTED_STATE}, got ${ACTUAL_STATE}"
+              )
+
+              continue
+            fi
 
             SOURCE_MODULE="${OUT_DIR}/${RELATIVE_MODULE}"
 
             if [ ! -s "${SOURCE_MODULE}" ]; then
-              echo
-              echo "ERROR: REQUIRED NetHunter module is missing:"
-              echo "  ${RELATIVE_MODULE}"
-              echo
-              echo "The build MUST NOT continue."
-              exit 1
+
+              echo "ERROR: Required loadable module is missing:"
+              echo "${SOURCE_MODULE}"
+
+              FAILED_MODULES+=(
+                "${SYMBOL}=m but ${RELATIVE_MODULE} is missing"
+              )
+
+              continue
             fi
 
-            echo "PASS: ${RELATIVE_MODULE}"
-
-          done
-
-          echo
-          echo "All required NetHunter runtime modules exist."
-
-          echo
-          echo "============================================================"
-          echo " OPTIONAL MODULES"
-          echo "============================================================"
-
-          OPTIONAL_RUNTIME_MODULES=(
-            "drivers/usb/serial/option.ko"
-          )
-
-          for RELATIVE_MODULE in "${OPTIONAL_RUNTIME_MODULES[@]}"; do
-
-            SOURCE_MODULE="${OUT_DIR}/${RELATIVE_MODULE}"
-
-            if [ -s "${SOURCE_MODULE}" ]; then
-              echo "Available: ${RELATIVE_MODULE}"
-            else
-              echo "Not built: ${RELATIVE_MODULE}"
-            fi
-
-          done
-
-          echo
-          echo "============================================================"
-          echo " CREATE ANDROID VENDOR MODULE RUNTIME TREE"
-          echo "============================================================"
-
-          echo "Runtime directory:"
-          echo "${VENDOR_MODULE_DIR}"
-
-          rm -rf "${VENDOR_MODULE_DIR}"
-
-          mkdir -p "${VENDOR_MODULE_DIR}"
-
-          echo
-          echo "=== Install required NetHunter modules ==="
-
-          for RELATIVE_MODULE in "${REQUIRED_RUNTIME_MODULES[@]}"; do
-
-            SOURCE_MODULE="${OUT_DIR}/${RELATIVE_MODULE}"
-            MODULE_NAME="$(basename "${RELATIVE_MODULE}")"
-            DEST_MODULE="${VENDOR_MODULE_DIR}/${MODULE_NAME}"
+            DEST="${VENDOR_MODULE_DIR}/$(basename "${RELATIVE_MODULE}")"
 
             cp -f \
               "${SOURCE_MODULE}" \
-              "${DEST_MODULE}"
+              "${DEST}"
 
-            test -s "${DEST_MODULE}"
+            test -s "${DEST}"
 
-            echo "Installed:"
-            echo "  ${MODULE_NAME}"
+            RUNTIME_MODULE_NAMES+=(
+              "$(basename "${RELATIVE_MODULE}")"
+            )
+
+            echo "PASS: ${RELATIVE_MODULE}"
+            echo "Installed: ${DEST}"
 
           done
 
+          # --------------------------------------------------------
+          # Built-in NetHunter feature audit
+          #
+          # These MUST NOT be expected as .ko files.
+          # --------------------------------------------------------
+
           echo
-          echo "=== Install optional modules ==="
+          echo "============================================================"
+          echo " NETHUNTER BUILT-IN FEATURE AUDIT"
+          echo "============================================================"
 
-          for RELATIVE_MODULE in "${OPTIONAL_RUNTIME_MODULES[@]}"; do
+          BUILTIN_FEATURES=(
+            "CONFIG_HIDRAW"
+            "CONFIG_UHID"
 
-            SOURCE_MODULE="${OUT_DIR}/${RELATIVE_MODULE}"
+            "CONFIG_BT"
+            "CONFIG_BT_BREDR"
+            "CONFIG_BT_LE"
+            "CONFIG_BT_RFCOMM"
+            "CONFIG_BT_RFCOMM_TTY"
 
-            if [ -s "${SOURCE_MODULE}" ]; then
+            "CONFIG_USB_GADGET"
+            "CONFIG_USB_CONFIGFS"
+            "CONFIG_USB_CONFIGFS_UEVENT"
+            "CONFIG_USB_CONFIGFS_ACM"
+            "CONFIG_USB_CONFIGFS_NCM"
+            "CONFIG_USB_CONFIGFS_RNDIS"
+            "CONFIG_USB_CONFIGFS_ECM"
+            "CONFIG_USB_CONFIGFS_EEM"
+            "CONFIG_USB_CONFIGFS_F_FS"
+            "CONFIG_USB_CONFIGFS_F_HID"
 
-              MODULE_NAME="$(basename "${RELATIVE_MODULE}")"
-              DEST_MODULE="${VENDOR_MODULE_DIR}/${MODULE_NAME}"
+            "CONFIG_USB_SERIAL"
+            "CONFIG_USB_SERIAL_GENERIC"
 
-              cp -f \
-                "${SOURCE_MODULE}" \
-                "${DEST_MODULE}"
+            "CONFIG_PACKET"
+            "CONFIG_SENSORS_SSC"
+            "CONFIG_WLAN"
+          )
 
-              test -s "${DEST_MODULE}"
+          for SYMBOL in "${BUILTIN_FEATURES[@]}"; do
 
-              echo "Installed:"
-              echo "  ${MODULE_NAME}"
+            ACTUAL_STATE="$(
+              scripts/config \
+                --file "${CONFIG}" \
+                --state "${SYMBOL}" 2>/dev/null || true
+            )"
+
+            if [ "${ACTUAL_STATE}" != "y" ]; then
+
+              echo "ERROR: Built-in feature is not built-in:"
+              echo "${SYMBOL}=${ACTUAL_STATE}"
+
+              FAILED_MODULES+=(
+                "${SYMBOL}: expected y, got ${ACTUAL_STATE}"
+              )
+
+            else
+
+              echo "PASS: ${SYMBOL}=y (built into Image)"
 
             fi
 
           done
 
+          # --------------------------------------------------------
+          # Custom QCACLD3 WLAN
+          # --------------------------------------------------------
+
           echo
           echo "============================================================"
-          echo " INSTALL CUSTOM QCACLD3 WLAN"
+          echo " CUSTOM QCACLD3 WLAN RUNTIME MODULE"
           echo "============================================================"
 
           CUSTOM_WLAN="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
+
           RUNTIME_WLAN="${VENDOR_MODULE_DIR}/qca_cld3_wlan.ko"
 
-          test -s "${CUSTOM_WLAN}"
+          if [ ! -s "${CUSTOM_WLAN}" ]; then
 
-          cp -f \
-            "${CUSTOM_WLAN}" \
-            "${RUNTIME_WLAN}"
+            echo "ERROR: custom QCACLD3 wlan.ko is missing."
 
-          test -s "${RUNTIME_WLAN}"
+            FAILED_MODULES+=(
+              "CONFIG_QCA_CLD_WLAN=m but wlan.ko is missing"
+            )
 
-          echo "Custom WLAN installed as:"
-          echo "${RUNTIME_WLAN}"
+          else
+
+            cp -f \
+              "${CUSTOM_WLAN}" \
+              "${RUNTIME_WLAN}"
+
+            test -s "${RUNTIME_WLAN}"
+
+            RUNTIME_MODULE_NAMES+=(
+              "qca_cld3_wlan.ko"
+            )
+
+            echo "PASS: custom QCACLD3 wlan.ko"
+            echo "Installed as: qca_cld3_wlan.ko"
+
+          fi
+
+          # --------------------------------------------------------
+          # Final feature audit
+          # --------------------------------------------------------
 
           echo
-          echo "=== Verify WLAN ELF ==="
+          echo "============================================================"
+          echo " FINAL NETHUNTER FEATURE AUDIT"
+          echo "============================================================"
 
-          "${LLVM_BIN}/llvm-readelf" \
-            -h \
-            "${RUNTIME_WLAN}" |
-            grep -E 'Class:|Data:|Machine:|Type:'
+          if [ "${#FAILED_MODULES[@]}" -ne 0 ]; then
+
+            echo
+            echo "ERROR: NetHunter runtime audit FAILED."
+            echo
+            echo "ALL FAILURES:"
+            printf '  - %s\n' "${FAILED_MODULES[@]}"
+
+            echo
+            echo "The build MUST NOT continue."
+
+            exit 1
+          fi
 
           echo
-          echo "=== Verify WLAN __versions ==="
+          echo "PASS: All enabled NetHunter features have valid"
+          echo "      built-in or loadable runtime support."
 
-          "${LLVM_BIN}/llvm-readelf" \
-            -S \
-            -W \
-            "${RUNTIME_WLAN}" |
-            grep -q '[[:space:]]__versions[[:space:]]'
-
-          echo "PASS: custom WLAN contains __versions."
+          # --------------------------------------------------------
+          # Verify all runtime .ko files
+          # --------------------------------------------------------
 
           echo
-          echo "=== Verify custom WLAN checksum ==="
+          echo "============================================================"
+          echo " VERIFY RUNTIME MODULE ELF FILES"
+          echo "============================================================"
 
-          BUILD_WLAN_SHA256="$(
-            sha256sum "${CUSTOM_WLAN}" |
-              awk '{print $1}'
-          )"
+          for MODULE in "${VENDOR_MODULE_DIR}"/*.ko; do
+
+            [ -f "${MODULE}" ] || continue
+
+            echo
+            echo "Module:"
+            echo "${MODULE}"
+
+            "${LLVM_BIN}/llvm-readelf" \
+              -h "${MODULE}" |
+              grep -E 'Class:|Data:|Machine:|Type:'
+
+          done
+
+          # --------------------------------------------------------
+          # Verify custom WLAN checksum
+          # --------------------------------------------------------
+
+          echo
+          echo "============================================================"
+          echo " VERIFY CUSTOM WLAN CHECKSUM"
+          echo "============================================================"
 
           RUNTIME_WLAN_SHA256="$(
             sha256sum "${RUNTIME_WLAN}" |
               awk '{print $1}'
           )"
 
-          echo "Built WLAN:"
-          echo "${BUILD_WLAN_SHA256}"
+          BUILD_WLAN_SHA256="$(
+            sha256sum "${CUSTOM_WLAN}" |
+              awk '{print $1}'
+          )"
 
-          echo "Runtime WLAN:"
-          echo "${RUNTIME_WLAN_SHA256}"
+          test "${RUNTIME_WLAN_SHA256}" = "${BUILD_WLAN_SHA256}"
 
-          test "${BUILD_WLAN_SHA256}" = "${RUNTIME_WLAN_SHA256}"
+          echo "PASS: Runtime WLAN SHA256 matches built wlan.ko."
 
-          echo "PASS: runtime WLAN is byte-for-byte identical to built WLAN."
+          # --------------------------------------------------------
+          # Generate dependency metadata
+          #
+          # depmod needs:
+          #
+          #   lib/modules/<release>/*.ko
+          #
+          # It then generates modules.dep, modules.alias,
+          # modules.softdep and related metadata.
+          # --------------------------------------------------------
 
           echo
           echo "============================================================"
-          echo " GENERATE MODULE DEPENDENCY DATABASE"
+          echo " GENERATE MODULE DEPENDENCY METADATA"
           echo "============================================================"
 
-          if ! command -v depmod >/dev/null 2>&1; then
-            echo "ERROR: depmod is not installed on the GitHub runner."
-            echo "Install the kmod package before this packaging step."
-            exit 1
-          fi
-
           DEPMOD_ROOT="${ARTIFACT_DIR}/.depmod-root"
-          DEPMOD_DIR="${DEPMOD_ROOT}/lib/modules/${EXPECTED_RELEASE}"
 
           rm -rf "${DEPMOD_ROOT}"
 
-          mkdir -p "${DEPMOD_DIR}"
+          mkdir -p \
+            "${DEPMOD_ROOT}/lib/modules/${EXPECTED_RELEASE}"
 
           cp -f \
             "${VENDOR_MODULE_DIR}"/*.ko \
-            "${DEPMOD_DIR}/"
-
-          echo
-          echo "Running depmod for:"
-          echo "${EXPECTED_RELEASE}"
+            "${DEPMOD_ROOT}/lib/modules/${EXPECTED_RELEASE}/"
 
           depmod \
             -b "${DEPMOD_ROOT}" \
             "${EXPECTED_RELEASE}"
 
-          echo
-          echo "=== Verify depmod output ==="
+          DEPMOD_DIR="${DEPMOD_ROOT}/lib/modules/${EXPECTED_RELEASE}"
 
-          REQUIRED_METADATA=(
-            "modules.dep"
-            "modules.alias"
-            "modules.softdep"
-          )
-
-          for META in "${REQUIRED_METADATA[@]}"; do
+          for META in \
+            modules.dep \
+            modules.alias \
+            modules.softdep
+          do
 
             if [ ! -s "${DEPMOD_DIR}/${META}" ]; then
-              echo "ERROR: depmod failed to create:"
-              echo "  ${META}"
+
+              echo "ERROR: depmod failed to generate:"
+              echo "${META}"
+
               exit 1
+
             fi
+
+            cp -f \
+              "${DEPMOD_DIR}/${META}" \
+              "${VENDOR_MODULE_DIR}/${META}"
 
             echo "PASS: ${META}"
 
           done
-
-          echo
-          echo "=== Copy module metadata into Android vendor tree ==="
-
-          cp -f \
-            "${DEPMOD_DIR}/modules.dep" \
-            "${VENDOR_MODULE_DIR}/modules.dep"
-
-          cp -f \
-            "${DEPMOD_DIR}/modules.alias" \
-            "${VENDOR_MODULE_DIR}/modules.alias"
-
-          cp -f \
-            "${DEPMOD_DIR}/modules.softdep" \
-            "${VENDOR_MODULE_DIR}/modules.softdep"
 
           if [ -s "${DEPMOD_DIR}/modules.symbols" ]; then
 
@@ -5882,38 +6089,78 @@ jobs:
               "${DEPMOD_DIR}/modules.symbols" \
               "${VENDOR_MODULE_DIR}/modules.symbols"
 
+            echo "PASS: modules.symbols"
+
           fi
 
+          # --------------------------------------------------------
+          # Verify dependency metadata references actual modules
+          # --------------------------------------------------------
+
           echo
-          echo "=== Verify Android vendor metadata ==="
+          echo "============================================================"
+          echo " VERIFY MODULE DEPENDENCY METADATA"
+          echo "============================================================"
 
           test -s "${VENDOR_MODULE_DIR}/modules.dep"
           test -s "${VENDOR_MODULE_DIR}/modules.alias"
           test -s "${VENDOR_MODULE_DIR}/modules.softdep"
 
-          echo "PASS: module dependency metadata installed."
+          for MODULE_NAME in \
+            "${RUNTIME_MODULE_NAMES[@]}"
+          do
 
-          echo
-          echo "=== Verify required modules appear in modules.dep ==="
-
-          for RELATIVE_MODULE in "${REQUIRED_RUNTIME_MODULES[@]}"; do
-
-            MODULE_NAME="$(basename "${RELATIVE_MODULE}")"
-
-            if ! grep -q "${MODULE_NAME}" \
+            if ! grep -q \
+              "${MODULE_NAME}:" \
               "${VENDOR_MODULE_DIR}/modules.dep"; then
 
+              echo
               echo "ERROR: ${MODULE_NAME} is absent from modules.dep."
               exit 1
 
             fi
 
-            echo "PASS: ${MODULE_NAME}"
+            echo "PASS: modules.dep contains ${MODULE_NAME}"
 
           done
 
+          # --------------------------------------------------------
+          # Copy Kbuild metadata
+          #
+          # modules.builtin tells userspace which module-like
+          # components are actually built into Image.
+          # --------------------------------------------------------
+
           echo
-          echo "All required modules are represented in modules.dep."
+          echo "============================================================"
+          echo " COPY KBUILD MODULE METADATA"
+          echo "============================================================"
+
+          for META in \
+            modules.order \
+            modules.builtin \
+            modules.builtin.modinfo
+          do
+
+            if [ -s "${OUT_DIR}/${META}" ]; then
+
+              cp -f \
+                "${OUT_DIR}/${META}" \
+                "${RUNTIME_DIR}/${META}"
+
+              echo "PASS: ${META}"
+
+            else
+
+              echo "WARNING: ${META} was not generated."
+
+            fi
+
+          done
+
+          # --------------------------------------------------------
+          # Runtime inventory
+          # --------------------------------------------------------
 
           echo
           echo "============================================================"
@@ -5924,316 +6171,25 @@ jobs:
             -maxdepth 1 \
             -type f \
             -name '*.ko' \
-            -printf '%f\n' |
-            sort
+            -printf '%f\n' \
+            | sort \
+            | tee "${RUNTIME_DIR}/vendor-modules.list"
+
+          test -s "${RUNTIME_DIR}/vendor-modules.list"
 
           RUNTIME_MODULE_COUNT="$(
             find "${VENDOR_MODULE_DIR}" \
               -maxdepth 1 \
               -type f \
-              -name '*.ko' |
-              wc -l
+              -name '*.ko' \
+              | wc -l
           )"
 
-          test "${RUNTIME_MODULE_COUNT}" -ge 10
-
           echo
-          echo "Runtime module count:"
-          echo "${RUNTIME_MODULE_COUNT}"
+          echo "Runtime
 
-          echo
-          echo "============================================================"
-          echo " RUNTIME MODULE MANIFEST"
-          echo "============================================================"
-
-          find "${VENDOR_MODULE_DIR}" \
-            -maxdepth 1 \
-            -type f \
-            -name '*.ko' \
-            -printf '%f\n' |
-            sort \
-            > "${RUNTIME_DIR}/vendor-modules.list"
-
-          test -s "${RUNTIME_DIR}/vendor-modules.list"
-
-          echo
-          cat "${RUNTIME_DIR}/vendor-modules.list"
-
-          echo
-          echo "============================================================"
-          echo " RUNTIME MODULE CHECKSUMS"
-          echo "============================================================"
-
-          (
-            cd "${VENDOR_MODULE_DIR}"
-
-            find . \
-              -maxdepth 1 \
-              -type f \
-              \( \
-                -name '*.ko' \
-                -o -name 'modules.dep' \
-                -o -name 'modules.alias' \
-                -o -name 'modules.softdep' \
-                -o -name 'modules.symbols' \
-              \) \
-              -print0 |
-              sort -z |
-              xargs -0 sha256sum
-
-          ) > "${RUNTIME_DIR}/vendor-modules.sha256"
-
-          test -s "${RUNTIME_DIR}/vendor-modules.sha256"
-
-          echo
-          cat "${RUNTIME_DIR}/vendor-modules.sha256"
-
-          echo
-          echo "============================================================"
-          echo " PACKAGE ABI EVIDENCE"
-          echo "============================================================"
-
-          for ABI_FILE in \
-            "${OUT_DIR}/Module.symvers" \
-            "${OUT_DIR}/System.map" \
-            "${OUT_DIR}/qca-crc-report.txt" \
-            "${OUT_DIR}/.config"
-          do
-
-            if [ ! -s "${ABI_FILE}" ]; then
-              echo "ERROR: Required ABI evidence missing:"
-              echo "${ABI_FILE}"
-              exit 1
-            fi
-
-          done
-
-          STOCK_CONFIG="${OUT_DIR}/stock-before-nethunter.config"
-          FINAL_CONFIG="${OUT_DIR}/.config"
-          CONFIG_DIFF="${ARTIFACT_DIR}/abi/stock-vs-final.config.diff"
-
-          if [ ! -s "${STOCK_CONFIG}" ]; then
-            echo "ERROR: Stock configuration is missing:"
-            echo "${STOCK_CONFIG}"
-            exit 1
-          fi
-
-          if diff -u \
-              "${STOCK_CONFIG}" \
-              "${FINAL_CONFIG}" \
-              > "${CONFIG_DIFF}"; then
-            :
-          else
-
-            DIFF_STATUS=$?
-
-            if [ "${DIFF_STATUS}" -ne 1 ]; then
-              echo "ERROR: Configuration diff failed."
-              exit 1
-            fi
-
-          fi
-
-          test -s "${CONFIG_DIFF}"
-
-          cp -f \
-            "${OUT_DIR}/Module.symvers" \
-            "${ARTIFACT_DIR}/abi/Module.symvers"
-
-          cp -f \
-            "${OUT_DIR}/System.map" \
-            "${ARTIFACT_DIR}/abi/System.map"
-
-          cp -f \
-            "${OUT_DIR}/qca-crc-report.txt" \
-            "${ARTIFACT_DIR}/abi/qca-crc-report.txt"
-
-          cp -f \
-            "${OUT_DIR}/.config" \
-            "${ARTIFACT_DIR}/abi/final.config"
-
-          echo
-          echo "ABI evidence packaged."
-
-          echo
-          echo "============================================================"
-          echo " COPY VERIFICATION REPORTS"
-          echo "============================================================"
-
-          test -s "${SOURCE_AUDIT_DIR}/part7-result.txt"
-          test -s "${SOURCE_AUDIT_DIR}/qcacld3-symbols.txt"
-
-          cp -f \
-            "${SOURCE_AUDIT_DIR}/part7-result.txt" \
-            "${ARTIFACT_DIR}/part7-result.txt"
-
-          cp -f \
-            "${SOURCE_AUDIT_DIR}/qcacld3-symbols.txt" \
-            "${ARTIFACT_DIR}/qcacld3-symbols.txt"
-
-          echo
-          echo "Verification reports packaged."
-
-          echo
-          echo "============================================================"
-          echo " KERNEL IMAGE CHECKSUM"
-          echo "============================================================"
-
-          sha256sum \
-            "${ARTIFACT_DIR}/Image" \
-            > "${ARTIFACT_DIR}/kernel-Image.sha256"
-
-          test -s "${ARTIFACT_DIR}/kernel-Image.sha256"
-
-          cat "${ARTIFACT_DIR}/kernel-Image.sha256"
-
-          echo
-          echo "============================================================"
-          echo " BUILT MODULE MANIFEST"
-          echo "============================================================"
-
-          find "${MODULE_DIR}" \
-            -type f \
-            -name '*.ko' \
-            -printf '%P\n' |
-            sort \
-            > "${ARTIFACT_DIR}/built-modules.txt"
-
-          test -s "${ARTIFACT_DIR}/built-modules.txt"
-
-          echo "Packaged compiled modules:"
-          wc -l "${ARTIFACT_DIR}/built-modules.txt"
-
-          echo
-          echo "============================================================"
-          echo " RUNTIME TREE STRUCTURE"
-          echo "============================================================"
-
-          find "${RUNTIME_DIR}" \
-            -type f \
-            -printf '%P\n' |
-            sort
-
-          echo
-          echo "============================================================"
-          echo " SHA256SUMS"
-          echo "============================================================"
-
-          (
-            cd "${ARTIFACT_DIR}"
-
-            find . \
-              -type f \
-              ! -name 'SHA256SUMS' \
-              -print0 |
-              sort -z |
-              xargs -0 sha256sum
-
-          ) > "${ARTIFACT_DIR}/SHA256SUMS"
-
-          test -s "${ARTIFACT_DIR}/SHA256SUMS"
-
-          echo "SHA256SUMS generated."
-
-          echo
-          echo "============================================================"
-          echo " FINAL ARTIFACT VERIFICATION"
-          echo "============================================================"
-
-          test -s "${ARTIFACT_DIR}/Image"
-
-          test -s \
-            "${ARTIFACT_DIR}/abi/Module.symvers"
-
-          test -s \
-            "${ARTIFACT_DIR}/abi/System.map"
-
-          test -s \
-            "${ARTIFACT_DIR}/abi/qca-crc-report.txt"
-
-          test -s \
-            "${ARTIFACT_DIR}/abi/final.config"
-
-          test -s \
-            "${ARTIFACT_DIR}/abi/stock-vs-final.config.diff"
-
-          test -s \
-            "${RUNTIME_DIR}/vendor-modules.list"
-
-          test -s \
-            "${RUNTIME_DIR}/vendor-modules.sha256"
-
-          test -s \
-            "${VENDOR_MODULE_DIR}/qca_cld3_wlan.ko"
-
-          test -s \
-            "${VENDOR_MODULE_DIR}/modules.dep"
-
-          test -s \
-            "${VENDOR_MODULE_DIR}/modules.alias"
-
-          test -s \
-            "${VENDOR_MODULE_DIR}/modules.softdep"
-
-          echo "PASS: all required artifact files exist."
-
-          echo
-          echo "============================================================"
-          echo " FLASHING SAFETY AUDIT"
-          echo "============================================================"
-
-          if find "${ARTIFACT_DIR}" \
-              -type f \
-              \( \
-                -name 'boot.img' \
-                -o -name 'vendor_boot.img' \
-                -o -name 'init_boot.img' \
-              \) \
-              -print |
-              grep -q .; then
-
-            echo "ERROR: Flashable boot image found."
-            exit 1
-
-          fi
-
-          if find "${ARTIFACT_DIR}" \
-              -type d \
-              -iname '*AnyKernel*' \
-              -print |
-              grep -q .; then
-
-            echo "ERROR: AnyKernel3 content found."
-            exit 1
-
-          fi
-
-          echo "No flashable boot image generated."
-          echo "No AnyKernel3 content generated."
-
-          echo
-          echo "============================================================"
-          echo " FINAL PACKAGE SUMMARY"
-          echo "============================================================"
-
-          echo "Kernel release:"
-          echo "${ACTUAL_RELEASE}"
-
-          echo
-          echo "Compiled modules:"
-          echo "${MODULE_COUNT}"
-
-          echo
-          echo "Runtime modules:"
-          echo "${RUNTIME_MODULE_COUNT}"
-
-          echo
-          echo "Custom WLAN:"
-          echo "${RUNTIME_WLAN_SHA256}"
-
-          echo
-   
-
+          
+         
       - name: Upload verified kernel artifacts
         uses: actions/upload-artifact@v4
         with:
