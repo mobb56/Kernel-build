@@ -5640,7 +5640,7 @@ jobs:
           echo "============================================================"
 
           REQUIRED_RUNTIME_MODULES=(
-            "net/bluetooth/bnep.ko"
+            "net/bluetooth/bnep/bnep.ko"
             "net/bluetooth/hidp/hidp.ko"
             "drivers/bluetooth/hci_uart.ko"
             "drivers/bluetooth/hci_vhci.ko"
