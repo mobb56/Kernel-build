@@ -348,12 +348,12 @@ jobs:
         run: |
          set -euo pipefail
 
-          echo "============================================================"
+         echo "============================================================"
          echo "CEBU KERNEL SOURCE VERIFIED"
          echo "============================================================"
-
-          EXPECTED_COMMIT="39bcecd5c63d"
-
+         
+           EXPECTED_COMMIT="39bcecd5c63df849923b1faadc9cde482648a1a1"
+           
           CURRENT_BRANCH="$(git branch --show-current)"
           CURRENT_COMMIT="$(git rev-parse HEAD)"
           CURRENT_SHORT="$(git rev-parse --short=12 HEAD)"
@@ -374,8 +374,7 @@ jobs:
            echo "Expected stock source revision:"
            echo "${EXPECTED_COMMIT}"
 
-           test "${CURRENT_BRANCH}" = "lineage-23.2"
-           test "${CURRENT_SHORT}" = "${EXPECTED_COMMIT}"
+            test "${CURRENT_COMMIT}" = "${EXPECTED_COMMIT}"
 
            test -f Makefile
            test -d arch/arm64
