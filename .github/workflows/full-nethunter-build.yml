@@ -2233,16 +2233,16 @@ jobs:
 
           echo
            echo "=== MODULE/COMPONENT LIFECYCLE ==="
+             grep -n -A20 -B8 \
+             'hdd_module_init' \
+               "${MAIN_C}" \
+             | sed -n '1,80p'
 
-            grep -n -A20 -B8 \
-            'hdd_module_init' \
-              "${MAIN_C}" \
-              | head -n 80
-
-            grep -n -A35 -B12 \
-           'hdd_module_component_deinit' \
-              "${MAIN_C}" \
-              | head -n 100
+             
+              grep -n -A35 -B12 \
+             'hdd_module_component_deinit' \
+             "${MAIN_C}" \
+              | sed -n '1,100p'
               
           echo
           echo "=== Required cleanup calls ==="
