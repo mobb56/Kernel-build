@@ -2206,6 +2206,7 @@ jobs:
       
       
 
+      
       # ============================================================
       # 33. FIX QCACLD3 MODULE LIFECYCLE CLEANUP
       # ============================================================
@@ -2223,13 +2224,21 @@ jobs:
           echo "=== QCACLD3 WLAN state-device lifecycle ==="
 
           echo
-          echo "--- All state-device create/destroy references ---"
+          echo "--- Current references ---"
 
           grep -n \
             -E \
             'wlan_hdd_state_ctrl_param_(create|destroy)\(\)' \
-            "${MAIN_C}" \
-            || true
+            "${MAIN_C}"
+
+          echo
+          echo "--- Current module-exit wrapper ---"
+
+          grep -n \
+            -A8 \
+            -B3 \
+            '_exit_hdd_module_exit' \
+            "${MAIN_C}"
 
           python3 - "${MAIN_C}" <<'PY'
           import pathlib
@@ -2239,336 +2248,191 @@ jobs:
           path = pathlib.Path(sys.argv[1])
           text = path.read_text()
 
-          CREATE = "wlan_hdd_state_ctrl_param_create();"
           DESTROY = "wlan_hdd_state_ctrl_param_destroy();"
           UNLOAD = "hdd_driver_unload();"
 
-          def find_function(source, pattern):
-              m = re.search(pattern, source)
-              if not m:
-                  return None
-
-              start = m.start()
-              brace = source.find("{", m.start())
-
-              if brace < 0:
-                  raise SystemExit(
-                      "ERROR: function opening brace not found."
-                  )
-
-              depth = 0
-              in_string = False
-              escape = False
-              in_line_comment = False
-              in_block_comment = False
-              i = brace
-
-              while i < len(source):
-                  c = source[i]
-                  n = source[i + 1] if i + 1 < len(source) else ""
-
-                  if in_line_comment:
-                      if c == "\n":
-                          in_line_comment = False
-                      i += 1
-                      continue
-
-                  if in_block_comment:
-                      if c == "*" and n == "/":
-                          in_block_comment = False
-                          i += 2
-                          continue
-                      i += 1
-                      continue
-
-                  if not in_string and c == "/" and n == "/":
-                      in_line_comment = True
-                      i += 2
-                      continue
-
-                  if not in_string and c == "/" and n == "*":
-                      in_block_comment = True
-                      i += 2
-                      continue
-
-                  if c == '"' and not escape:
-                      in_string = not in_string
-
-                  if in_string:
-                      if c == "\\" and not escape:
-                          escape = True
-                      else:
-                          escape = False
-                      i += 1
-                      continue
-
-                  if c == "{":
-                      depth += 1
-                  elif c == "}":
-                      depth -= 1
-                      if depth == 0:
-                          return start, i + 1
-
-                  i += 1
-
-              raise SystemExit(
-                  "ERROR: unmatched braces while locating function."
-              )
-
           # --------------------------------------------------------
-          # Locate component teardown.
+          # The cebu QCACLD3 source uses this exact module-exit
+          # wrapper:
+          #
+          #     static void _exit_hdd_module_exit(void)
+          #     {
+          #         hdd_driver_unload();
+          #     }
+          #
+          # Do not try to infer the function from hdd_component_deinit.
           # --------------------------------------------------------
-          component = find_function(
-              text,
-              r'\b(?:static\s+)?(?:void|int)\s+'
-              r'hdd_component_deinit\s*\([^)]*\)\s*\{'
+
+          exit_pattern = re.compile(
+              r'(?m)^static\s+void\s+_exit_hdd_module_exit\s*\(\s*void\s*\)\s*\{\s*'
+              r'hdd_driver_unload\(\);\s*'
+              r'\}'
           )
 
-          if not component:
+          match = exit_pattern.search(text)
+
+          if not match:
               raise SystemExit(
-                  "ERROR: hdd_component_deinit() not found."
+                  "ERROR: exact _exit_hdd_module_exit() wrapper "
+                  "was not found."
               )
 
-          component_start, component_end = component
-          component_body = text[component_start:component_end]
+          exit_block = match.group(0)
+
+          print("Found module-exit wrapper:")
+          print(exit_block)
 
           # --------------------------------------------------------
-          # Locate module exit.
+          # There must be exactly one existing destroy call.
           # --------------------------------------------------------
-          module_exit = find_function(
-              text,
-              r'\b(?:static\s+)?(?:void|int)\s+'
-              r'[A-Za-z0-9_]*hdd_module_exit\s*'
-              r'\([^)]*\)\s*\{'
-          )
-
-          if not module_exit:
-              raise SystemExit(
-                  "ERROR: hdd_module_exit() not found."
-              )
-
-          exit_start, exit_end = module_exit
-          exit_body = text[exit_start:exit_end]
 
           destroy_count = text.count(DESTROY)
 
-          print(f"Destroy-call count: {destroy_count}")
-          print(
-              "Destroy in component:",
-              DESTROY in component_body
-          )
-          print(
-              "Destroy in module exit:",
-              DESTROY in exit_body
-          )
+          if destroy_count != 1:
+              raise SystemExit(
+                  "ERROR: expected exactly one "
+                  f"{DESTROY!r}; found {destroy_count}."
+              )
 
           # --------------------------------------------------------
-          # CASE 1:
-          # Already correct.
+          # If already correct, leave it alone.
           # --------------------------------------------------------
-          if (
-              destroy_count == 1
-              and DESTROY in exit_body
-              and DESTROY not in component_body
-          ):
-              unload_pos = exit_body.find(UNLOAD)
-              destroy_pos = exit_body.find(DESTROY)
 
-              if unload_pos < 0:
-                  raise SystemExit(
-                      "ERROR: hdd_driver_unload() missing from "
-                      "module exit."
-                  )
+          if DESTROY in exit_block:
+              unload_pos = exit_block.find(UNLOAD)
+              destroy_pos = exit_block.find(DESTROY)
 
               if destroy_pos <= unload_pos:
                   raise SystemExit(
-                      "ERROR: state-device destroy is not after "
-                      "hdd_driver_unload()."
+                      "ERROR: destroy exists in module exit but "
+                      "is not after hdd_driver_unload()."
                   )
 
               print(
-                  "PASS: lifecycle cleanup is already in the "
-                  "correct module-exit location."
+                  "PASS: state-device destroy is already correctly "
+                  "located in module exit."
               )
               sys.exit(0)
 
           # --------------------------------------------------------
-          # CASE 2:
-          # Destroy still lives in component teardown.
-          # Move it to module exit.
+          # Remove the existing standalone destroy call wherever it
+          # currently lives.
+          #
+          # We have already verified there is exactly ONE call.
           # --------------------------------------------------------
-          if DESTROY in component_body:
 
-              if destroy_count != 1:
-                  raise SystemExit(
-                      "ERROR: expected exactly one destroy call "
-                      f"before moving it; found {destroy_count}."
-                  )
+          destroy_line = re.compile(
+              r'(?m)^[ \t]*'
+              r'wlan_hdd_state_ctrl_param_destroy\(\);'
+              r'[ \t]*\n?'
+          )
 
-              if DESTROY in exit_body:
-                  raise SystemExit(
-                      "ERROR: destroy exists in both component "
-                      "teardown and module exit."
-                  )
+          new_text, removed = destroy_line.subn("", text, count=1)
 
-              if UNLOAD not in exit_body:
-                  raise SystemExit(
-                      "ERROR: hdd_driver_unload() missing from "
-                      "module exit."
-                  )
-
-              # Remove only the standalone destroy line from
-              # component teardown.
-              component_new = re.sub(
-                  r'^[ \t]*wlan_hdd_state_ctrl_param_destroy\(\);[ \t]*\n?',
-                  "",
-                  component_body,
-                  count=1,
-                  flags=re.M
-              )
-
-              if component_new == component_body:
-                  raise SystemExit(
-                      "ERROR: found destroy reference in component "
-                      "but could not safely remove its line."
-                  )
-
-              text = (
-                  text[:component_start]
-                  + component_new
-                  + text[component_end:]
-              )
-
-              # Re-locate module exit because offsets changed.
-              module_exit = find_function(
-                  text,
-                  r'\b(?:static\s+)?(?:void|int)\s+'
-                  r'[A-Za-z0-9_]*hdd_module_exit\s*'
-                  r'\([^)]*\)\s*\{'
-              )
-
-              exit_start, exit_end = module_exit
-              exit_body = text[exit_start:exit_end]
-
-              if DESTROY in exit_body:
-                  raise SystemExit(
-                      "ERROR: destroy unexpectedly already present "
-                      "in module exit."
-                  )
-
-              replacement = (
-                  UNLOAD
-                  + "\n"
-                  + "    "
-                  + DESTROY
-              )
-
-              exit_body_new = exit_body.replace(
-                  UNLOAD,
-                  replacement,
-                  1
-              )
-
-              text = (
-                  text[:exit_start]
-                  + exit_body_new
-                  + text[exit_end:]
-              )
-
-              path.write_text(text)
-
-              print(
-                  "PASS: moved state-device destroy from "
-                  "component teardown to module exit."
+          if removed != 1:
+              raise SystemExit(
+                  "ERROR: could not safely remove the existing "
+                  "state-device destroy call."
               )
 
           # --------------------------------------------------------
-          # CASE 3:
-          # Destroy is missing or in an unexpected location.
-          # Do NOT invent a new cleanup call.
+          # Re-find the module-exit wrapper after removal.
           # --------------------------------------------------------
-          else:
-              print()
-              print(
-                  "ERROR: state-device destroy is not in "
-                  "hdd_component_deinit() or hdd_module_exit()."
+
+          match = exit_pattern.search(new_text)
+
+          if not match:
+              raise SystemExit(
+                  "ERROR: module-exit wrapper disappeared after "
+                  "removing destroy call."
               )
-              print()
-              print("Create references:")
-              for m in re.finditer(
-                  r'wlan_hdd_state_ctrl_param_create\(\);',
-                  text
-              ):
-                  print(f"  line {text.count(chr(10), 0, m.start()) + 1}")
 
-              print("Destroy references:")
-              for m in re.finditer(
-                  r'wlan_hdd_state_ctrl_param_destroy\(\);',
-                  text
-              ):
-                  print(f"  line {text.count(chr(10), 0, m.start()) + 1}")
+          exit_block = match.group(0)
 
-              raise SystemExit(1)
+          if UNLOAD not in exit_block:
+              raise SystemExit(
+                  "ERROR: hdd_driver_unload() missing from "
+                  "module-exit wrapper."
+              )
+
+          # --------------------------------------------------------
+          # Insert destroy immediately after hdd_driver_unload().
+          # --------------------------------------------------------
+
+          replacement = (
+              "static void _exit_hdd_module_exit(void)\n"
+              "{\n"
+              "    hdd_driver_unload();\n"
+              "    wlan_hdd_state_ctrl_param_destroy();\n"
+              "}"
+          )
+
+          new_text = (
+              new_text[:match.start()]
+              + replacement
+              + new_text[match.end():]
+          )
+
+          path.write_text(new_text)
 
           # --------------------------------------------------------
           # Final validation.
           # --------------------------------------------------------
-          module_exit = find_function(
-              text,
-              r'\b(?:static\s+)?(?:void|int)\s+'
-              r'[A-Za-z0-9_]*hdd_module_exit\s*'
-              r'\([^)]*\)\s*\{'
-          )
 
-          exit_start, exit_end = module_exit
-          exit_body = text[exit_start:exit_end]
+          final_text = path.read_text()
 
-          component = find_function(
-              text,
-              r'\b(?:static\s+)?(?:void|int)\s+'
-              r'hdd_component_deinit\s*\([^)]*\)\s*\{'
-          )
-
-          component_start, component_end = component
-          component_body = text[component_start:component_end]
-
-          if text.count(DESTROY) != 1:
+          if final_text.count(DESTROY) != 1:
               raise SystemExit(
-                  "ERROR: final source does not contain exactly "
-                  "one state-device destroy call."
+                  "ERROR: final source must contain exactly one "
+                  "state-device destroy call."
               )
 
-          if DESTROY not in exit_body:
+          final_match = exit_pattern.search(final_text)
+
+          if not final_match:
               raise SystemExit(
-                  "ERROR: final destroy call is not in module exit."
+                  "ERROR: final module-exit wrapper not found."
               )
 
-          if DESTROY in component_body:
+          final_exit = final_match.group(0)
+
+          unload_pos = final_exit.find(UNLOAD)
+          destroy_pos = final_exit.find(DESTROY)
+
+          if unload_pos < 0:
               raise SystemExit(
-                  "ERROR: final destroy call remains in "
-                  "hdd_component_deinit()."
+                  "ERROR: final module exit has no "
+                  "hdd_driver_unload()."
               )
 
-          if UNLOAD not in exit_body:
+          if destroy_pos < 0:
               raise SystemExit(
-                  "ERROR: hdd_driver_unload() missing from module exit."
+                  "ERROR: final module exit has no "
+                  "wlan_hdd_state_ctrl_param_destroy()."
               )
 
-          if exit_body.find(DESTROY) <= exit_body.find(UNLOAD):
+          if destroy_pos <= unload_pos:
               raise SystemExit(
-                  "ERROR: destroy does not occur after "
+                  "ERROR: destroy does not follow "
                   "hdd_driver_unload()."
               )
 
           print()
-          print("PASS: exactly one state-device destroy call.")
-          print("PASS: destroy is in module exit.")
-          print("PASS: destroy follows hdd_driver_unload().")
-          print("PASS: component teardown has no state-device destroy.")
+          print("PASS: moved state-device destroy to module exit.")
+          print("PASS: hdd_driver_unload() precedes destroy.")
           PY
 
           echo
-          echo "=== Final lifecycle references ==="
+          echo "=== Final module-exit wrapper ==="
+
+          grep -n \
+            -A8 \
+            -B3 \
+            '_exit_hdd_module_exit' \
+            "${MAIN_C}"
+
+          echo
+          echo "=== Final state-device references ==="
 
           grep -n \
             -E \
@@ -2576,11 +2440,7 @@ jobs:
             "${MAIN_C}"
 
           echo
-          echo "QCACLD3 module lifecycle cleanup PASSED."      
-              
-        
-
-         
+          echo "QCACLD3 module lifecycle cleanup PASSED."
 
 
       # ============================================================
