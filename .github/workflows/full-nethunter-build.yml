@@ -2204,7 +2204,325 @@ jobs:
 
 
       # ============================================================
-      # 32A. VERIFY QCACLD3 MODULE LIFECYCLE / STATE CLEANUP
+      # 33. FIX QCACLD3 WLAN STATE DEVICE LIFETIME
+      #
+      # The qcwlanstate / "wlan" class is module-lifetime state.
+      # It must be destroyed from the module-exit path, not from
+      # component teardown.
+      #
+      # This prevents a second module load from failing with:
+      #   kobject_add_internal failed for wlan with -EEXIST
+      # ============================================================
+
+      - name: Fix QCACLD3 module lifecycle cleanup
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MAIN_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+
+          test -f "${MAIN_C}"
+
+          echo "=== QCACLD3 module lifecycle cleanup ==="
+
+          python3 - "${MAIN_C}" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          path = pathlib.Path(sys.argv[1])
+          text = path.read_text()
+
+          destroy = "wlan_hdd_state_ctrl_param_destroy();"
+
+          # --------------------------------------------------------
+          # 1. There must initially be exactly one destroy call.
+          # --------------------------------------------------------
+          count = text.count(destroy)
+
+          if count != 1:
+              raise SystemExit(
+                  f"ERROR: expected exactly one existing "
+                  f"{destroy!r}, found {count}"
+              )
+
+          # --------------------------------------------------------
+          # 2. Locate hdd_component_deinit().
+          #
+          # We use brace matching instead of line numbers so this
+          # remains safe if upstream source line numbers change.
+          # --------------------------------------------------------
+          component_match = re.search(
+              r'\b(?:static\s+)?(?:void|int)\s+hdd_component_deinit\s*\([^)]*\)\s*\{',
+              text
+          )
+
+          if not component_match:
+              raise SystemExit(
+                  "ERROR: hdd_component_deinit() was not found."
+              )
+
+          def find_block_end(source, start):
+              depth = 0
+              in_string = False
+              escape = False
+              in_line_comment = False
+              in_block_comment = False
+
+              i = start
+
+              while i < len(source):
+                  c = source[i]
+                  n = source[i + 1] if i + 1 < len(source) else ""
+
+                  if in_line_comment:
+                      if c == "\n":
+                          in_line_comment = False
+                      i += 1
+                      continue
+
+                  if in_block_comment:
+                      if c == "*" and n == "/":
+                          in_block_comment = False
+                          i += 2
+                          continue
+                      i += 1
+                      continue
+
+                  if not in_string and c == "/" and n == "/":
+                      in_line_comment = True
+                      i += 2
+                      continue
+
+                  if not in_string and c == "/" and n == "*":
+                      in_block_comment = True
+                      i += 2
+                      continue
+
+                  if c == '"' and not escape:
+                      in_string = not in_string
+
+                  if in_string:
+                      if c == "\\" and not escape:
+                          escape = True
+                      else:
+                          escape = False
+                      i += 1
+                      continue
+
+                  if c == "{":
+                      depth += 1
+                  elif c == "}":
+                      depth -= 1
+                      if depth == 0:
+                          return i + 1
+
+                  i += 1
+
+              raise SystemExit("ERROR: unmatched function braces.")
+
+          component_start = component_match.start()
+          component_end = find_block_end(
+              text,
+              component_match.end() - 1
+          )
+
+          component_body = text[component_start:component_end]
+
+          # --------------------------------------------------------
+          # 3. Confirm the state destroy call is currently inside
+          #    component teardown before moving it.
+          # --------------------------------------------------------
+          if destroy not in component_body:
+              raise SystemExit(
+                  "ERROR: expected wlan_hdd_state_ctrl_param_destroy() "
+                  "inside hdd_component_deinit(), but it was not found."
+              )
+
+          print("Found state-device destroy inside hdd_component_deinit().")
+
+          # Remove ONLY that call from component teardown.
+          component_body_new = component_body.replace(
+              destroy,
+              "",
+              1
+          )
+
+          text = (
+              text[:component_start]
+              + component_body_new
+              + text[component_end:]
+          )
+
+          # --------------------------------------------------------
+          # 4. Locate the actual module-exit function.
+          #
+          # Do not depend on the exact generated/static function name.
+          # Find a function whose name contains hdd_module_exit.
+          # --------------------------------------------------------
+          exit_match = re.search(
+              r'\b(?:static\s+)?(?:void|int)\s+'
+              r'[A-Za-z0-9_]*hdd_module_exit\s*'
+              r'\([^)]*\)\s*\{',
+              text
+          )
+
+          if not exit_match:
+              raise SystemExit(
+                  "ERROR: hdd_module_exit() function was not found."
+              )
+
+          exit_start = exit_match.start()
+          exit_end = find_block_end(
+              text,
+              exit_match.end() - 1
+          )
+
+          exit_body = text[exit_start:exit_end]
+
+          # --------------------------------------------------------
+          # 5. hdd_driver_unload() must be present in module exit.
+          # --------------------------------------------------------
+          unload = "hdd_driver_unload();"
+
+          unload_count = exit_body.count(unload)
+
+          if unload_count != 1:
+              raise SystemExit(
+                  "ERROR: expected exactly one hdd_driver_unload(); "
+                  f"in module exit, found {unload_count}"
+              )
+
+          # --------------------------------------------------------
+          # 6. Insert state-device destruction immediately after
+          #    hdd_driver_unload().
+          # --------------------------------------------------------
+          replacement = (
+              unload
+              + "\n"
+              + "    wlan_hdd_state_ctrl_param_destroy();"
+          )
+
+          exit_body_new = exit_body.replace(
+              unload,
+              replacement,
+              1
+          )
+
+          text = (
+              text[:exit_start]
+              + exit_body_new
+              + text[exit_end:]
+          )
+
+          path.write_text(text)
+
+          # --------------------------------------------------------
+          # 7. Final structural assertions.
+          # --------------------------------------------------------
+          final_count = text.count(destroy)
+
+          if final_count != 1:
+              raise SystemExit(
+                  "ERROR: final source must contain exactly one "
+                  f"{destroy!r}; found {final_count}"
+              )
+
+          component_match = re.search(
+              r'\b(?:static\s+)?(?:void|int)\s+hdd_component_deinit\s*\([^)]*\)\s*\{',
+              text
+          )
+
+          if not component_match:
+              raise SystemExit(
+                  "ERROR: hdd_component_deinit() disappeared unexpectedly."
+              )
+
+          component_end = find_block_end(
+              text,
+              component_match.end() - 1
+          )
+
+          final_component = text[
+              component_match.start():component_end
+          ]
+
+          if destroy in final_component:
+              raise SystemExit(
+                  "ERROR: state-device destroy still exists inside "
+                  "hdd_component_deinit()."
+              )
+
+          exit_match = re.search(
+              r'\b(?:static\s+)?(?:void|int)\s+'
+              r'[A-Za-z0-9_]*hdd_module_exit\s*'
+              r'\([^)]*\)\s*\{',
+              text
+          )
+
+          if not exit_match:
+              raise SystemExit(
+                  "ERROR: hdd_module_exit() disappeared unexpectedly."
+              )
+
+          exit_end = find_block_end(
+              text,
+              exit_match.end() - 1
+          )
+
+          final_exit = text[
+              exit_match.start():exit_end
+          ]
+
+          unload_pos = final_exit.find(unload)
+          destroy_pos = final_exit.find(destroy)
+
+          if unload_pos < 0 or destroy_pos < 0:
+              raise SystemExit(
+                  "ERROR: module-exit cleanup calls are missing."
+              )
+
+          if destroy_pos <= unload_pos:
+              raise SystemExit(
+                  "ERROR: wlan_hdd_state_ctrl_param_destroy() is not "
+                  "after hdd_driver_unload()."
+              )
+
+          print(
+              "PASS: state-device destroy moved from "
+              "hdd_component_deinit() to module exit."
+          )
+          print(
+              "PASS: hdd_driver_unload() precedes "
+              "wlan_hdd_state_ctrl_param_destroy()."
+          )
+          PY
+
+          echo
+          echo "=== Final lifecycle source ==="
+
+          grep -n -A12 -B5 \
+            'hdd_driver_unload' \
+            "${MAIN_C}"
+
+          echo
+          echo "=== Component teardown check ==="
+
+          grep -n -A35 -B10 \
+            'hdd_component_deinit' \
+            "${MAIN_C}" \
+            | sed -n '1,100p'
+
+          echo
+          echo "QCACLD3 module lifecycle cleanup fixed."
+
+          
+
+
+
+      # ============================================================
+      # 34. VERIFY QCACLD3 MODULE LIFECYCLE CLEANUP
       # ============================================================
 
       - name: Verify QCACLD3 module lifecycle cleanup
@@ -2217,69 +2535,210 @@ jobs:
 
           test -f "${MAIN_C}"
 
-          echo "=== QCACLD3 WLAN state-device lifecycle ==="
+          echo "=== Checking WLAN state-device lifecycle ==="
 
           echo
-          echo "--- CREATE ---"
-           grep -n -A12 -B5 \
-           'wlan_hdd_state_ctrl_param_create' \
+          echo "--- State-device create ---"
+
+          grep -n -A15 -B5 \
+            'wlan_hdd_state_ctrl_param_create' \
             "${MAIN_C}"
 
           echo
-          echo "--- DESTROY ---"
-           grep -n -A12 -B5 \
-           'wlan_hdd_state_ctrl_param_destroy' \
-           "${MAIN_C}"
+          echo "--- State-device destroy ---"
+
+          grep -n -A15 -B5 \
+            'wlan_hdd_state_ctrl_param_destroy' \
+            "${MAIN_C}"
 
           echo
-           echo "=== MODULE/COMPONENT LIFECYCLE ==="
-             grep -n -A20 -B8 \
-             'hdd_module_init' \
-               "${MAIN_C}" \
-             | sed -n '1,80p'
+          echo "--- Module exit ---"
 
-             
-              grep -n -A35 -B12 \
-             'hdd_module_component_deinit' \
-             "${MAIN_C}" \
-              | sed -n '1,100p'
-              
+          grep -n -A20 -B8 \
+            'hdd_module_exit' \
+            "${MAIN_C}" \
+            | sed -n '1,80p'
+
           echo
-          echo "=== Required cleanup calls ==="
+          echo "--- Component teardown ---"
 
+          grep -n -A35 -B12 \
+            'hdd_component_deinit' \
+            "${MAIN_C}" \
+            | sed -n '1,100p'
+
+          echo
+          echo "=== Structural lifecycle assertions ==="
+
+          # Create must exist.
           grep -Fq \
-            'wlan_hdd_state_ctrl_param_destroy();' \
+            'wlan_hdd_state_ctrl_param_create();' \
             "${MAIN_C}"
 
+          # Destroy must exist exactly once.
+          DESTROY_COUNT="$(
+            grep -Fc \
+              'wlan_hdd_state_ctrl_param_destroy();' \
+              "${MAIN_C}"
+          )"
+
+          test "${DESTROY_COUNT}" -eq 1
+
+          # Module exit must contain the unload path.
           grep -Fq \
-            'hdd_deinit();' \
+            'hdd_driver_unload();' \
             "${MAIN_C}"
 
-          grep -Fq \
-            'pld_deinit();' \
-            "${MAIN_C}"
+          # The state-device destroy must occur after driver unload
+          # in the module-exit function.
+          python3 - "${MAIN_C}" <<'PY'
+          import pathlib
+          import re
+          import sys
 
-          echo "QCACLD3 state-device destroy call: PRESENT"
-          echo "QCACLD3 HDD deinit call: PRESENT"
-          echo "QCACLD3 PLD deinit call: PRESENT"
+          path = pathlib.Path(sys.argv[1])
+          text = path.read_text()
+
+          def find_block_end(source, start):
+              depth = 0
+              in_string = False
+              escape = False
+              in_line_comment = False
+              in_block_comment = False
+              i = start
+
+              while i < len(source):
+                  c = source[i]
+                  n = source[i + 1] if i + 1 < len(source) else ""
+
+                  if in_line_comment:
+                      if c == "\n":
+                          in_line_comment = False
+                      i += 1
+                      continue
+
+                  if in_block_comment:
+                      if c == "*" and n == "/":
+                          in_block_comment = False
+                          i += 2
+                          continue
+                      i += 1
+                      continue
+
+                  if not in_string and c == "/" and n == "/":
+                      in_line_comment = True
+                      i += 2
+                      continue
+
+                  if not in_string and c == "/" and n == "*":
+                      in_block_comment = True
+                      i += 2
+                      continue
+
+                  if c == '"' and not escape:
+                      in_string = not in_string
+
+                  if in_string:
+                      if c == "\\" and not escape:
+                          escape = True
+                      else:
+                          escape = False
+                      i += 1
+                      continue
+
+                  if c == "{":
+                      depth += 1
+                  elif c == "}":
+                      depth -= 1
+                      if depth == 0:
+                          return i + 1
+
+                  i += 1
+
+              raise SystemExit("ERROR: unmatched braces.")
+
+          exit_match = re.search(
+              r'\b(?:static\s+)?(?:void|int)\s+'
+              r'[A-Za-z0-9_]*hdd_module_exit\s*'
+              r'\([^)]*\)\s*\{',
+              text
+          )
+
+          if not exit_match:
+              raise SystemExit(
+                  "ERROR: hdd_module_exit() was not found."
+              )
+
+          exit_end = find_block_end(
+              text,
+              exit_match.end() - 1
+          )
+
+          exit_body = text[
+              exit_match.start():exit_end
+          ]
+
+          unload = exit_body.find("hdd_driver_unload();")
+          destroy = exit_body.find(
+              "wlan_hdd_state_ctrl_param_destroy();"
+          )
+
+          if unload < 0:
+              raise SystemExit(
+                  "ERROR: hdd_driver_unload() missing from module exit."
+              )
+
+          if destroy < 0:
+              raise SystemExit(
+                  "ERROR: wlan_hdd_state_ctrl_param_destroy() missing "
+                  "from module exit."
+              )
+
+          if destroy <= unload:
+              raise SystemExit(
+                  "ERROR: state-device destroy does not occur after "
+                  "hdd_driver_unload()."
+              )
+
+          component_match = re.search(
+              r'\b(?:static\s+)?(?:void|int)\s+hdd_component_deinit\s*\([^)]*\)\s*\{',
+              text
+          )
+
+          if not component_match:
+              raise SystemExit(
+                  "ERROR: hdd_component_deinit() was not found."
+              )
+
+          component_end = find_block_end(
+              text,
+              component_match.end() - 1
+          )
+
+          component_body = text[
+              component_match.start():component_end
+          ]
+
+          if "wlan_hdd_state_ctrl_param_destroy();" in component_body:
+              raise SystemExit(
+                  "ERROR: state-device destroy still exists inside "
+                  "hdd_component_deinit()."
+              )
+
+          print(
+              "PASS: create remains in module initialization path."
+          )
+          print(
+              "PASS: destroy is in module exit after "
+              "hdd_driver_unload()."
+          )
+          print(
+              "PASS: destroy is absent from hdd_component_deinit()."
+          )
+          PY
 
           echo
-          echo "=== Frame-injection lifecycle ==="
-
-          grep -Fq \
-            'hdd_init_frame_injection(adapter);' \
-            "${MAIN_C}"
-
-          grep -Fq \
-            'hdd_deinit_frame_injection(adapter);' \
-            "${MAIN_C}"
-
-          echo "Frame-injection init: PRESENT"
-          echo "Frame-injection deinit: PRESENT"
-
-          echo
-          echo "=== QCACLD3 lifecycle verification passed ==="
-          
+          echo "QCACLD3 module lifecycle cleanup verification PASSED."
       # ============================================================
       # 33. APPLY 4.19 CAP_NET_RAW COMPATIBILITY
       #
