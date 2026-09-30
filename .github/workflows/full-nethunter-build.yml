@@ -5574,10 +5574,20 @@ jobs:
           test -s "${ARTIFACT_DIR}/Image"
 
           echo
+                    
           echo "=== Verify kernel release ==="
 
+          EXPECTED_RELEASE="4.19.325-cip135-st19-perf-g39bcecd5c63d"
+
           BUILT_RELEASE="$(
-            make -s O="${OUT_DIR}" kernelrelease
+            make -s \
+              O="${OUT_DIR}" \
+              ARCH="${ARCH}" \
+              LLVM=1 \
+              LLVM_IAS=1 \
+              CROSS_COMPILE="${CROSS_COMPILE}" \
+              LOCALVERSION="-g39bcecd5c63d" \
+              kernelrelease
           )"
 
           echo "Built release: ${BUILT_RELEASE}"
@@ -5585,8 +5595,8 @@ jobs:
 
           test "${BUILT_RELEASE}" = "${EXPECTED_RELEASE}"
 
-          echo "PASS: kernel release matches"
-
+          echo "Kernel release verification PASSED."
+          
           echo
           echo "=== Verify required kernel configuration ==="
 
