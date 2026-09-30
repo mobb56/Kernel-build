@@ -297,13 +297,15 @@ jobs:
 
           rm -rf kernel
 
-          git clone \
-            --branch "${KERNEL_BRANCH}" \
-            --single-branch \
-            "${KERNEL_REPO}" \
-            kernel
+           git clone \
+             --branch "${KERNEL_BRANCH}" \
+             --single-branch \
+              "${KERNEL_REPO}" \
+               kernel
 
-          cd kernel
+               cd kernel
+
+            git checkout 39bcecd5c63df849923b1faadc9cde482648a1a1
 
           echo
           echo "============================================================"
