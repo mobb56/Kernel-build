@@ -2232,17 +2232,18 @@ jobs:
            "${MAIN_C}"
 
           echo
-          echo "--- MODULE INIT/EXIT ---"
-          grep -n -A45 -B5 \
-            '__hdd_module_init' \
-            "${MAIN_C}" \
-            | head -n 100
+           echo "=== MODULE/COMPONENT LIFECYCLE ==="
 
-          grep -n -A30 -B5 \
-            '__hdd_module_exit' \
-            "${MAIN_C}" \
-            | head -n 80
+            grep -n -A20 -B8 \
+            'hdd_module_init' \
+              "${MAIN_C}" \
+              | head -n 80
 
+            grep -n -A35 -B12 \
+           'hdd_module_component_deinit' \
+              "${MAIN_C}" \
+              | head -n 100
+              
           echo
           echo "=== Required cleanup calls ==="
 
