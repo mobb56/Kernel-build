@@ -2221,15 +2221,15 @@ jobs:
 
           echo
           echo "--- CREATE ---"
-          grep -n -A12 -B5 \
-            'static int wlan_hdd_state_ctrl_param_create' \
+           grep -n -A12 -B5 \
+           'wlan_hdd_state_ctrl_param_create' \
             "${MAIN_C}"
 
           echo
           echo "--- DESTROY ---"
-          grep -n -A12 -B5 \
-            'static void wlan_hdd_state_ctrl_param_destroy' \
-            "${MAIN_C}"
+           grep -n -A12 -B5 \
+           'wlan_hdd_state_ctrl_param_destroy' \
+           "${MAIN_C}"
 
           echo
           echo "--- MODULE INIT/EXIT ---"
