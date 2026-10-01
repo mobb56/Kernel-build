@@ -5739,7 +5739,7 @@ jobs:
           }
 
           install_runtime_module \
-            "net/bluetooth/bnep.ko" \
+            "net/bluetooth/bnep/bnep.ko" \
             "bnep.ko"
 
           install_runtime_module \
