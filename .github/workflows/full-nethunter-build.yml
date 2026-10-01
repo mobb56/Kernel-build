@@ -5677,17 +5677,17 @@ jobs:
           echo
           echo "=== Verify required NetHunter module files ==="
 
-          REQUIRED_MODULES=(
-            "net/bluetooth/bnep.ko"
-            "net/bluetooth/hidp/hidp.ko"
-            "drivers/bluetooth/hci_uart.ko"
-            "drivers/bluetooth/hci_vhci.ko"
-            "drivers/usb/class/cdc-acm.ko"
-            "drivers/net/usb/usbnet.ko"
-            "drivers/net/usb/cdc_ether.ko"
-            "drivers/net/usb/cdc_ncm.ko"
-            "drivers/staging/qcacld-3.0/wlan.ko"
-          )
+           REQUIRED_MODULES=(
+                  "net/bluetooth/bnep/bnep.ko"
+                  "net/bluetooth/hidp/hidp.ko"
+                  "drivers/bluetooth/hci_uart.ko"
+                  "drivers/bluetooth/hci_vhci.ko"
+                  "drivers/usb/class/cdc-acm.ko"
+                  "drivers/net/usb/usbnet.ko"
+                  "drivers/net/usb/cdc_ether.ko"
+                  "drivers/net/usb/cdc_ncm.ko"
+                  "drivers/staging/qcacld-3.0/wlan.ko"
+              )
 
           for RELATIVE_MODULE in "${REQUIRED_MODULES[@]}"; do
             SOURCE_MODULE="${OUT_DIR}/${RELATIVE_MODULE}"
