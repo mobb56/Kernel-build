@@ -6297,44 +6297,30 @@ jobs:
 
 
 
-      - name: Inspect compiled injection call relocations
+      - name: Locate injection module and tools
         shell: bash
         run: |
-          set -euxo pipefail
+          echo "=== LOCATE WLAN MODULE ==="
+          find "${OUT_DIR}" -name "wlan.ko" -type f -print 2>/dev/null || true
 
-          MOD="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
-
-          echo "=== WLAN MODULE ==="
-          test -f "$MOD"
-          ls -lh "$MOD"
+          echo
+          echo "=== LLVM TOOLS ==="
+          command -v llvm-readelf || true
+          command -v llvm-objdump || true
+          ls -l "${LLVM_DIR}/bin/llvm-readelf" 2>/dev/null || true
+          ls -l "${LLVM_DIR}/bin/llvm-objdump" 2>/dev/null || true
 
           echo
           echo "=== INJECTION SYMBOLS ==="
-          llvm-readelf -Ws "$MOD" 2>/dev/null |
-            grep -E \
-            'hdd_injection_create_debugfs_entries|hdd_injection_init_debug_interfaces|hdd_init_frame_injection' \
-            || true
+          MOD="$(find "${OUT_DIR}" -name "wlan.ko" -type f -print -quit 2>/dev/null || true)"
 
-          echo
-          echo "=== ALL TEXT RELOCATIONS NEAR INJECTION FUNCTIONS ==="
-          llvm-readelf -r "$MOD" 2>/dev/null |
-            grep -E \
-            '9dd|9de|9df|hdd_injection' \
-            || true
-
-          echo
-          echo "=== DISASSEMBLY OF CREATE DEBUGFS FUNCTION ==="
-          llvm-objdump -dr "$MOD" 2>/dev/null |
-            grep -A80 -B5 \
-            '<hdd_injection_create_debugfs_entries>' \
-            || true
-
-          echo
-          echo "=== DISASSEMBLY OF DEBUG INTERFACE INITIALIZER ==="
-          llvm-objdump -dr "$MOD" 2>/dev/null |
-            grep -A120 -B5 \
-            '<hdd_injection_init_debug_interfaces>' \
-            || true
+          if [ -n "$MOD" ]; then
+            echo "Using: $MOD"
+            "${LLVM_DIR}/bin/llvm-readelf" -Ws "$MOD" 2>/dev/null || true
+              grep -E 'hdd_injection_create_debugfs_entries|hdd_injection_init_debug_interfaces|hdd_init_frame_injection' || true
+          else
+            echo "wlan.ko not found"
+          fi
 
 
 
