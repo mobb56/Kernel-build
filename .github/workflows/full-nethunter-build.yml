@@ -5143,64 +5143,56 @@ jobs:
         run: |
           set -euxo pipefail
 
-          echo "=========================================="
-          echo " COMPILED QCACLD3 MODULE INSPECTION"
-          echo "=========================================="
+          echo "========================================"
+          echo "COMPILED QCACLD3 MODULE INSPECTION"
+          echo "========================================"
 
           echo
-          echo "=== SEARCHING FOR FINAL WLAN MODULE ==="
+          echo "=== SEARCHING FOR WLAN MODULE ==="
 
-          WLAN_KO="$(find kernel/out -type f \
-            \( -name 'wlan.ko' -o -name 'qca_cld3_wlan.ko' \) \
-            -print -quit 2>/dev/null || true)"
+          WLAN_KO="$(
+            find "${OUT_DIR}" -type f \
+              \( -name 'wlan.ko' -o -name 'qca_cld3_wlan.ko' \) \
+              -print | head -n 1
+          )"
 
           if [ -z "${WLAN_KO}" ]; then
-            echo "ERROR: Final WLAN module was not found."
-
+            echo "ERROR: No compiled WLAN module was found."
             echo
-            echo "=== POSSIBLE QCACLD3 MODULES ==="
-            find kernel/out -type f \
-              \( -name '*wlan*.ko' -o -name '*qca*.ko' \) \
-              -print 2>/dev/null || true
-
+            echo "=== ALL COMPILED .KO FILES ==="
+            find "${OUT_DIR}" -type f -name '*.ko' -print | sort || true
             exit 1
           fi
 
-          echo "FOUND FINAL WLAN MODULE:"
-          echo "${WLAN_KO}"
+          echo "WLAN_KO=${WLAN_KO}"
 
           echo
-          echo "=== MODULE SIZE ==="
+          echo "=== MODULE FILE ==="
           ls -lh "${WLAN_KO}"
-
-          echo
-          echo "=== MODULE SHA256 ==="
-          sha256sum "${WLAN_KO}"
+          file "${WLAN_KO}" || true
 
           echo
           echo "=== INJECTION SYMBOLS ==="
-
-          if command -v llvm-readelf >/dev/null 2>&1; then
-            llvm-readelf -Ws "${WLAN_KO}" 2>/dev/null |
-              grep -E \
-              'hdd_(init_frame_injection|injection_create_debugfs_entries|injection_init_debug_interfaces|frame_inject_ioctl|frame_inject_netlink)|wma_frame_inject' \
-              || true
-          else
-            echo "llvm-readelf not available."
-          fi
+          "${LLVM_DIR}/bin/llvm-nm" -a "${WLAN_KO}" 2>/dev/null \
+            | grep -E \
+              'hdd_(init_frame_injection|process_frame_injection|frame_inject_ioctl|frame_inject_netlink|injection_create_debugfs_entries|injection_init_debug_interfaces)|wma_frame_inject' \
+            || true
 
           echo
           echo "=== INJECTION STRINGS ==="
-
-          strings "${WLAN_KO}" 2>/dev/null |
-            grep -E \
-            'hdd_injection_init_debug_interfaces|hdd_injection_create_debugfs_entries|hdd_frame_inject_ioctl|hdd_frame_inject_netlink|Frame injection debug interfaces initialized|Failed to create frame injection sysfs kobject|Failed to create sysfs attribute group' \
-            | sort -u || true
+          strings "${WLAN_KO}" 2>/dev/null \
+            | grep -E \
+              'Frame injection|frame_injection|hdd_frame_inject|wma_frame_inject|MONITOR_PERSONA|CESIUM' \
+            | head -200 || true
 
           echo
-          echo "=== COMPILED MODULE INSPECTION COMPLETE ==="
+          echo "=== MODULE SECTIONS ==="
+          "${LLVM_DIR}/bin/llvm-readelf" -S "${WLAN_KO}" 2>/dev/null \
+            | grep -E '__versions|\.text|\.rodata|\.data|\.bss' \
+            || true
 
-
+          echo
+          echo "Compiled WLAN module inspection completed."
 
 
 
@@ -5209,58 +5201,54 @@ jobs:
         run: |
           set -euxo pipefail
 
-          echo "=========================================="
-          echo " COMPILED INJECTION CALL PATH"
-          echo "=========================================="
+          echo "========================================"
+          echo "COMPILED INJECTION CALL PATH"
+          echo "========================================"
 
-          WLAN_KO="$(find out kernel -type f \
-            -name 'qca_cld3_wlan.ko' \
-            -print -quit 2>/dev/null || true)"
+          WLAN_KO="$(
+            find "${OUT_DIR}" -type f \
+              \( -name 'wlan.ko' -o -name 'qca_cld3_wlan.ko' \) \
+              -print | head -n 1
+          )"
 
-          test -n "${WLAN_KO}"
-          test -f "${WLAN_KO}"
-
-          echo
-          echo "MODULE:"
-          echo "${WLAN_KO}"
-
-          echo
-          echo "=== SYMBOLS ==="
-
-          if command -v llvm-readelf >/dev/null 2>&1; then
-            llvm-readelf -Ws "${WLAN_KO}" 2>/dev/null |
-              grep -E \
-              'hdd_injection_create_debugfs_entries|hdd_injection_init_debug_interfaces|hdd_init_frame_injection' \
-              || true
+          if [ -z "${WLAN_KO}" ]; then
+            echo "ERROR: No compiled WLAN module was found."
+            find "${OUT_DIR}" -type f -name '*.ko' -print | sort || true
+            exit 1
           fi
 
-          echo
-          echo "=== RELOCATIONS ==="
-
-          if command -v llvm-readelf >/dev/null 2>&1; then
-            llvm-readelf -r "${WLAN_KO}" 2>/dev/null |
-              grep -E \
-              'hdd_injection_create_debugfs_entries|hdd_injection_init_debug_interfaces|hdd_init_frame_injection' \
-              || true
-          fi
+          echo "WLAN_KO=${WLAN_KO}"
 
           echo
-          echo "=== DISASSEMBLY / CALL REFERENCES ==="
+          echo "=== INJECTION DEBUG SYMBOLS ==="
+          "${LLVM_DIR}/bin/llvm-nm" -a "${WLAN_KO}" 2>/dev/null \
+            | grep -E \
+              'hdd_injection_(create_debugfs_entries|init_debug_interfaces|remove_debugfs_entries)' \
+            || true
 
-          if command -v llvm-objdump >/dev/null 2>&1; then
-            llvm-objdump -dr "${WLAN_KO}" 2>/dev/null |
-              grep -E \
-              -B8 -A12 \
+          echo
+          echo "=== FRAME INJECTION INITIALIZATION SYMBOLS ==="
+          "${LLVM_DIR}/bin/llvm-nm" -a "${WLAN_KO}" 2>/dev/null \
+            | grep -E \
+              'hdd_init_frame_injection|hdd_deinit_frame_injection' \
+            || true
+
+          echo
+          echo "=== RELOCATIONS TO DEBUG INTERFACE INITIALIZER ==="
+          "${LLVM_DIR}/bin/llvm-readelf" -r "${WLAN_KO}" 2>/dev/null \
+            | grep -E \
               'hdd_injection_init_debug_interfaces|hdd_injection_create_debugfs_entries' \
-              || true
-          else
-            echo "llvm-objdump not available."
-          fi
+            || true
 
           echo
-          echo "=== CALL-PATH INSPECTION COMPLETE ==="
-       
+          echo "=== RELOCATIONS TO FRAME INJECTION ==="
+          "${LLVM_DIR}/bin/llvm-readelf" -r "${WLAN_KO}" 2>/dev/null \
+            | grep -E \
+              'hdd_init_frame_injection|hdd_frame_inject|wma_frame_inject' \
+            || true
 
+          echo
+          echo "Compiled injection call-path inspection completed."
 
           
 
