@@ -575,11 +575,11 @@ jobs:
 
 
 
-              - name: Inspect exact injection sysfs implementation
-                 run: |
-                   echo "=== EXACT FRAME INJECTION SYSFS CODE ==="
+      - name: Inspect exact injection sysfs implementation
+        run: |
+            echo "=== EXACT FRAME INJECTION SYSFS CODE ==="
 
-                    sed -n '600,670p' \
+             sed -n '600,670p' \
                      nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c
 
                    echo
