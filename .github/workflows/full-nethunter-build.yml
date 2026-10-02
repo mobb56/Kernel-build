@@ -539,6 +539,40 @@ jobs:
           find "$R" -type f 2>/dev/null | \
             grep -Ei 'frame.?inject|injection|cesium' | sort
 
+
+
+
+
+      - name: Inspect injection interface definitions
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          R="nethunter-reference/drivers/staging/qcacld-3.0"
+
+          echo "=== CESIUM NETLINK CONSTANT ==="
+          grep -RniE \
+            'WLAN_NLINK_CESIUM|NETLINK_CESIUM' \
+            "$R" 2>/dev/null | head -100
+
+          echo
+          echo "=== FRAME INJECTION IOCTL DEFINITIONS ==="
+          grep -nE \
+            'FRAME_INJECT|HDD_FRAME_INJECT|IOCTL' \
+            "$R/core/hdd/inc/wlan_hdd_frame_inject.h" 2>/dev/null | head -150
+
+          echo
+          echo "=== FRAME INJECTION NETLINK ATTRIBUTES ==="
+          grep -nE \
+            'HDD_FRAME_INJECT_ATTR|NL80211|CESIUM' \
+            "$R/core/hdd/inc/wlan_hdd_frame_inject.h" 2>/dev/null | head -150
+
+          echo
+          echo "=== CESIUM PID / NETLINK USERSPACE HANDLING ==="
+          grep -RniE \
+            'cesium_pid|WLAN_NLINK_CESIUM|nlmsg_unicast' \
+            "$R/core/hdd" 2>/dev/null | head -150
+
       # ============================================================
       # 12. VERIFY REQUIRED INJECTION SOURCES EXIST
       #
