@@ -766,6 +766,45 @@ jobs:
                kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
               nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
               2>/dev/null || true
+
+
+
+      - name: Trace injection source import
+        run: |
+           echo "=== ACTUAL QCACLD3 INJECTION FILES ==="
+            find kernel/drivers/staging/qcacld-3.0 \
+            -type f \
+              \( -name 'wlan_hdd_frame_inject*.c' \
+              -o -name 'wlan_hdd_frame_inject*.h' \
+              -o -name 'wlan_hdd_frame_validate*.c' \
+              -o -name 'wlan_hdd_frame_validate*.h' \
+              -o -name 'wma_frame_inject.c' \
+              -o -name 'wma_frame_inject.h' \) \
+              -print | sort
+
+             echo
+             echo "=== REFERENCE QCACLD3 INJECTION FILES ==="
+              find nethunter-reference/drivers/staging/qcacld-3.0 \
+             -type f \
+              \( -name 'wlan_hdd_frame_inject*.c' \
+            -o -name 'wlan_hdd_frame_inject*.h' \
+             -o -name 'wlan_hdd_frame_validate*.c' \
+              -o -name 'wlan_hdd_frame_validate*.h' \
+                 -o -name 'wma_frame_inject.c' \
+                -o -name 'wma_frame_inject.h' \) \
+              -print | sort
+
+             echo
+             echo "=== ACTUAL QCACLD3 KBUILD ==="
+             sed -n '190,250p' \
+              kernel/drivers/staging/qcacld-3.0/Kbuild 2>/dev/null || true
+
+             echo
+             echo "=== INJECTION IMPORT COMMANDS IN WORKFLOW ==="
+              grep -n -B5 -A15 -E \
+             'wlan_hdd_frame_inject|wlan_hdd_frame_validate|wma_frame_inject|FEATURE_FRAME_INJECTION_SUPPORT|cp .*nethunter-reference' \
+             .github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null || true
+             
                 
       # ============================================================
       # 11. VERIFY NETHUNTER QCACLD3 REFERENCE
