@@ -721,6 +721,51 @@ jobs:
                 --include='Makefile' \
                  'cppflags-y.*FEATURE_FRAME_INJECTION_SUPPORT|CFLAGS.*FEATURE_FRAME_INJECTION_SUPPORT' \
                 kernel/drivers/staging/qcacld-3.0 2>/dev/null || true
+
+
+
+
+      - name: Compare compiled tree injection implementation
+        run: |
+          echo "=== ACTUAL KERNEL TREE KBUILD ==="
+           grep -n -B3 -A8 \
+          'FEATURE_FRAME_INJECTION_SUPPORT\|wlan_hdd_frame_inject_debug' \
+            kernel/drivers/staging/qcacld-3.0/Kbuild 2>/dev/null || true
+
+             echo
+             echo "=== ACTUAL KERNEL TREE SYSFS INITIALIZER CALLERS ==="
+              grep -RniE \
+             --include='*.c' \
+              'hdd_injection_init_debug_interfaces[[:space:]]*\(' \
+               kernel/drivers/staging/qcacld-3.0 2>/dev/null || true
+
+            echo
+            echo "=== ACTUAL CREATE-DEBUGFS FUNCTION ==="
+            grep -n -B10 -A35 \
+             'hdd_injection_create_debugfs_entries' \
+               kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
+               2>/dev/null || true
+
+              echo
+              echo "=== ACTUAL SYSFS INITIALIZER ==="
+              grep -n -B5 -A45 \
+             'QDF_STATUS hdd_injection_init_debug_interfaces' \
+              kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
+                2>/dev/null || true
+
+           echo
+           echo "=== REFERENCE CREATE-DEBUGFS FUNCTION ==="
+             grep -n -B10 -A35 \
+             'hdd_injection_create_debugfs_entries' \
+             nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
+             2>/dev/null || true
+
+                echo
+               echo "=== SOURCE CHECKSUMS ==="
+              sha256sum \
+               kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
+              nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
+              2>/dev/null || true
                 
       # ============================================================
       # 11. VERIFY NETHUNTER QCACLD3 REFERENCE
