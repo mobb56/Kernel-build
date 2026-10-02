@@ -512,6 +512,58 @@ jobs:
             'cesium_pid[[:space:]]*=|cesium_pid' \
             nethunter-reference 2>/dev/null | head -100 || true
 
+
+
+
+      - name: Inspect frame injection sysfs initialization
+        run: |
+         echo "=== FRAME INJECTION SYSFS CREATE CALL ==="
+
+         grep -n -B15 -A35 \
+         'g_injection_sysfs_kobj.*kobject_create_and_add' \
+          nethunter-reference/core/hdd/src/wlan_hdd_frame_inject_debug.c \
+          2>/dev/null || true
+
+         echo
+         echo "=== FRAME INJECTION SYSFS INIT FUNCTION ==="
+
+         sed -n '580,675p' \
+          nethunter-reference/core/hdd/src/wlan_hdd_frame_inject_debug.c \
+          2>/dev/null || true
+
+          echo
+          echo "=== FRAME INJECTION SYSFS CALLERS ==="
+
+          grep -RniE \
+          --exclude-dir=.git \
+           'hdd_injection_init_debug_interfaces|hdd_injection_deinit_debug_interfaces' \
+            nethunter-reference/core/hdd \
+            2>/dev/null || true
+
+           echo
+           echo "=== CESIUM PID REGISTRATION ==="
+
+            sed -n '900,965p' \
+            nethunter-reference/core/hdd/src/wlan_hdd_ioctl.c \
+            2>/dev/null || true
+
+           echo
+           echo "=== CESIUM IOCTL DEFINITIONS ==="
+
+            grep -n -B10 -A25 \
+            -E 'CESIUM|cesium|SIOCDEVPRIVATE' \
+             nethunter-reference/core/hdd/inc/wlan_hdd_ioctl.h \
+              2>/dev/null || true
+
+           echo
+            echo "=== CESIUM NETLINK DEFINITIONS ==="
+
+              grep -RniE \
+             --exclude-dir=.git \
+           'WLAN_NLINK_CESIUM|NETLINK_CESIUM' \
+            nethunter-reference/core/hdd \
+              2>/dev/null || true
+
       # ============================================================
       # 11. VERIFY NETHUNTER QCACLD3 REFERENCE
       # ============================================================
