@@ -5138,64 +5138,6 @@ jobs:
 
 
 
-      - name: Inspect compiled QCACLD3 injection module
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          echo "========================================"
-          echo "COMPILED QCACLD3 MODULE INSPECTION"
-          echo "========================================"
-
-          echo
-          echo "=== SEARCHING FOR WLAN MODULE ==="
-
-          WLAN_KO="$(
-            find "${OUT_DIR}" -type f \
-              \( -name 'wlan.ko' -o -name 'qca_cld3_wlan.ko' \) \
-              -print | head -n 1
-          )"
-
-          if [ -z "${WLAN_KO}" ]; then
-            echo "ERROR: No compiled WLAN module was found."
-            echo
-            echo "=== ALL COMPILED .KO FILES ==="
-            find "${OUT_DIR}" -type f -name '*.ko' -print | sort || true
-            exit 1
-          fi
-
-          echo "WLAN_KO=${WLAN_KO}"
-
-          echo
-          echo "=== MODULE FILE ==="
-          ls -lh "${WLAN_KO}"
-          file "${WLAN_KO}" || true
-
-          echo
-          echo "=== INJECTION SYMBOLS ==="
-          "${LLVM_DIR}/bin/llvm-nm" -a "${WLAN_KO}" 2>/dev/null \
-            | grep -E \
-              'hdd_(init_frame_injection|process_frame_injection|frame_inject_ioctl|frame_inject_netlink|injection_create_debugfs_entries|injection_init_debug_interfaces)|wma_frame_inject' \
-            || true
-
-          echo
-          echo "=== INJECTION STRINGS ==="
-          strings "${WLAN_KO}" 2>/dev/null \
-            | grep -E \
-              'Frame injection|frame_injection|hdd_frame_inject|wma_frame_inject|MONITOR_PERSONA|CESIUM' \
-            | head -200 || true
-
-          echo
-          echo "=== MODULE SECTIONS ==="
-          "${LLVM_DIR}/bin/llvm-readelf" -S "${WLAN_KO}" 2>/dev/null \
-            | grep -E '__versions|\.text|\.rodata|\.data|\.bss' \
-            || true
-
-          echo
-          echo "Compiled WLAN module inspection completed."
-
-
-
       - name: Inspect compiled injection debug call path
         shell: bash
         run: |
@@ -5205,15 +5147,24 @@ jobs:
           echo "COMPILED INJECTION CALL PATH"
           echo "========================================"
 
+          KERNEL_OUT="${GITHUB_WORKSPACE}/kernel/${OUT_DIR}"
+
+          echo
+          echo "=== BUILD OUTPUT DIRECTORY ==="
+          echo "KERNEL_OUT=${KERNEL_OUT}"
+          test -d "${KERNEL_OUT}"
+
           WLAN_KO="$(
-            find "${OUT_DIR}" -type f \
+            find "${KERNEL_OUT}" -type f \
               \( -name 'wlan.ko' -o -name 'qca_cld3_wlan.ko' \) \
               -print | head -n 1
           )"
 
           if [ -z "${WLAN_KO}" ]; then
             echo "ERROR: No compiled WLAN module was found."
-            find "${OUT_DIR}" -type f -name '*.ko' -print | sort || true
+            echo
+            echo "=== ALL COMPILED .KO FILES ==="
+            find "${KERNEL_OUT}" -type f -name '*.ko' -print | sort || true
             exit 1
           fi
 
@@ -5251,6 +5202,69 @@ jobs:
           echo "Compiled injection call-path inspection completed."
 
           
+
+      - name: Inspect compiled injection debug call path
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "========================================"
+          echo "COMPILED INJECTION CALL PATH"
+          echo "========================================"
+
+          KERNEL_OUT="${GITHUB_WORKSPACE}/kernel/${OUT_DIR}"
+
+          echo
+          echo "=== BUILD OUTPUT DIRECTORY ==="
+          echo "KERNEL_OUT=${KERNEL_OUT}"
+          test -d "${KERNEL_OUT}"
+
+          WLAN_KO="$(
+            find "${KERNEL_OUT}" -type f \
+              \( -name 'wlan.ko' -o -name 'qca_cld3_wlan.ko' \) \
+              -print | head -n 1
+          )"
+
+          if [ -z "${WLAN_KO}" ]; then
+            echo "ERROR: No compiled WLAN module was found."
+            echo
+            echo "=== ALL COMPILED .KO FILES ==="
+            find "${KERNEL_OUT}" -type f -name '*.ko' -print | sort || true
+            exit 1
+          fi
+
+          echo "WLAN_KO=${WLAN_KO}"
+
+          echo
+          echo "=== INJECTION DEBUG SYMBOLS ==="
+          "${LLVM_DIR}/bin/llvm-nm" -a "${WLAN_KO}" 2>/dev/null \
+            | grep -E \
+              'hdd_injection_(create_debugfs_entries|init_debug_interfaces|remove_debugfs_entries)' \
+            || true
+
+          echo
+          echo "=== FRAME INJECTION INITIALIZATION SYMBOLS ==="
+          "${LLVM_DIR}/bin/llvm-nm" -a "${WLAN_KO}" 2>/dev/null \
+            | grep -E \
+              'hdd_init_frame_injection|hdd_deinit_frame_injection' \
+            || true
+
+          echo
+          echo "=== RELOCATIONS TO DEBUG INTERFACE INITIALIZER ==="
+          "${LLVM_DIR}/bin/llvm-readelf" -r "${WLAN_KO}" 2>/dev/null \
+            | grep -E \
+              'hdd_injection_init_debug_interfaces|hdd_injection_create_debugfs_entries' \
+            || true
+
+          echo
+          echo "=== RELOCATIONS TO FRAME INJECTION ==="
+          "${LLVM_DIR}/bin/llvm-readelf" -r "${WLAN_KO}" 2>/dev/null \
+            | grep -E \
+              'hdd_init_frame_injection|hdd_frame_inject|wma_frame_inject' \
+            || true
+
+          echo
+          echo "Compiled injection call-path inspection completed."
 
       # ============================================================
       # 43. VERIFY MODVERSIONS
