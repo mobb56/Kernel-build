@@ -4734,7 +4734,30 @@ jobs:
                kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
                 2>/dev/null || true
     
-          
+
+
+     
+      - name: Inspect exact sysfs initializer caller
+        run: |
+           echo "=== FINAL wlan_hdd_main.c CALLER ==="
+           sed -n '15535,15575p' kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c
+ 
+             echo
+            echo "=== ALL FINAL CALLS ==="
+              grep -n -B15 -A20 \
+              'hdd_injection_init_debug_interfaces' \
+              kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c \
+              kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
+              kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_test.c \
+              2>/dev/null || true
+ 
+           echo
+           echo "=== FINAL hdd_init_frame_injection ==="
+           grep -n -B10 -A45 \
+           'hdd_init_frame_injection' \
+           kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.c \
+             kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c \
+            2>/dev/null || true  
 
       
                          
