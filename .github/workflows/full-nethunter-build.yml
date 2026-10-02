@@ -6292,6 +6292,53 @@ jobs:
           echo "========================================"
 
 
+
+
+
+
+
+      - name: Inspect compiled injection call relocations
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          MOD="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
+
+          echo "=== WLAN MODULE ==="
+          test -f "$MOD"
+          ls -lh "$MOD"
+
+          echo
+          echo "=== INJECTION SYMBOLS ==="
+          llvm-readelf -Ws "$MOD" 2>/dev/null |
+            grep -E \
+            'hdd_injection_create_debugfs_entries|hdd_injection_init_debug_interfaces|hdd_init_frame_injection' \
+            || true
+
+          echo
+          echo "=== ALL TEXT RELOCATIONS NEAR INJECTION FUNCTIONS ==="
+          llvm-readelf -r "$MOD" 2>/dev/null |
+            grep -E \
+            '9dd|9de|9df|hdd_injection' \
+            || true
+
+          echo
+          echo "=== DISASSEMBLY OF CREATE DEBUGFS FUNCTION ==="
+          llvm-objdump -dr "$MOD" 2>/dev/null |
+            grep -A80 -B5 \
+            '<hdd_injection_create_debugfs_entries>' \
+            || true
+
+          echo
+          echo "=== DISASSEMBLY OF DEBUG INTERFACE INITIALIZER ==="
+          llvm-objdump -dr "$MOD" 2>/dev/null |
+            grep -A120 -B5 \
+            '<hdd_injection_init_debug_interfaces>' \
+            || true
+
+
+
+            
       # ============================================================
       # PACKAGE VERIFIED KERNEL ARTIFACTS
       #
