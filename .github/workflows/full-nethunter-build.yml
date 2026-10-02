@@ -4978,7 +4978,286 @@ jobs:
 
              echo "Kernel modules built successfully."
 
+             
 
+
+
+      - name: Verify final injection source after build
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          NH="nethunter-reference/drivers/staging/qcacld-3.0"
+          KERNEL="kernel/drivers/staging/qcacld-3.0"
+
+          echo "=========================================="
+          echo " FINAL INJECTION SOURCE VERIFICATION"
+          echo "=========================================="
+
+          echo
+          echo "=== ACTUAL FILES ==="
+          test -f "${KERNEL}/core/hdd/src/wlan_hdd_frame_inject.c"
+          test -f "${KERNEL}/core/hdd/src/wlan_hdd_frame_validate.c"
+          test -f "${KERNEL}/core/hdd/src/wlan_hdd_inject_security.c"
+          test -f "${KERNEL}/core/hdd/src/wlan_hdd_frame_inject_debug.c"
+          test -f "${KERNEL}/core/wma/src/wma_frame_inject.c"
+
+          echo "All required injection source files exist."
+
+          echo
+          echo "=== REFERENCE FILES ==="
+          test -f "${NH}/core/hdd/src/wlan_hdd_frame_inject.c"
+          test -f "${NH}/core/hdd/src/wlan_hdd_frame_validate.c"
+          test -f "${NH}/core/hdd/src/wlan_hdd_inject_security.c"
+          test -f "${NH}/core/hdd/src/wlan_hdd_frame_inject_debug.c"
+          test -f "${NH}/core/wma/src/wma_frame_inject.c"
+
+          echo "All reference files exist."
+
+          echo
+          echo "=== FRAME INJECTION DEBUG FUNCTION ==="
+          grep -n -A50 -B5 \
+            'hdd_injection_create_debugfs_entries' \
+            "${KERNEL}/core/hdd/src/wlan_hdd_frame_inject_debug.c"
+
+          echo
+          echo "=== SYSFS INITIALIZER ==="
+          grep -n -A60 -B5 \
+            'hdd_injection_init_debug_interfaces' \
+            "${KERNEL}/core/hdd/src/wlan_hdd_frame_inject_debug.c"
+
+          echo
+          echo "=== FEATURE DEFINITIONS ==="
+          grep -nE \
+            'FEATURE_FRAME_INJECTION_SUPPORT|FEATURE_MONITOR_MODE_SUPPORT' \
+            "${KERNEL}/Kbuild" || true
+
+          echo
+          echo "=== FINAL SOURCE CHECK COMPLETE ==="
+
+
+
+
+
+      - name: Compare final injection source with reference
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          NH="nethunter-reference/drivers/staging/qcacld-3.0"
+          KERNEL="kernel/drivers/staging/qcacld-3.0"
+
+          echo "=========================================="
+          echo " SOURCE COMPARISON"
+          echo "=========================================="
+
+          echo
+          echo "=== wlan_hdd_frame_inject_debug.c ==="
+          diff -u \
+            "${NH}/core/hdd/src/wlan_hdd_frame_inject_debug.c" \
+            "${KERNEL}/core/hdd/src/wlan_hdd_frame_inject_debug.c" \
+            || {
+              echo
+              echo "WARNING: Debug source differs from reference."
+              echo "The differences above must be reviewed."
+              exit 1
+            }
+
+          echo
+          echo "=== wlan_hdd_frame_inject.c ==="
+          diff -u \
+            "${NH}/core/hdd/src/wlan_hdd_frame_inject.c" \
+            "${KERNEL}/core/hdd/src/wlan_hdd_frame_inject.c" \
+            || {
+              echo
+              echo "WARNING: Frame injection source differs from reference."
+              exit 1
+            }
+
+          echo
+          echo "=== wlan_hdd_frame_validate.c ==="
+          diff -u \
+            "${NH}/core/hdd/src/wlan_hdd_frame_validate.c" \
+            "${KERNEL}/core/hdd/src/wlan_hdd_frame_validate.c" \
+            || {
+              echo
+              echo "WARNING: Frame validation source differs from reference."
+              exit 1
+            }
+
+          echo
+          echo "=== wma_frame_inject.c ==="
+          diff -u \
+            "${NH}/core/wma/src/wma_frame_inject.c" \
+            "${KERNEL}/core/wma/src/wma_frame_inject.c" \
+            || {
+              echo
+              echo "WARNING: WMA injection source differs from reference."
+              exit 1
+            }
+
+          echo
+          echo "=== SOURCE COMPARISON PASSED ==="
+
+
+
+
+
+
+           
+      - name: Verify final QCACLD3 injection Kbuild
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          KBUILD="kernel/drivers/staging/qcacld-3.0/Kbuild"
+
+          echo "=========================================="
+          echo " FINAL QCACLD3 KBUILD VERIFICATION"
+          echo "=========================================="
+
+          test -f "${KBUILD}"
+
+          echo
+          echo "=== FEATURE DEFINITIONS ==="
+          grep -nE \
+            'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT|CONFIG_FEATURE_MONITOR_MODE_SUPPORT|FEATURE_FRAME_INJECTION_SUPPORT|FEATURE_MONITOR_MODE_SUPPORT' \
+            "${KBUILD}" || true
+
+          echo
+          echo "=== INJECTION OBJECTS ==="
+          grep -nE \
+            'wlan_hdd_frame_inject\.o|wlan_hdd_frame_validate\.o|wlan_hdd_inject_security\.o|wlan_hdd_frame_inject_debug\.o|wma_frame_inject\.o' \
+            "${KBUILD}"
+
+          echo
+          echo "=== FINAL KBUILD CHECK PASSED ==="
+
+
+
+
+
+
+      - name: Inspect compiled QCACLD3 injection module
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "=========================================="
+          echo " COMPILED QCACLD3 MODULE INSPECTION"
+          echo "=========================================="
+
+          echo
+          echo "=== SEARCHING FOR qca_cld3_wlan.ko ==="
+
+          WLAN_KO="$(find out kernel -type f \
+            -name 'qca_cld3_wlan.ko' \
+            -print -quit 2>/dev/null || true)"
+
+          if [ -z "${WLAN_KO}" ]; then
+            echo "ERROR: qca_cld3_wlan.ko was not found."
+            echo
+            echo "=== POSSIBLE WLAN MODULES ==="
+            find out kernel -type f \
+              \( -name '*wlan*.ko' -o -name 'wlan.ko' \) \
+              -print 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "FOUND:"
+          echo "${WLAN_KO}"
+
+          echo
+          echo "=== MODULE SIZE ==="
+          ls -lh "${WLAN_KO}"
+
+          echo
+          echo "=== INJECTION SYMBOLS ==="
+
+          if command -v llvm-readelf >/dev/null 2>&1; then
+            llvm-readelf -Ws "${WLAN_KO}" 2>/dev/null |
+              grep -E \
+              'hdd_(init_frame_injection|injection_create_debugfs_entries|injection_init_debug_interfaces|frame_inject_ioctl|frame_inject_netlink)|wma_frame_inject' \
+              || true
+          else
+            echo "llvm-readelf not available."
+          fi
+
+          echo
+          echo "=== INJECTION STRINGS ==="
+
+          strings "${WLAN_KO}" 2>/dev/null |
+            grep -E \
+            'hdd_injection_init_debug_interfaces|hdd_injection_create_debugfs_entries|hdd_frame_inject_ioctl|hdd_frame_inject_netlink|Frame injection debug interfaces initialized|Failed to create frame injection sysfs kobject|Failed to create sysfs attribute group' \
+            | sort -u || true
+
+          echo
+          echo "=== COMPILED MODULE INSPECTION COMPLETE ==="
+
+
+
+
+
+
+      - name: Inspect compiled injection debug call path
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "=========================================="
+          echo " COMPILED INJECTION CALL PATH"
+          echo "=========================================="
+
+          WLAN_KO="$(find out kernel -type f \
+            -name 'qca_cld3_wlan.ko' \
+            -print -quit 2>/dev/null || true)"
+
+          test -n "${WLAN_KO}"
+          test -f "${WLAN_KO}"
+
+          echo
+          echo "MODULE:"
+          echo "${WLAN_KO}"
+
+          echo
+          echo "=== SYMBOLS ==="
+
+          if command -v llvm-readelf >/dev/null 2>&1; then
+            llvm-readelf -Ws "${WLAN_KO}" 2>/dev/null |
+              grep -E \
+              'hdd_injection_create_debugfs_entries|hdd_injection_init_debug_interfaces|hdd_init_frame_injection' \
+              || true
+          fi
+
+          echo
+          echo "=== RELOCATIONS ==="
+
+          if command -v llvm-readelf >/dev/null 2>&1; then
+            llvm-readelf -r "${WLAN_KO}" 2>/dev/null |
+              grep -E \
+              'hdd_injection_create_debugfs_entries|hdd_injection_init_debug_interfaces|hdd_init_frame_injection' \
+              || true
+          fi
+
+          echo
+          echo "=== DISASSEMBLY / CALL REFERENCES ==="
+
+          if command -v llvm-objdump >/dev/null 2>&1; then
+            llvm-objdump -dr "${WLAN_KO}" 2>/dev/null |
+              grep -E \
+              -B8 -A12 \
+              'hdd_injection_init_debug_interfaces|hdd_injection_create_debugfs_entries' \
+              || true
+          else
+            echo "llvm-objdump not available."
+          fi
+
+          echo
+          echo "=== CALL-PATH INSPECTION COMPLETE ==="
+       
+
+
+          
 
       # ============================================================
       # 43. VERIFY MODVERSIONS
