@@ -601,7 +601,44 @@ jobs:
                  'hdd_injection_init_debug_interfaces' \
                     nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
                      2>/dev/null || true
-               
+
+
+
+
+
+      
+      - name: Trace injection debug interface callers
+        run: |
+          echo "=== hdd_init_frame_injection ==="
+          grep -RniE \
+            --include='*.c' \
+            'hdd_init_frame_injection[[:space:]]*\(' \
+            nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src \
+            2>/dev/null || true
+
+          echo
+          echo "=== hdd_injection_create_debugfs_entries ==="
+          grep -RniE \
+            --include='*.c' \
+            'hdd_injection_create_debugfs_entries[[:space:]]*\(' \
+            nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src \
+            2>/dev/null || true
+
+          echo
+          echo "=== hdd_injection_init_debug_interfaces ==="
+          grep -RniE \
+            --include='*.c' \
+            'hdd_injection_init_debug_interfaces[[:space:]]*\(' \
+            nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src \
+            2>/dev/null || true
+
+          echo
+          echo "=== ALL FEATURE_FRAME_INJECTION_SUPPORT CALL SITES ==="
+          grep -RniE \
+            --include='*.c' \
+            '#ifdef FEATURE_FRAME_INJECTION_SUPPORT|hdd_injection_init_debug_interfaces|hdd_injection_create_debugfs_entries' \
+            nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src \
+            2>/dev/null || true 
       # ============================================================
       # 11. VERIFY NETHUNTER QCACLD3 REFERENCE
       # ============================================================
