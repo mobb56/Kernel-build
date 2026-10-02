@@ -658,6 +658,31 @@ jobs:
           echo "=== DEBUG INTERFACE FUNCTION ==="
           sed -n '45,82p' \
             nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c
+
+
+
+      - name: Trace hdd_init runtime call path
+        run: |
+          echo "=== ALL hdd_init CALL SITES ==="
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            'hdd_init[[:space:]]*\(' \
+            nethunter-reference/drivers/staging/qcacld-3.0/core/hdd \
+            2>/dev/null || true
+
+          echo
+          echo "=== WLAN MODULE INIT FUNCTIONS ==="
+          grep -RniE \
+            --include='*.c' \
+            'module_init|module_exit|qdf_module|hdd_init[[:space:]]*\(' \
+            nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src \
+            2>/dev/null || true
+
+          echo
+          echo "=== hdd_init DEBUG INTERFACE BLOCK ==="
+          sed -n '90,142p' \
+            nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c
       # ============================================================
       # 11. VERIFY NETHUNTER QCACLD3 REFERENCE
       # ============================================================
