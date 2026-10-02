@@ -480,6 +480,38 @@ jobs:
           echo "NetHunter commit:"
           git rev-parse HEAD
 
+
+      - name: Inspect Cesium userspace injection interface
+        run: |
+          echo "=== SEARCHING NETHUNTER REFERENCE FOR CESIUM USERSPACE ==="
+
+          grep -RniE \
+            --exclude-dir=.git \
+            --exclude='*.ko' \
+            --exclude='*.o' \
+            --exclude='*.a' \
+            'WLAN_NLINK_CESIUM|NETLINK_CESIUM|cesium_pid|cesium_nl_srv_sock|inject_events|FRAME_INJECT_CMD|SIOCDEVPRIVATE.*10|hdd_frame_inject_ioctl' \
+            nethunter-reference 2>/dev/null | head -300 || true
+
+          echo
+          echo "=== SEARCHING FOR CESIUM-RELATED SOURCE FILES ==="
+
+          find nethunter-reference \
+            -type f \
+            \( -name '*.c' -o -name '*.h' -o -name '*.cpp' -o -name '*.cc' -o -name '*.py' -o -name '*.sh' -o -name 'Makefile' \) \
+            -print 2>/dev/null |
+          while read -r f; do
+            grep -IlE 'cesium|WLAN_NLINK_CESIUM|inject_events|FRAME_INJECT' "$f" 2>/dev/null || true
+          done | head -200
+
+          echo
+          echo "=== CESIUM PID ASSIGNMENT ==="
+
+          grep -RniE \
+            --exclude-dir=.git \
+            'cesium_pid[[:space:]]*=|cesium_pid' \
+            nethunter-reference 2>/dev/null | head -100 || true
+
       # ============================================================
       # 11. VERIFY NETHUNTER QCACLD3 REFERENCE
       # ============================================================
