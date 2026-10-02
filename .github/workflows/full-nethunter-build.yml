@@ -5148,28 +5148,34 @@ jobs:
           echo "=========================================="
 
           echo
-          echo "=== SEARCHING FOR qca_cld3_wlan.ko ==="
+          echo "=== SEARCHING FOR FINAL WLAN MODULE ==="
 
-          WLAN_KO="$(find out kernel -type f \
-            -name 'qca_cld3_wlan.ko' \
+          WLAN_KO="$(find kernel/out -type f \
+            \( -name 'wlan.ko' -o -name 'qca_cld3_wlan.ko' \) \
             -print -quit 2>/dev/null || true)"
 
           if [ -z "${WLAN_KO}" ]; then
-            echo "ERROR: qca_cld3_wlan.ko was not found."
+            echo "ERROR: Final WLAN module was not found."
+
             echo
-            echo "=== POSSIBLE WLAN MODULES ==="
-            find out kernel -type f \
-              \( -name '*wlan*.ko' -o -name 'wlan.ko' \) \
+            echo "=== POSSIBLE QCACLD3 MODULES ==="
+            find kernel/out -type f \
+              \( -name '*wlan*.ko' -o -name '*qca*.ko' \) \
               -print 2>/dev/null || true
+
             exit 1
           fi
 
-          echo "FOUND:"
+          echo "FOUND FINAL WLAN MODULE:"
           echo "${WLAN_KO}"
 
           echo
           echo "=== MODULE SIZE ==="
           ls -lh "${WLAN_KO}"
+
+          echo
+          echo "=== MODULE SHA256 ==="
+          sha256sum "${WLAN_KO}"
 
           echo
           echo "=== INJECTION SYMBOLS ==="
@@ -5193,7 +5199,6 @@ jobs:
 
           echo
           echo "=== COMPILED MODULE INSPECTION COMPLETE ==="
-
 
 
 
