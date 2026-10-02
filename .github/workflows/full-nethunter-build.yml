@@ -769,6 +769,44 @@ jobs:
 
 
 
+      - name: Compare actual and reference debug interface call
+        run: |
+            echo "=== ACTUAL create_debugfs_entries ==="
+            grep -n -B20 -A60 \
+             'QDF_STATUS hdd_injection_create_debugfs_entries' \
+            kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
+             || true
+
+            echo
+            echo "=== ACTUAL initializer references ==="
+            grep -n -B10 -A20 \
+             'hdd_injection_init_debug_interfaces' \
+             kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
+             || true
+
+            echo
+            echo "=== REFERENCE create_debugfs_entries ==="
+            grep -n -B20 -A70 \
+             'QDF_STATUS hdd_injection_create_debugfs_entries' \
+            nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
+             || true
+
+            echo
+             echo "=== REFERENCE initializer references ==="
+            grep -n -B10 -A20 \
+            'hdd_injection_init_debug_interfaces' \
+            nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
+              || true
+
+             echo
+             echo "=== EXACT DIFF ==="
+             diff -u \
+             nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
+             kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
+             || true
+
+
+
       - name: Trace injection source import
         run: |
            echo "=== ACTUAL QCACLD3 INJECTION FILES ==="
