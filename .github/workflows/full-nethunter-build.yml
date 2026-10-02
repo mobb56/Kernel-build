@@ -683,6 +683,45 @@ jobs:
           echo "=== hdd_init DEBUG INTERFACE BLOCK ==="
           sed -n '90,142p' \
             nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c
+
+
+
+
+      - name: Verify injection feature guards and Kbuild flags
+        run: |
+           echo "=== KBUILD FRAME INJECTION DEFINITIONS ==="
+           grep -RniE \
+           --include='Kbuild' \
+           --include='Makefile' \
+           'FEATURE_FRAME_INJECTION_SUPPORT|wlan_hdd_frame_inject|wlan_hdd_frame_inject_debug|wma_frame_inject' \
+            kernel/drivers/staging/qcacld-3.0 \
+            nethunter-reference/drivers/staging/qcacld-3.0 2>/dev/null || true
+
+            echo
+            echo "=== CREATE DEBUGFS SOURCE ==="
+            sed -n '185,225p' \
+            nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c
+
+             echo
+             echo "=== SYSFS INITIALIZER SOURCE ==="
+             sed -n '608,650p' \
+             nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c
+
+              echo
+              echo "=== CALLERS IN SOURCE ==="
+               grep -RniE \
+               --include='*.c' \
+                'hdd_injection_init_debug_interfaces[[:space:]]*\(' \
+                 nethunter-reference/drivers/staging/qcacld-3.0 2>/dev/null || true
+
+              echo
+               echo "=== FRAME INJECTION CPPFLAGS ==="
+               grep -RniE \
+               --include='Kbuild' \
+                --include='Makefile' \
+                 'cppflags-y.*FEATURE_FRAME_INJECTION_SUPPORT|CFLAGS.*FEATURE_FRAME_INJECTION_SUPPORT' \
+                kernel/drivers/staging/qcacld-3.0 2>/dev/null || true
+                
       # ============================================================
       # 11. VERIFY NETHUNTER QCACLD3 REFERENCE
       # ============================================================
