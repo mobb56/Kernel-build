@@ -575,7 +575,7 @@ jobs:
 
 
 
-               - name: Inspect exact injection sysfs implementation
+              - name: Inspect exact injection sysfs implementation
                  run: |
                    echo "=== EXACT FRAME INJECTION SYSFS CODE ==="
 
