@@ -509,6 +509,36 @@ jobs:
           echo
           echo "NetHunter QCACLD3 reference tree verified."
 
+
+      - name: Inspect NetHunter injection implementation
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          R="nethunter-reference/drivers/staging/qcacld-3.0"
+
+          echo "=== CESIUM NETLINK IMPLEMENTATION ==="
+          grep -RniE \
+            'cesium_nl_srv_sock|hdd_open_cesium_nl_sock|hdd_close_cesium_nl_sock|hdd_frame_inject_netlink' \
+            "$R" 2>/dev/null | head -100
+
+          echo
+          echo "=== INJECTION SYSFS IMPLEMENTATION ==="
+          grep -RniE \
+            'g_injection_sysfs_kobj|hdd_injection_sysfs_attr_group|hdd_injection_init_debug_interfaces|hdd_injection_sysfs_global_enable' \
+            "$R" 2>/dev/null | head -100
+
+          echo
+          echo "=== IOCTL IMPLEMENTATION ==="
+          grep -RniE \
+            'hdd_frame_inject_ioctl|FRAME_INJECT.*IOCTL|ioctl.*inject' \
+            "$R" 2>/dev/null | head -100
+
+          echo
+          echo "=== INJECTION FILES ==="
+          find "$R" -type f 2>/dev/null | \
+            grep -Ei 'frame.?inject|injection|cesium' | sort
+
       # ============================================================
       # 12. VERIFY REQUIRED INJECTION SOURCES EXIST
       #
