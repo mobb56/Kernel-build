@@ -4691,6 +4691,49 @@ jobs:
           echo
           echo "4.19 injection capability compatibility applied."
 
+
+
+
+
+      - name: Verify final injected QCACLD3 tree before build
+        run: |
+            echo "=== FINAL QCACLD3 INJECTION SOURCES ==="
+            find kernel/drivers/staging/qcacld-3.0 \
+            -type f \
+             \( -name 'wlan_hdd_frame_inject*.c' \
+             -o -name 'wlan_hdd_frame_inject*.h' \
+            -o -name 'wlan_hdd_frame_validate*.c' \
+            -o -name 'wlan_hdd_frame_validate*.h' \
+            -o -name 'wma_frame_inject.c' \
+             -o -name 'wma_frame_inject.h' \) \
+            -print | sort
+
+            echo
+            echo "=== FINAL KBUILD INJECTION CONFIG ==="
+            grep -n -B3 -A12 \
+             'FEATURE_FRAME_INJECTION_SUPPORT\|wlan_hdd_frame_inject\|wlan_hdd_frame_validate\|wma_frame_inject' \
+            kernel/drivers/staging/qcacld-3.0/Kbuild 2>/dev/null || true
+
+            echo
+             echo "=== FINAL SOURCE CALLER ==="
+              grep -n -B8 -A12 \
+            'hdd_injection_init_debug_interfaces[[:space:]]*(' \
+             kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c \
+             2>/dev/null || true
+
+            echo
+            echo "=== FINAL DEBUG SOURCE CALL ==="
+             grep -n -B8 -A25 \
+            'hdd_injection_init_debug_interfaces[[:space:]]*(' \
+            kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
+              2>/dev/null || true
+
+              echo
+            echo "=== FINAL SOURCE CHECKSUM ==="
+             sha256sum \
+               kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
+                2>/dev/null || true
+    
           
 
       
