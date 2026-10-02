@@ -639,6 +639,25 @@ jobs:
             '#ifdef FEATURE_FRAME_INJECTION_SUPPORT|hdd_injection_init_debug_interfaces|hdd_injection_create_debugfs_entries' \
             nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src \
             2>/dev/null || true 
+
+
+
+
+      - name: Inspect injection initialization call contexts
+        run: |
+          echo "=== CALLER A: hdd_init_frame_injection ==="
+          sed -n '6535,6600p' \
+            nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c
+
+          echo
+          echo "=== CALLER B: hdd_injection_init_debug_interfaces ==="
+          sed -n '15515,15580p' \
+            nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c
+
+          echo
+          echo "=== DEBUG INTERFACE FUNCTION ==="
+          sed -n '45,82p' \
+            nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c
       # ============================================================
       # 11. VERIFY NETHUNTER QCACLD3 REFERENCE
       # ============================================================
