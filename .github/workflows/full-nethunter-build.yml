@@ -572,6 +572,35 @@ jobs:
                 --include='*.h' \
               'WLAN_NLINK_CESIUM|NETLINK_CESIUM' \
                nethunter-reference 2>/dev/null | head -100 || true
+
+
+
+               - name: Inspect exact injection sysfs implementation
+                 run: |
+                   echo "=== EXACT FRAME INJECTION SYSFS CODE ==="
+
+                    sed -n '600,670p' \
+                     nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c
+
+                   echo
+                   echo "=== INJECTION SYSFS ATTRIBUTE DEFINITIONS ==="
+
+                     sed -n '470,545p' \
+                     nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c
+
+                    echo
+                    echo "=== INJECTION INITIALIZATION CALLER ==="
+
+                      sed -n '15535,15575p' \
+                     nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c
+
+                     echo
+                      echo "=== ALL INJECTION DEBUG RETURN CODES ==="
+
+                    grep -n -B8 -A15 \
+                 'hdd_injection_init_debug_interfaces' \
+                    nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
+                     2>/dev/null || true
                
       # ============================================================
       # 11. VERIFY NETHUNTER QCACLD3 REFERENCE
