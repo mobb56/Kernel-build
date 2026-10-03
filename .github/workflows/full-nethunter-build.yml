@@ -2149,6 +2149,299 @@ jobs:
           echo
           echo "=== End QCACLD3 HDD diagnostic ==="
 
+
+
+
+      # ============================================================
+      # BUILD QCACLD3 CESIUM FRAME-INJECTION USERSPACE TOOL
+      # ============================================================
+
+      - name: Build QCACLD3 Cesium injection tool
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p "${GITHUB_WORKSPACE}/tools"
+
+          cat > "${GITHUB_WORKSPACE}/tools/cebu_cesium_inject.c" <<'EOF'
+          #include <errno.h>
+          #include <linux/netlink.h>
+          #include <linux/if.h>
+          #include <stdint.h>
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <string.h>
+          #include <sys/socket.h>
+          #include <unistd.h>
+
+          /*
+           * QCACLD3 NetHunter Cesium interface.
+           *
+           * The kernel implementation uses WLAN_NLINK_CESIUM = 30.
+           *
+           * IMPORTANT:
+           * The exact vendor attribute numbering must match the
+           * wlan_hdd_frame_inject.h used by the kernel build.
+           */
+
+          #define WLAN_NLINK_CESIUM 30
+
+          #define CESIUM_FRAME_MAX 4096
+
+          struct cesium_nlmsg {
+              struct nlmsghdr nlh;
+              struct nlattr {
+                  uint16_t nla_len;
+                  uint16_t nla_type;
+              } attr;
+          };
+
+          static int nl_socket_create(void)
+          {
+              int fd;
+
+              fd = socket(AF_NETLINK, SOCK_RAW, WLAN_NLINK_CESIUM);
+              if (fd < 0) {
+                  perror("socket(AF_NETLINK)");
+                  return -1;
+              }
+
+              struct sockaddr_nl local;
+
+              memset(&local, 0, sizeof(local));
+              local.nl_family = AF_NETLINK;
+              local.nl_pid = (uint32_t)getpid();
+
+              if (bind(fd,
+                       (struct sockaddr *)&local,
+                       sizeof(local)) < 0) {
+                  perror("bind(AF_NETLINK)");
+                  close(fd);
+                  return -1;
+              }
+
+              return fd;
+          }
+
+          static int nl_attr_put(
+              unsigned char *buf,
+              size_t buf_size,
+              size_t *offset,
+              uint16_t type,
+              const void *data,
+              size_t len)
+          {
+              struct nlattr {
+                  uint16_t nla_len;
+                  uint16_t nla_type;
+              } *attr;
+
+              size_t total =
+                  (sizeof(*attr) + len + 3) & ~3U;
+
+              if (*offset + total > buf_size)
+                  return -1;
+
+              attr = (struct nlattr *)(buf + *offset);
+
+              attr->nla_type = type;
+              attr->nla_len = sizeof(*attr) + len;
+
+              memcpy(
+                  buf + *offset + sizeof(*attr),
+                  data,
+                  len
+              );
+
+              memset(
+                  buf + *offset + sizeof(*attr) + len,
+                  0,
+                  total - sizeof(*attr) - len
+              );
+
+              *offset += total;
+
+              return 0;
+          }
+
+          static int read_frame(
+              const char *path,
+              unsigned char *frame,
+              size_t *frame_len)
+          {
+              FILE *fp;
+              long size;
+
+              fp = fopen(path, "rb");
+              if (!fp) {
+                  perror("fopen");
+                  return -1;
+              }
+
+              if (fseek(fp, 0, SEEK_END) != 0) {
+                  fclose(fp);
+                  return -1;
+              }
+
+              size = ftell(fp);
+
+              if (size <= 0 || size > CESIUM_FRAME_MAX) {
+                  fprintf(stderr,
+                          "Invalid frame size: %ld\n",
+                          size);
+                  fclose(fp);
+                  return -1;
+              }
+
+              rewind(fp);
+
+              if (fread(frame, 1, size, fp) != (size_t)size) {
+                  perror("fread");
+                  fclose(fp);
+                  return -1;
+              }
+
+              fclose(fp);
+
+              *frame_len = (size_t)size;
+
+              return 0;
+          }
+
+          int main(int argc, char **argv)
+          {
+              int fd;
+              unsigned char frame[CESIUM_FRAME_MAX];
+              size_t frame_len;
+
+              unsigned char packet[8192];
+              size_t offset = 0;
+
+              struct nlmsghdr *nlh;
+              struct sockaddr_nl kernel;
+
+              uint16_t frame_data_attr;
+              uint16_t frame_len_attr;
+
+              if (argc != 2) {
+                  fprintf(stderr,
+                          "Usage: %s frame.bin\n",
+                          argv[0]);
+                  return 2;
+              }
+
+              /*
+               * These values MUST correspond to the
+               * HDD_FRAME_INJECT_ATTR_* definitions from
+               * wlan_hdd_frame_inject.h.
+               *
+               * Do not guess them in the final kernel build.
+               */
+              frame_data_attr = 1;
+              frame_len_attr  = 2;
+
+              if (read_frame(argv[1],
+                             frame,
+                             &frame_len) < 0)
+                  return 1;
+
+              fd = nl_socket_create();
+
+              if (fd < 0)
+                  return 1;
+
+              memset(packet, 0, sizeof(packet));
+
+              nlh = (struct nlmsghdr *)packet;
+
+              nlh->nlmsg_len =
+                  NLMSG_LENGTH(0);
+
+              nlh->nlmsg_type = 0;
+
+              nlh->nlmsg_flags =
+                  NLM_F_REQUEST;
+
+              nlh->nlmsg_seq =
+                  1;
+
+              nlh->nlmsg_pid =
+                  (uint32_t)getpid();
+
+              offset = NLMSG_ALIGN(nlh->nlmsg_len);
+
+              if (nl_attr_put(
+                      packet,
+                      sizeof(packet),
+                      &offset,
+                      frame_data_attr,
+                      frame,
+                      frame_len) < 0) {
+                  fprintf(stderr,
+                          "Unable to add frame-data attribute\n");
+                  close(fd);
+                  return 1;
+              }
+
+              if (nl_attr_put(
+                      packet,
+                      sizeof(packet),
+                      &offset,
+                      frame_len_attr,
+                      &frame_len,
+                      sizeof(frame_len)) < 0) {
+                  fprintf(stderr,
+                          "Unable to add frame-length attribute\n");
+                  close(fd);
+                  return 1;
+              }
+
+              nlh->nlmsg_len = offset;
+
+              memset(&kernel, 0, sizeof(kernel));
+              kernel.nl_family = AF_NETLINK;
+              kernel.nl_pid = 0;
+              kernel.nl_groups = 0;
+
+              if (sendto(
+                      fd,
+                      packet,
+                      nlh->nlmsg_len,
+                      0,
+                      (struct sockaddr *)&kernel,
+                      sizeof(kernel)) < 0) {
+                  perror("sendto(CESIUM)");
+                  close(fd);
+                  return 1;
+              }
+
+              printf(
+                  "Cesium frame submitted: %zu bytes\n",
+                  frame_len
+              );
+
+              close(fd);
+
+              return 0;
+          }
+          EOF
+
+          ${CC:-gcc} \
+            -O2 \
+            -Wall \
+            -Wextra \
+            "${GITHUB_WORKSPACE}/tools/cebu_cesium_inject.c" \
+            -o "${GITHUB_WORKSPACE}/tools/cebu_cesium_inject"
+
+          chmod 0755 \
+            "${GITHUB_WORKSPACE}/tools/cebu_cesium_inject"
+
+          file \
+            "${GITHUB_WORKSPACE}/tools/cebu_cesium_inject"
+
+          echo
+          echo "Cesium userspace injector built."
+
       # ============================================================
       # 28. IMPORT REQUIRED QCACLD3 HEADERS
       # ============================================================
