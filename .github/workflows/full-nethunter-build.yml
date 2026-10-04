@@ -1237,6 +1237,44 @@ jobs:
             'HDD_FRAME_INJECT_ATTR_FRAME_DATA' \
             "$R/core/hdd" 2>/dev/null | head -500 || true
 
+
+
+      - name: Extract exact Cesium vendor command
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          R="nethunter-reference/drivers/staging/qcacld-3.0"
+
+          echo "============================================================"
+          echo "EXACT hdd_frame_inject_netlink REGISTRATION"
+          echo "============================================================"
+
+          grep -Rni -B15 -A20 \
+            '\.doit[[:space:]]*=[[:space:]]*hdd_frame_inject_netlink' \
+            "$R/core/hdd/src" 2>/dev/null || true
+
+          echo
+          echo "============================================================"
+          echo "EXACT FRAME INJECTION REFERENCES IN CFG80211"
+          echo "============================================================"
+
+          grep -Rni -B10 -A20 \
+            'hdd_frame_inject_netlink' \
+            "$R/core/hdd/src/wlan_hdd_cfg80211.c" \
+            "$R/core/hdd/src/wlan_hdd_frame_inject.c" \
+            "$R/core/hdd/inc" 2>/dev/null || true
+
+          echo
+          echo "============================================================"
+          echo "FRAME INJECTION VENDOR CONSTANTS"
+          echo "============================================================"
+
+          grep -RniE \
+            'FRAME_INJECT|FRAME_INJECTION' \
+            "$R/core/hdd/src/wlan_hdd_cfg80211.c" \
+            "$R/core/hdd/inc" 2>/dev/null || true
+
       # ============================================================
       # 12. VERIFY REQUIRED INJECTION SOURCES EXIST
       #
