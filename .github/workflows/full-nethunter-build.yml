@@ -1275,6 +1275,32 @@ jobs:
             "$R/core/hdd/src/wlan_hdd_cfg80211.c" \
             "$R/core/hdd/inc" 2>/dev/null || true
 
+
+
+
+      - name: Read exact frame injection vendor command
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          R="nethunter-reference/drivers/staging/qcacld-3.0"
+
+          echo "============================================================"
+          echo "EXACT FRAME INJECTION VENDOR COMMAND"
+          echo "============================================================"
+
+          sed -n '65,110p' \
+            "$R/core/hdd/inc/wlan_hdd_frame_inject.h"
+
+          echo
+          echo "============================================================"
+          echo "FRAME INJECTION COMMAND / ATTRIBUTE DEFINITIONS"
+          echo "============================================================"
+
+          grep -n -B5 -A20 \
+            'HDD_FRAME_INJECT_CMD_INJECT\|HDD_FRAME_INJECT_ATTR_FRAME_DATA' \
+            "$R/core/hdd/inc/wlan_hdd_frame_inject.h"
+
       # ============================================================
       # 12. VERIFY REQUIRED INJECTION SOURCES EXIST
       #
