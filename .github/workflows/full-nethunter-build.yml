@@ -1068,6 +1068,61 @@ jobs:
             'WLAN_NLINK_CESIUM|NETLINK_CESIUM' \
             "$R" 2>/dev/null | head -200 || true
 
+
+
+
+
+      - name: Trace Cesium socket callback registration
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          R="nethunter-reference/drivers/staging/qcacld-3.0"
+
+          echo "============================================================"
+          echo "NETLINK KERNEL CREATE CALL"
+          echo "============================================================"
+
+          grep -Rni -B30 -A50 \
+            'netlink_kernel_create' \
+            "$R" 2>/dev/null | head -300 || true
+
+          echo
+          echo "============================================================"
+          echo "CESIUM SOCKET CREATION IN WLAN HDD MAIN"
+          echo "============================================================"
+
+          sed -n '4280,4370p' \
+            "$R/core/hdd/src/wlan_hdd_main.c" \
+            2>/dev/null || true
+
+          echo
+          echo "============================================================"
+          echo "ALL CESIUM SOCKET REFERENCES"
+          echo "============================================================"
+
+          grep -RniE \
+            'cesium_nl_srv_sock|hdd_open_cesium_nl_sock|hdd_close_cesium_nl_sock' \
+            "$R" 2>/dev/null | head -200 || true
+
+          echo
+          echo "============================================================"
+          echo "ALL FRAME INJECTION CALLBACK REFERENCES"
+          echo "============================================================"
+
+          grep -RniE \
+            'hdd_frame_inject_netlink|hdd_process_frame_injection' \
+            "$R" 2>/dev/null | head -300 || true
+
+          echo
+          echo "============================================================"
+          echo "NETLINK RECEIVE CALLBACK DEFINITIONS"
+          echo "============================================================"
+
+          grep -RniE \
+            'input[[:space:]]*=|\.input[[:space:]]*=|netlink_rcv|netlink_rcv_skb' \
+            "$R/core/hdd" 2>/dev/null | head -300 || true
+
       # ============================================================
       # 12. VERIFY REQUIRED INJECTION SOURCES EXIST
       #
