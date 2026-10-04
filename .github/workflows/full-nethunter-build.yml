@@ -1600,13 +1600,6 @@ jobs:
           # ============================================================
 
           # ============================================================
-          # DEBUGFS
-          # Required by the QCACLD3 frame-injection debug interface.
-          # ============================================================
-
-          CONFIG_DEBUG_FS=y
-
-          # ============================================================
           # HID
           # ============================================================
 
@@ -2235,7 +2228,6 @@ jobs:
           cat > "${ALLOWED_CHANGES}" <<'EOF'
              CONFIG_HIDRAW=y
              CONFIG_UHID=y
-             CONFIG_DEBUG_FS=y
              CONFIG_BT=y
             CONFIG_BT_BREDR=y
              CONFIG_BT_LE=y
@@ -2575,6 +2567,56 @@ jobs:
 
           echo
           echo "=== End QCACLD3 HDD diagnostic ==="
+
+
+
+
+
+      - name: Wire QCACLD3 frame injection ioctl
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IOCTL_SRC="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_ioctl.c"
+
+          test -f "${IOCTL_SRC}"
+
+          echo "=== Locating hdd_ioctl dispatch ==="
+          grep -n -A80 -B20 \
+            'hdd_ioctl(struct net_device' \
+            "${IOCTL_SRC}" || true
+
+          echo
+          echo "=== Locating frame injection ioctl ==="
+          grep -Rni \
+            'hdd_frame_inject_ioctl' \
+            drivers/staging/qcacld-3.0/core/hdd \
+            || true
+
+          echo
+          echo "=== Checking whether 0x89FA is already wired ==="
+
+          if grep -nE \
+            '0x89FA|89FA|SIOCDEVPRIVATE.*[Ff]rame|hdd_frame_inject_ioctl' \
+            "${IOCTL_SRC}"; then
+
+            echo
+            echo "Frame-injection ioctl reference already exists."
+            echo "No source modification required."
+
+          else
+
+            echo
+            echo "ERROR: Existing source does not expose hdd_frame_inject_ioctl."
+            echo "Refusing to inject an unverified dispatch patch."
+            echo "The source must be patched against its actual hdd_ioctl dispatch."
+            exit 1
+
+          fi
+
+          echo
+          echo "=== Frame injection ioctl wiring check complete ==="
 
 
 
@@ -6633,7 +6675,7 @@ jobs:
           scripts/config --file "${OUT_DIR}/.config" --state CONFIG_USB_GADGET
           scripts/config --file "${OUT_DIR}/.config" --state CONFIG_USB_CONFIGFS
           scripts/config --file "${OUT_DIR}/.config" --state CONFIG_PACKET
-          scripts/config --file "${OUT_DIR}/.config" --state CONFIG_DEBUG_FS
+          
 
           echo
           
