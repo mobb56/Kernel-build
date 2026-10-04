@@ -2948,7 +2948,8 @@ jobs:
           drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h
 
 
-      - name: Wire QCACLD3 frame injection ioctl
+
+      - name: Safely wire QCACLD3 frame injection ioctl
         working-directory: kernel
         shell: bash
         run: |
@@ -2957,142 +2958,305 @@ jobs:
           IOCTL_SRC="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_ioctl.c"
           INJECT_HDR="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h"
 
-          test -f "${IOCTL_SRC}"
-          test -f "${INJECT_HDR}"
+          echo "=================================================="
+          echo "QCACLD3 FRAME-INJECTION DISPATCH PREFLIGHT"
+          echo "=================================================="
 
-          echo "=== Adding frame-injection header to ioctl dispatcher ==="
-
-          python3 - "${IOCTL_SRC}" <<'PY'
-          import sys
-          from pathlib import Path
-
-          path = Path(sys.argv[1])
-          text = path.read_text()
-
-          include = '#include "../inc/wlan_hdd_frame_inject.h"'
-
-          if include not in text:
-              lines = text.splitlines(True)
-
-              # Insert after the existing local HDD includes.
-              insert_at = 0
-
-              for i, line in enumerate(lines):
-                  if line.startswith('#include'):
-                      insert_at = i + 1
-
-              lines.insert(insert_at, include + "\n")
-              text = "".join(lines)
-
-              path.write_text(text)
-              print("Frame-injection header added.")
-          else:
-              print("Frame-injection header already present.")
-          PY
+          test -f "$IOCTL_SRC"
+          test -f "$INJECT_HDR"
 
           echo
-          echo "=== Wiring SIOCDEVPRIVATE + 10 to frame injection ==="
-
-          python3 - "${IOCTL_SRC}" <<'PY'
-          import sys
-          from pathlib import Path
-
-          path = Path(sys.argv[1])
-          text = path.read_text()
-
-          if "case (SIOCDEVPRIVATE + 10):" in text:
-              print("Frame injection ioctl already wired.")
-              raise SystemExit(0)
-
-          start = text.find("static int __hdd_ioctl(")
-          if start < 0:
-              raise SystemExit("ERROR: __hdd_ioctl() not found")
-
-          brace_start = text.find("{", start)
-          if brace_start < 0:
-              raise SystemExit(
-                  "ERROR: opening brace of __hdd_ioctl() not found"
-              )
-
-          depth = 0
-          end = None
-
-          for i in range(brace_start, len(text)):
-              if text[i] == "{":
-                  depth += 1
-              elif text[i] == "}":
-                  depth -= 1
-                  if depth == 0:
-                      end = i + 1
-                      break
-
-          if end is None:
-              raise SystemExit(
-                  "ERROR: could not determine end of __hdd_ioctl()"
-              )
-
-          block = text[start:end]
-
-          if "switch (cmd)" not in block and "switch(cmd)" not in block:
-              raise SystemExit(
-                  "ERROR: __hdd_ioctl() does not contain switch(cmd)"
-              )
-
-          marker = "\n\tdefault:"
-          if marker not in block:
-              marker = "\n    default:"
-          if marker not in block:
-              marker = "\ndefault:"
-
-          if marker not in block:
-              raise SystemExit(
-                  "ERROR: Could not locate default: inside __hdd_ioctl()"
-              )
-
-          injection_case = """
-          case (SIOCDEVPRIVATE + 10):
-              ret = hdd_frame_inject_ioctl(dev, ifr, cmd);
-              break;
-          """
-
-          block = block.replace(
-              marker,
-              "\n" + injection_case + marker,
-              1
-          )
-
-          text = text[:start] + block + text[end:]
-          path.write_text(text)
-
-          print("Frame-injection ioctl dispatch inserted.")
-          PY
-
-          echo
-          echo "=== VERIFY HEADER ==="
-
-          grep -n \
-            'wlan_hdd_frame_inject.h' \
-            "${IOCTL_SRC}"
-
-          echo
-          echo "=== VERIFY IOCTL DISPATCH ==="
-
-          grep -n -A8 -B5 \
-            'SIOCDEVPRIVATE + 10' \
-            "${IOCTL_SRC}"
-
-          
-          echo
-          echo "=== VERIFY HANDLER ==="
-
+          echo "=== Injection handler declarations ==="
           grep -Rni \
             'hdd_frame_inject_ioctl' \
             drivers/staging/qcacld-3.0/core/hdd/inc \
             drivers/staging/qcacld-3.0/core/hdd/src
 
           echo
-          echo "=== FRAME INJECTION IOCTL WIRING PASSED ==="
-        
+          echo "=== Locating ioctl functions ==="
+
+          grep -nE \
+            '(^|[[:space:]])(static[[:space:]]+)?int[[:space:]]+(__)?hdd_ioctl[[:space:]]*\(' \
+            "$IOCTL_SRC"
+
+          echo
+          echo "=== Relevant dispatcher references ==="
+
+          grep -nE \
+            '__hdd_ioctl|hdd_driver_ioctl|hdd_frame_inject_ioctl|switch[[:space:]]*\([[:space:]]*cmd[[:space:]]*\)|SIOCDEVPRIVATE' \
+            "$IOCTL_SRC" | head -250
+
+          echo
+          echo "=== Adding injection header if necessary ==="
+
+          python3 - "$IOCTL_SRC" <<'PY'
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          text = path.read_text()
+
+          inc = '#include "../inc/wlan_hdd_frame_inject.h"'
+
+          if inc not in text:
+              lines = text.splitlines(True)
+
+              positions = [
+                  i for i, line in enumerate(lines)
+                  if line.startswith("#include")
+              ]
+
+              if not positions:
+                  raise SystemExit(
+                      "FATAL: wlan_hdd_ioctl.c has no include section"
+                  )
+
+              lines.insert(positions[-1] + 1, inc + "\n")
+              path.write_text("".join(lines))
+
+              print("Injection header inserted.")
+          else:
+              print("Injection header already present.")
+          PY
+
+          echo
+          echo "=================================================="
+          echo "ANALYZING ACTUAL DISPATCH TOPOLOGY"
+          echo "=================================================="
+
+          python3 - "$IOCTL_SRC" <<'PY'
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          text = path.read_text()
+
+          def function_body(name):
+              needle = name + "("
+              start = text.find(needle)
+
+              if start < 0:
+                  return None
+
+              brace = text.find("{", start)
+              if brace < 0:
+                  return None
+
+              depth = 0
+
+              for i in range(brace, len(text)):
+                  c = text[i]
+
+                  if c == "{":
+                      depth += 1
+                  elif c == "}":
+                      depth -= 1
+
+                      if depth == 0:
+                          return text[start:i + 1]
+
+              return None
+
+          outer = function_body("hdd_ioctl")
+          inner = function_body("__hdd_ioctl")
+
+          if outer is None:
+              raise SystemExit(
+                  "FATAL: Could not locate hdd_ioctl()."
+              )
+
+          if inner is None:
+              raise SystemExit(
+                  "FATAL: Could not locate __hdd_ioctl()."
+              )
+
+          print("hdd_ioctl() found.")
+          print("__hdd_ioctl() found.")
+
+          print()
+          print("=== hdd_ioctl() relevant lines ===")
+
+          for n, line in enumerate(outer.splitlines(), 1):
+              if any(x in line for x in (
+                  "__hdd_ioctl",
+                  "hdd_driver_ioctl",
+                  "switch",
+                  "SIOCDEVPRIVATE",
+                  "hdd_frame_inject_ioctl"
+              )):
+                  print(f"{n:5}: {line}")
+
+          print()
+          print("=== __hdd_ioctl() relevant lines ===")
+
+          for n, line in enumerate(inner.splitlines(), 1):
+              if any(x in line for x in (
+                  "switch",
+                  "SIOCDEVPRIVATE",
+                  "hdd_frame_inject_ioctl"
+              )):
+                  print(f"{n:5}: {line}")
+
+          has_inner_switch = (
+              "switch (cmd)" in inner or
+              "switch(cmd)" in inner
+          )
+
+          has_outer_switch = (
+              "switch (cmd)" in outer or
+              "switch(cmd)" in outer
+          )
+
+          if not has_inner_switch:
+              raise SystemExit(
+                  "FATAL: __hdd_ioctl() does not contain switch(cmd). "
+                  "Refusing to guess where to patch."
+              )
+
+          if not has_outer_switch:
+              print(
+                  "NOTE: outer hdd_ioctl() has no switch(cmd)."
+              )
+
+          print()
+          print("DISPATCH PREFLIGHT PASSED.")
+          PY
+
+          echo
+          echo "=================================================="
+          echo "PATCHING THE VERIFIED INNER DISPATCHER"
+          echo "=================================================="
+
+          python3 - "$IOCTL_SRC" <<'PY'
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          text = path.read_text()
+
+          CASE = """    case (SIOCDEVPRIVATE + 10):
+              ret = hdd_frame_inject_ioctl(dev, ifr, cmd);
+              break;
+          """
+
+          def locate_function(text, name):
+              needle = name + "("
+              start = text.find(needle)
+
+              if start < 0:
+                  raise SystemExit(
+                      f"FATAL: {name}() not found"
+                  )
+
+              brace = text.find("{", start)
+
+              if brace < 0:
+                  raise SystemExit(
+                      f"FATAL: opening brace for {name}() not found"
+                  )
+
+              depth = 0
+
+              for i in range(brace, len(text)):
+                  if text[i] == "{":
+                      depth += 1
+                  elif text[i] == "}":
+                      depth -= 1
+
+                      if depth == 0:
+                          return start, i + 1
+
+              raise SystemExit(
+                  f"FATAL: could not determine end of {name}()"
+              )
+
+          start, end = locate_function(
+              text,
+              "__hdd_ioctl"
+          )
+
+          block = text[start:end]
+
+          if "switch (cmd)" not in block and \
+             "switch(cmd)" not in block:
+              raise SystemExit(
+                  "FATAL: verified __hdd_ioctl() no longer "
+                  "contains switch(cmd)."
+              )
+
+          if "case (SIOCDEVPRIVATE + 10):" in block:
+              print(
+                  "0x89FA already present in __hdd_ioctl(); "
+                  "no duplicate inserted."
+              )
+              raise SystemExit(0)
+
+          markers = [
+              "\n\tdefault:",
+              "\n    default:",
+              "\ndefault:"
+          ]
+
+          marker = next(
+              (m for m in markers if m in block),
+              None
+          )
+
+          if marker is None:
+              raise SystemExit(
+                  "FATAL: __hdd_ioctl() default case not found. "
+                  "Refusing to guess."
+              )
+
+          block = block.replace(
+              marker,
+              "\n" + CASE + marker,
+              1
+          )
+
+          text = text[:start] + block + text[end:]
+          path.write_text(text)
+
+          print(
+              "SUCCESS: 0x89FA wired into verified "
+              "__hdd_ioctl() switch."
+          )
+          PY
+
+          echo
+          echo "=================================================="
+          echo "POST-PATCH SOURCE VERIFICATION"
+          echo "=================================================="
+
+          COUNT="$(
+            grep -c \
+              'case (SIOCDEVPRIVATE + 10):' \
+              "$IOCTL_SRC" || true
+          )"
+
+          echo "0x89FA case count: $COUNT"
+
+          if [ "$COUNT" -ne 1 ]; then
+            echo "FATAL: Expected exactly one 0x89FA case."
+            exit 1
+          fi
+
+          grep -n -A6 -B6 \
+            'case (SIOCDEVPRIVATE + 10):' \
+            "$IOCTL_SRC"
+
+          echo
+          echo "=== Handler call verification ==="
+
+          grep -n \
+            'hdd_frame_inject_ioctl(dev, ifr, cmd)' \
+            "$IOCTL_SRC"
+
+          echo
+          echo "=================================================="
+          echo "FRAME-INJECTION IOCTL SOURCE PATCH PASSED"
+          echo "=================================================="
+
 
 
       - name: Remove duplicate injection helper definitions
