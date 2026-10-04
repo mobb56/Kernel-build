@@ -1020,6 +1020,54 @@ jobs:
             'hdd_frame_inject_ioctl|FRAME_INJECT.*IOCTL|SIOCDEVPRIVATE' \
             "$R/core/hdd" 2>/dev/null | head -200 || true
 
+
+
+
+
+
+      - name: Trace exact Cesium Netlink callback
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          R="nethunter-reference/drivers/staging/qcacld-3.0"
+          C="$R/core/hdd/src/wlan_hdd_frame_inject.c"
+
+          echo "============================================================"
+          echo "CESIUM NETLINK SOCKET CREATION CONTEXT"
+          echo "============================================================"
+
+          grep -n -B30 -A80 \
+            'cesium_nl_srv_sock[[:space:]]*=' \
+            "$C" 2>/dev/null || true
+
+          echo
+          echo "============================================================"
+          echo "ALL NETLINK CALLBACK / RECEIVE FUNCTIONS"
+          echo "============================================================"
+
+          grep -n -B15 -A50 \
+            -E 'netlink_kernel_create|netlink_rcv|netlink_unicast|nlmsg|sk_buff.*netlink|cesium_nl' \
+            "$C" 2>/dev/null | head -400 || true
+
+          echo
+          echo "============================================================"
+          echo "FRAME INJECTION NETLINK CALL SITES"
+          echo "============================================================"
+
+          grep -RniE \
+            'hdd_frame_inject_netlink[[:space:]]*\\(' \
+            "$R" 2>/dev/null | head -100 || true
+
+          echo
+          echo "============================================================"
+          echo "NETLINK PROTOCOL 30 REFERENCES"
+          echo "============================================================"
+
+          grep -RniE \
+            'WLAN_NLINK_CESIUM|NETLINK_CESIUM' \
+            "$R" 2>/dev/null | head -200 || true
+
       # ============================================================
       # 12. VERIFY REQUIRED INJECTION SOURCES EXIST
       #
