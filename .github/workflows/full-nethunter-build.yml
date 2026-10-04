@@ -2599,31 +2599,68 @@ jobs:
           if start < 0:
               raise SystemExit("ERROR: __hdd_ioctl() not found")
 
-          end = text.find("\nstatic int hdd_ioctl(", start)
-          if end < 0:
-              raise SystemExit("ERROR: end of __hdd_ioctl() not found")
+          # Find the opening brace of __hdd_ioctl().
+          brace_start = text.find("{", start)
+          if brace_start < 0:
+              raise SystemExit(
+                  "ERROR: opening brace of __hdd_ioctl() not found"
+              )
+
+          # Match braces to locate the actual end of __hdd_ioctl().
+          depth = 0
+          end = None
+
+          for i in range(brace_start, len(text)):
+              if text[i] == "{":
+                  depth += 1
+              elif text[i] == "}":
+                  depth -= 1
+                  if depth == 0:
+                      end = i + 1
+                      break
+
+          if end is None:
+              raise SystemExit(
+                  "ERROR: could not determine end of __hdd_ioctl()"
+              )
 
           block = text[start:end]
 
+          # Make sure this is really the dispatcher we expect.
+          if "switch (cmd)" not in block and "switch(cmd)" not in block:
+              raise SystemExit(
+                  "ERROR: __hdd_ioctl() does not contain switch(cmd)"
+              )
+
+          # Locate the dispatcher default case.
           marker = "\n\tdefault:"
           if marker not in block:
               marker = "\n    default:"
 
           if marker not in block:
+              marker = "\ndefault:"
+
+          if marker not in block:
               raise SystemExit(
-                  "ERROR: Could not locate __hdd_ioctl() default dispatch"
+                  "ERROR: Could not locate default: inside __hdd_ioctl()"
               )
 
-          injection_case = r'''
+          injection_case = """
           case (SIOCDEVPRIVATE + 10):
               ret = hdd_frame_inject_ioctl(dev, ifr, cmd);
               break;
-          '''
+          """
 
-          block = block.replace(marker, "\n" + injection_case + marker, 1)
+          block = block.replace(
+              marker,
+              "\n" + injection_case + marker,
+              1
+          )
 
           text = text[:start] + block + text[end:]
           path.write_text(text)
+
+          print("Frame-injection ioctl dispatch inserted.")
           PY
 
           echo
@@ -2642,8 +2679,6 @@ jobs:
 
           echo
           echo "=== Frame injection ioctl successfully wired ==="
-
-
       # ============================================================
       # BUILD QCACLD3 CESIUM INJECTION USERSPACE TOOL
       # ============================================================
