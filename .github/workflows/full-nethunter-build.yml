@@ -1537,6 +1537,62 @@ jobs:
             CROSS_COMPILE="${CROSS_COMPILE}" \
             olddefconfig
 
+
+
+          echo
+          echo "=========================================================="
+          echo "KCONFIG DELTA AFTER OLDDEFCONFIG"
+          echo "============================================================"
+
+          FINAL_CONFIG="${OUT_DIR}/.config"
+          PREMERGE_CONFIG="${OUT_DIR}/stock-before-nethunter.config"
+
+          awk '
+            /^[#] CONFIG_[A-Za-z0-9_]+ is not set$/ {
+              print $2 "=n"
+              next
+            }
+
+            /^CONFIG_[A-Za-z0-9_]+=/ {
+              line=$0
+              sub(/^CONFIG_/, "", line)
+              split(line, a, "=")
+              print "CONFIG_" a[1] "=" a[2]
+            }
+          ' "${PREMERGE_CONFIG}" | sort > "${OUT_DIR}/premerge.normalized"
+
+          awk '
+            /^[#] CONFIG_[A-Za-z0-9_]+ is not set$/ {
+              print $2 "=n"
+              next
+            }
+
+            /^CONFIG_[A-Za-z0-9_]+=/ {
+              line=$0
+              sub(/^CONFIG_/, "", line)
+              split(line, a, "=")
+              print "CONFIG_" a[1] "=" a[2]
+            }
+          ' "${FINAL_CONFIG}" | sort > "${OUT_DIR}/final.normalized"
+
+          echo
+          echo "=== Changes introduced by NetHunter merge + olddefconfig ==="
+
+          comm -3 \
+            "${OUT_DIR}/premerge.normalized" \
+            "${OUT_DIR}/final.normalized" \
+            > "${OUT_DIR}/kconfig-full-delta.txt"
+
+          cat "${OUT_DIR}/kconfig-full-delta.txt"
+
+          echo
+          echo "=== DEBUG_FS dependency-related symbols ==="
+
+          grep -E \
+            '(^|[[:space:]])CONFIG_(DEBUG_FS|DEBUG_KERNEL|DEBUG_MISC|DEBUG_INFO|STACKTRACE|KALLSYMS|KALLSYMS_ALL|LOCKDEP|FTRACE|FUNCTION_TRACER|TRACING|KGDB|PROFILING)=' \
+            "${FINAL_CONFIG}" \
+            || true
+
           echo
           echo "=== Critical settings AFTER olddefconfig ==="
 
