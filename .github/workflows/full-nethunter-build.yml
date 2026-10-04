@@ -2706,8 +2706,9 @@ jobs:
             'SIOCDEVPRIVATE + 10' \
             "${IOCTL_SRC}"
 
+          
           echo
-          echo "=== VERIFY HANDLER DECLARATION ==="
+          echo "=== VERIFY HANDLER ==="
 
           grep -Rni \
             'hdd_frame_inject_ioctl' \
@@ -2716,6 +2717,8 @@ jobs:
 
           echo
           echo "=== FRAME INJECTION IOCTL WIRING PASSED ==="
+        
+          
 
       # ============================================================
       # BUILD QCACLD3 CESIUM INJECTION USERSPACE TOOL
