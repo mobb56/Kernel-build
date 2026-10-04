@@ -937,6 +937,89 @@ jobs:
             'cesium_pid|WLAN_NLINK_CESIUM|nlmsg_unicast' \
             "$R/core/hdd" 2>/dev/null | head -150
 
+
+
+
+      - name: Extract exact Cesium injection interface
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          R="nethunter-reference/drivers/staging/qcacld-3.0"
+          H="$R/core/hdd/inc/wlan_hdd_frame_inject.h"
+          C="$R/core/hdd/src/wlan_hdd_frame_inject.c"
+
+          echo "============================================================"
+          echo "EXACT CESIUM NETLINK CONSTANTS"
+          echo "============================================================"
+
+          grep -RniE \
+            'WLAN_NLINK_CESIUM|NETLINK_CESIUM' \
+            "$R" 2>/dev/null | head -100 || true
+
+          echo
+          echo "============================================================"
+          echo "EXACT HDD_FRAME_INJECT_ATTR ENUM"
+          echo "============================================================"
+
+          grep -n -B15 -A40 \
+            'HDD_FRAME_INJECT_ATTR_FRAME_DATA' \
+            "$H" 2>/dev/null || true
+
+          echo
+          echo "============================================================"
+          echo "ALL FRAME INJECTION ATTRIBUTES"
+          echo "============================================================"
+
+          grep -nE \
+            'HDD_FRAME_INJECT_ATTR_' \
+            "$H" 2>/dev/null | head -200 || true
+
+          echo
+          echo "============================================================"
+          echo "CESIUM NETLINK SOCKET CREATION"
+          echo "============================================================"
+
+          grep -n -B20 -A60 \
+            'hdd_open_cesium_nl_sock' \
+            "$C" 2>/dev/null || true
+
+          echo
+          echo "============================================================"
+          echo "CESIUM NETLINK RECEIVE HANDLER"
+          echo "============================================================"
+
+          grep -n -B40 -A120 \
+            'hdd_frame_inject_netlink' \
+            "$C" 2>/dev/null || true
+
+          echo
+          echo "============================================================"
+          echo "CESIUM NETLINK SEND/UNICAST"
+          echo "============================================================"
+
+          grep -RniE \
+            'nlmsg_unicast|netlink_unicast|netlink_kernel_create|netlink_kernel_cfg' \
+            "$R/core/hdd" 2>/dev/null | head -200 || true
+
+          echo
+          echo "============================================================"
+          echo "CESIUM PID"
+          echo "============================================================"
+
+          grep -RniE \
+            'cesium_pid[[:space:]]*=|cesium_pid' \
+            "$R/core/hdd" 2>/dev/null | head -150 || true
+
+          echo
+          echo "============================================================"
+          echo "IOCTL COMMAND DEFINITIONS"
+          echo "============================================================"
+
+          grep -RniE \
+            'hdd_frame_inject_ioctl|FRAME_INJECT.*IOCTL|SIOCDEVPRIVATE' \
+            "$R/core/hdd" 2>/dev/null | head -200 || true
+
       # ============================================================
       # 12. VERIFY REQUIRED INJECTION SOURCES EXIST
       #
