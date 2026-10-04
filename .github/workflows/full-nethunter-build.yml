@@ -1123,6 +1123,58 @@ jobs:
             'input[[:space:]]*=|\.input[[:space:]]*=|netlink_rcv|netlink_rcv_skb' \
             "$R/core/hdd" 2>/dev/null | head -300 || true
 
+
+
+
+      - name: Inspect Cesium Netlink API compatibility
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          R="nethunter-reference/drivers/staging/qcacld-3.0"
+
+          echo "============================================================"
+          echo "CESIUM NETLINK CREATE CALL - FULL CONTEXT"
+          echo "============================================================"
+
+          sed -n '4320,4360p' \
+            "$R/core/hdd/src/wlan_hdd_main.c" || true
+
+          echo
+          echo "============================================================"
+          echo "FRAME INJECTION NETLINK FUNCTION"
+          echo "============================================================"
+
+          sed -n '715,825p' \
+            "$R/core/hdd/src/wlan_hdd_frame_inject.c" || true
+
+          echo
+          echo "============================================================"
+          echo "ALL REFERENCES TO hdd_frame_inject_netlink"
+          echo "============================================================"
+
+          grep -Rni \
+            'hdd_frame_inject_netlink' \
+            "$R" 2>/dev/null | head -200 || true
+
+          echo
+          echo "============================================================"
+          echo "NETLINK KERNEL CONFIG STRUCTURES"
+          echo "============================================================"
+
+          grep -RniE \
+            'netlink_kernel_cfg|\.input[[:space:]]*=|input[[:space:]]*=' \
+            "$R/core/hdd" 2>/dev/null | head -300 || true
+
+          echo
+          echo "============================================================"
+          echo "KERNEL NETLINK API DECLARATIONS"
+          echo "============================================================"
+
+          grep -Rni \
+            'netlink_kernel_create' \
+            "$R" 2>/dev/null | head -200 || true
+
       # ============================================================
       # 12. VERIFY REQUIRED INJECTION SOURCES EXIST
       #
