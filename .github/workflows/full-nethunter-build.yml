@@ -1175,6 +1175,68 @@ jobs:
             'netlink_kernel_create' \
             "$R" 2>/dev/null | head -200 || true
 
+
+
+
+      - name: Trace Cesium cfg80211 vendor command registration
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          R="nethunter-reference/drivers/staging/qcacld-3.0"
+
+          echo "============================================================"
+          echo "hdd_frame_inject_netlink REGISTRATION CONTEXT"
+          echo "============================================================"
+
+          sed -n '70,115p' \
+            "$R/core/hdd/src/wlan_hdd_frame_inject.c" || true
+
+          echo
+          echo "============================================================"
+          echo "ALL .doit = hdd_frame_inject_netlink REFERENCES"
+          echo "============================================================"
+
+          grep -Rni -B25 -A25 \
+            '\.doit[[:space:]]*=[[:space:]]*hdd_frame_inject_netlink' \
+            "$R" 2>/dev/null | head -500 || true
+
+          echo
+          echo "============================================================"
+          echo "VENDOR COMMAND STRUCTURES"
+          echo "============================================================"
+
+          grep -RniE \
+            'struct[[:space:]]+wiphy_vendor_command|wiphy_vendor_command|vendor_commands' \
+            "$R/core/hdd" 2>/dev/null | head -500 || true
+
+          echo
+          echo "============================================================"
+          echo "VENDOR ID / SUBCOMMAND DEFINITIONS"
+          echo "============================================================"
+
+          grep -RniE \
+            'QCA_NL80211_VENDOR_ID|NL80211_VENDOR_ID|VENDOR_SUBCMD|vendor_subcmd|subcmd' \
+            "$R/core/hdd" 2>/dev/null | head -700 || true
+
+          echo
+          echo "============================================================"
+          echo "CFG80211 VENDOR COMMAND REGISTRATION"
+          echo "============================================================"
+
+          grep -RniE \
+            'vendor_commands|wiphy.*vendor|vendor.*wiphy|cfg80211.*vendor|NL80211_CMD_VENDOR' \
+            "$R/core/hdd/src" 2>/dev/null | head -700 || true
+
+          echo
+          echo "============================================================"
+          echo "INJECTION ATTRIBUTES / POLICY"
+          echo "============================================================"
+
+          grep -Rni -B15 -A40 \
+            'HDD_FRAME_INJECT_ATTR_FRAME_DATA' \
+            "$R/core/hdd" 2>/dev/null | head -500 || true
+
       # ============================================================
       # 12. VERIFY REQUIRED INJECTION SOURCES EXIST
       #
