@@ -2572,6 +2572,7 @@ jobs:
 
 
 
+
       - name: Wire QCACLD3 frame injection ioctl
         working-directory: kernel
         shell: bash
@@ -2579,9 +2580,42 @@ jobs:
           set -euo pipefail
 
           IOCTL_SRC="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_ioctl.c"
+          INJECT_HDR="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h"
 
           test -f "${IOCTL_SRC}"
+          test -f "${INJECT_HDR}"
 
+          echo "=== Adding frame-injection header to ioctl dispatcher ==="
+
+          python3 - "${IOCTL_SRC}" <<'PY'
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          text = path.read_text()
+
+          include = '#include "../inc/wlan_hdd_frame_inject.h"'
+
+          if include not in text:
+              lines = text.splitlines(True)
+
+              # Insert after the existing local HDD includes.
+              insert_at = 0
+
+              for i, line in enumerate(lines):
+                  if line.startswith('#include'):
+                      insert_at = i + 1
+
+              lines.insert(insert_at, include + "\n")
+              text = "".join(lines)
+
+              path.write_text(text)
+              print("Frame-injection header added.")
+          else:
+              print("Frame-injection header already present.")
+          PY
+
+          echo
           echo "=== Wiring SIOCDEVPRIVATE + 10 to frame injection ==="
 
           python3 - "${IOCTL_SRC}" <<'PY'
@@ -2599,14 +2633,12 @@ jobs:
           if start < 0:
               raise SystemExit("ERROR: __hdd_ioctl() not found")
 
-          # Find the opening brace of __hdd_ioctl().
           brace_start = text.find("{", start)
           if brace_start < 0:
               raise SystemExit(
                   "ERROR: opening brace of __hdd_ioctl() not found"
               )
 
-          # Match braces to locate the actual end of __hdd_ioctl().
           depth = 0
           end = None
 
@@ -2626,17 +2658,14 @@ jobs:
 
           block = text[start:end]
 
-          # Make sure this is really the dispatcher we expect.
           if "switch (cmd)" not in block and "switch(cmd)" not in block:
               raise SystemExit(
                   "ERROR: __hdd_ioctl() does not contain switch(cmd)"
               )
 
-          # Locate the dispatcher default case.
           marker = "\n\tdefault:"
           if marker not in block:
               marker = "\n    default:"
-
           if marker not in block:
               marker = "\ndefault:"
 
@@ -2664,21 +2693,30 @@ jobs:
           PY
 
           echo
-          echo "=== Verifying frame injection dispatch ==="
+          echo "=== VERIFY HEADER ==="
+
+          grep -n \
+            'wlan_hdd_frame_inject.h' \
+            "${IOCTL_SRC}"
+
+          echo
+          echo "=== VERIFY IOCTL DISPATCH ==="
 
           grep -n -A8 -B5 \
             'SIOCDEVPRIVATE + 10' \
             "${IOCTL_SRC}"
 
           echo
-          echo "=== Verifying handler exists ==="
+          echo "=== VERIFY HANDLER DECLARATION ==="
 
           grep -Rni \
-            'hdd_frame_inject_ioctl(struct net_device' \
+            'hdd_frame_inject_ioctl' \
+            drivers/staging/qcacld-3.0/core/hdd/inc \
             drivers/staging/qcacld-3.0/core/hdd/src
 
           echo
-          echo "=== Frame injection ioctl successfully wired ==="
+          echo "=== FRAME INJECTION IOCTL WIRING PASSED ==="
+
       # ============================================================
       # BUILD QCACLD3 CESIUM INJECTION USERSPACE TOOL
       # ============================================================
