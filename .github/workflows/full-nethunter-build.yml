@@ -2582,43 +2582,66 @@ jobs:
 
           test -f "${IOCTL_SRC}"
 
-          echo "=== Locating hdd_ioctl dispatch ==="
-          grep -n -A80 -B20 \
-            'hdd_ioctl(struct net_device' \
-            "${IOCTL_SRC}" || true
+          echo "=== Wiring SIOCDEVPRIVATE + 10 to frame injection ==="
+
+          python3 - "${IOCTL_SRC}" <<'PY'
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          text = path.read_text()
+
+          if "case (SIOCDEVPRIVATE + 10):" in text:
+              print("Frame injection ioctl already wired.")
+              raise SystemExit(0)
+
+          start = text.find("static int __hdd_ioctl(")
+          if start < 0:
+              raise SystemExit("ERROR: __hdd_ioctl() not found")
+
+          end = text.find("\nstatic int hdd_ioctl(", start)
+          if end < 0:
+              raise SystemExit("ERROR: end of __hdd_ioctl() not found")
+
+          block = text[start:end]
+
+          marker = "\n\tdefault:"
+          if marker not in block:
+              marker = "\n    default:"
+
+          if marker not in block:
+              raise SystemExit(
+                  "ERROR: Could not locate __hdd_ioctl() default dispatch"
+              )
+
+          injection_case = r'''
+          case (SIOCDEVPRIVATE + 10):
+              ret = hdd_frame_inject_ioctl(dev, ifr, cmd);
+              break;
+          '''
+
+          block = block.replace(marker, "\n" + injection_case + marker, 1)
+
+          text = text[:start] + block + text[end:]
+          path.write_text(text)
+          PY
 
           echo
-          echo "=== Locating frame injection ioctl ==="
+          echo "=== Verifying frame injection dispatch ==="
+
+          grep -n -A8 -B5 \
+            'SIOCDEVPRIVATE + 10' \
+            "${IOCTL_SRC}"
+
+          echo
+          echo "=== Verifying handler exists ==="
+
           grep -Rni \
-            'hdd_frame_inject_ioctl' \
-            drivers/staging/qcacld-3.0/core/hdd \
-            || true
+            'hdd_frame_inject_ioctl(struct net_device' \
+            drivers/staging/qcacld-3.0/core/hdd/src
 
           echo
-          echo "=== Checking whether 0x89FA is already wired ==="
-
-          if grep -nE \
-            '0x89FA|89FA|SIOCDEVPRIVATE.*[Ff]rame|hdd_frame_inject_ioctl' \
-            "${IOCTL_SRC}"; then
-
-            echo
-            echo "Frame-injection ioctl reference already exists."
-            echo "No source modification required."
-
-          else
-
-            echo
-            echo "ERROR: Existing source does not expose hdd_frame_inject_ioctl."
-            echo "Refusing to inject an unverified dispatch patch."
-            echo "The source must be patched against its actual hdd_ioctl dispatch."
-            exit 1
-
-          fi
-
-          echo
-          echo "=== Frame injection ioctl wiring check complete ==="
-
-
+          echo "=== Frame injection ioctl successfully wired ==="
 
 
       # ============================================================
