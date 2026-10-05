@@ -3585,7 +3585,76 @@ jobs:
 
 
 
-       
+      - name: Remove duplicate QCACLD3 WMA injection stubs
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          WMA_SRC="${GITHUB_WORKSPACE}/kernel/drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c"
+
+          test -f "$WMA_SRC"
+
+          echo "=== Before cleanup ==="
+          grep -n -E \
+            'QDF_STATUS wma_(init|deinit)_injection_queue|wma_queue_injection_frame|wma_injection_pre_stop_cleanup' \
+            "$WMA_SRC" || true
+
+          python3 - "$WMA_SRC" <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          path = Path(sys.argv[1])
+          text = path.read_text()
+
+          # Remove the known trailing stub block only.
+          pattern = re.compile(
+              r'''
+              QDF_STATUS\s+wma_init_injection_queue\s*
+              \(\s*tp_wma_handle\s+wma_handle\s*\)\s*
+              \{\s*
+              return\s+QDF_STATUS_SUCCESS\s*;\s*
+              \}\s*
+
+              QDF_STATUS\s+wma_deinit_injection_queue\s*
+              \(\s*tp_wma_handle\s+wma_handle\s*\)\s*
+              \{\s*
+              return\s+QDF_STATUS_SUCCESS\s*;\s*
+              \}\s*
+
+              void\s+wma_injection_pre_stop_cleanup\s*
+              \(\s*tp_wma_handle\s+wma_handle\s*\)\s*
+              \{\s*\}\s*
+
+              QDF_STATUS\s+wma_queue_injection_frame\s*
+              \(\s*
+              tp_wma_handle\s+wma_handle\s*,\s*
+              struct\s+inject_frame_req\s*\*req\s*,\s*
+              uint8_t\s+vdev_id\s*
+              \)\s*
+              \{\s*
+              return\s+QDF_STATUS_E_NOSUPPORT\s*;\s*
+              \}
+              ''',
+              re.X | re.S
+          )
+
+          new_text, count = pattern.subn('', text)
+
+          if count != 1:
+              raise SystemExit(
+                  f"Expected exactly one duplicate WMA injection stub block, found {count}"
+              )
+
+          path.write_text(new_text)
+
+          print("Removed exactly one duplicate WMA injection stub block.")
+          PY
+
+          echo "=== After cleanup ==="
+          grep -n -E \
+            'QDF_STATUS wma_(init|deinit)_injection_queue|wma_queue_injection_frame|wma_injection_pre_stop_cleanup' \
+            "$WMA_SRC" || true
                         
                           
       # ============================================================
