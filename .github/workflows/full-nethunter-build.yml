@@ -3138,86 +3138,98 @@ jobs:
 
 
 
-
       - name: Route per-interface monitor netdev ops
-        working-directory: kernel
         shell: bash
         run: |
           set -euo pipefail
 
           HDD_MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
 
-          test -f "$HDD_MAIN"
-
           echo "=== Checking expected original hdd_set_station_ops() ==="
 
-          grep -Fq \
-            'if (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE) {' \
-            "$HDD_MAIN"
+          python3 - "$HDD_MAIN" <<'PY'
+          import re
+          import sys
 
-          echo "Original monitor condition found."
+          path = sys.argv[1]
 
-          cp "$HDD_MAIN" "$HDD_MAIN.monitor-routing.bak"
+          with open(path, "r", encoding="utf-8") as f:
+              src = f.read()
 
-          awk '
-          /void hdd_set_station_ops\(struct net_device \*dev\)/ {
-              in_func = 1
-              added_adapter = 0
-          }
+          pattern = re.compile(
+              r'void\s+hdd_set_station_ops\s*\(\s*struct\s+net_device\s*\*\s*dev\s*\)\s*'
+              r'\{.*?\n\}',
+              re.S
+          )
 
-          in_func && /^[[:space:]]*\{/ && !added_adapter {
-              print
-              print "\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
-              added_adapter = 1
-              next
-          }
+          match = pattern.search(src)
 
-          in_func &&
-          /if \(cds_get_conparam\(\) == QDF_GLOBAL_MONITOR_MODE\) \{/ {
-              print "\tif (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||"
-              print "\t    (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {"
-              changed = 1
-              next
-          }
+          if not match:
+              print("ERROR: hdd_set_station_ops() was not found")
+              sys.exit(1)
 
-          { print }
+          old = match.group(0)
 
-          in_func && /^[[:space:]]*}[[:space:]]*$/ {
-              in_func = 0
-          }
+          print("Original hdd_set_station_ops():")
+          print(old)
 
-          END {
-              if (!changed) {
-                  print "ERROR: Monitor condition was not replaced." > "/dev/stderr"
-                  exit 1
+          if (
+              "WLAN_HDD_GET_PRIV_PTR(dev)" in old
+              and "QDF_MONITOR_MODE" in old
+              and "wlan_mon_drv_ops" in old
+              and "wlan_drv_ops" in old
+          ):
+              print("Monitor routing is already patched.")
+              sys.exit(0)
+
+          new = """void hdd_set_station_ops(struct net_device *dev)
+          {
+              struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
+
+              if (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||
+                  (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {
+                  dev->netdev_ops = &wlan_mon_drv_ops;
+              } else {
+                  dev->netdev_ops = &wlan_drv_ops;
               }
 
-              if (!added_adapter) {
-                  print "ERROR: Adapter declaration was not inserted." > "/dev/stderr"
-                  exit 1
-              }
-          }
-          ' "$HDD_MAIN.monitor-routing.bak" > "$HDD_MAIN.monitor-routing.new"
+              dev->ethtool_ops = &wlan_ethtool_ops;
+          }"""
 
-          mv "$HDD_MAIN.monitor-routing.new" "$HDD_MAIN"
-          rm -f "$HDD_MAIN.monitor-routing.bak"
+          src = src[:match.start()] + new + src[match.end():]
+
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(src)
+
+          print("Patched hdd_set_station_ops() successfully.")
+          PY
 
           echo
           echo "=== Patched hdd_set_station_ops() ==="
 
-          awk '
-          /void hdd_set_station_ops\(struct net_device \*dev\)/ {
-              show = 1
-          }
+          python3 - "$HDD_MAIN" <<'PY'
+          import re
+          import sys
 
-          show {
-              print
-          }
+          path = sys.argv[1]
 
-          show && /^[[:space:]]*}[[:space:]]*$/ {
-              exit
-          }
-          ' "$HDD_MAIN"
+          with open(path, "r", encoding="utf-8") as f:
+              src = f.read()
+
+          pattern = re.compile(
+              r'void\s+hdd_set_station_ops\s*\(\s*struct\s+net_device\s*\*\s*dev\s*\)\s*'
+              r'\{.*?\n\}',
+              re.S
+          )
+
+          match = pattern.search(src)
+
+          if not match:
+              print("ERROR: patched hdd_set_station_ops() not found")
+              sys.exit(1)
+
+          print(match.group(0))
+          PY
 
           echo
           echo "=== Verifying exact monitor routing ==="
@@ -3227,7 +3239,7 @@ jobs:
             "$HDD_MAIN"
 
           grep -Fq \
-            'adapter && adapter->device_mode == QDF_MONITOR_MODE' \
+            'adapter->device_mode == QDF_MONITOR_MODE' \
             "$HDD_MAIN"
 
           grep -Fq \
@@ -3236,6 +3248,10 @@ jobs:
 
           grep -Fq \
             'dev->netdev_ops = &wlan_drv_ops;' \
+            "$HDD_MAIN"
+
+          grep -Fq \
+            'dev->ethtool_ops = &wlan_ethtool_ops;' \
             "$HDD_MAIN"
 
           echo "Per-interface monitor routing: PASS"
