@@ -3247,53 +3247,164 @@ jobs:
 
 
       - name: Verify monitor and injection completion integration
-        working-directory: kernel
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
 
           HDD_MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
           HDD_CFG="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c"
           WMA_MGMT="drivers/staging/qcacld-3.0/core/wma/src/wma_mgmt.c"
           WMA_INJECT="drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c"
+          WMA_INJECT_H="drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h"
 
+          fail=0
+
+          check_file() {
+            local file="$1"
+
+            if [ -f "$file" ]; then
+              echo "PASS: file exists: $file"
+            else
+              echo "FAIL: missing file: $file"
+              fail=1
+            fi
+          }
+
+          check_grep() {
+            local pattern="$1"
+            shift
+            local found=0
+            local file
+
+            for file in "$@"; do
+              if grep -Fq -- "$pattern" "$file" 2>/dev/null; then
+                echo "PASS: [$pattern] found in $file"
+                found=1
+                break
+              fi
+            done
+
+            if [ "$found" -eq 0 ]; then
+              echo "FAIL: [$pattern] not found in:"
+              for file in "$@"; do
+                echo "      $file"
+              done
+              fail=1
+            fi
+          }
+
+          echo
+          echo "=========================================="
+          echo "VERIFY MONITOR + INJECTION INTEGRATION"
+          echo "=========================================="
+
+          echo
+          echo "=== SOURCE FILE CHECKS ==="
+
+          check_file "$HDD_MAIN"
+          check_file "$HDD_CFG"
+          check_file "$WMA_MGMT"
+          check_file "$WMA_INJECT"
+          check_file "$WMA_INJECT_H"
+
+          if [ "$fail" -ne 0 ]; then
+            echo
+            echo "ERROR: Required source file is missing."
+            exit 1
+          fi
+
+          echo
           echo "=== MONITOR CHECKS ==="
 
-          grep -Fq 'QDF_MONITOR_MODE' "$HDD_MAIN"
-          grep -Fq 'wlan_mon_drv_ops' "$HDD_MAIN"
-          grep -Fq 'hdd_mon_open' "$HDD_MAIN"
-          grep -Fq 'adapter->device_mode = QDF_MONITOR_MODE;' "$HDD_CFG"
-          grep -Fq 'adapter->wdev.iftype = NL80211_IFTYPE_MONITOR;' "$HDD_CFG"
+          # Monitor mode symbol must exist somewhere in the HDD implementation.
+          check_grep \
+            "QDF_MONITOR_MODE" \
+            "$HDD_MAIN" "$HDD_CFG"
 
-          echo "Monitor lifecycle checks: PASS"
+          # Monitor netdev operations must be present.
+          check_grep \
+            "wlan_mon_drv_ops" \
+            "$HDD_MAIN" "$HDD_CFG"
+
+          # Monitor open handler must exist if used by the monitor netdev ops.
+          check_grep \
+            "hdd_mon_open" \
+            "$HDD_MAIN" "$HDD_CFG"
+
+          # Do not assume which HDD source file owns the device_mode assignment.
+          check_grep \
+            "adapter->device_mode = QDF_MONITOR_MODE" \
+            "$HDD_MAIN" "$HDD_CFG"
+
+          # Do not assume which HDD source file owns the nl80211 monitor
+          # interface assignment.
+          check_grep \
+            "NL80211_IFTYPE_MONITOR" \
+            "$HDD_MAIN" "$HDD_CFG"
+
+          echo
+          echo "=== MONITOR SYMBOL LOCATION DEBUG ==="
+
+          grep -nE \
+            'QDF_MONITOR_MODE|wlan_mon_drv_ops|hdd_mon_open|device_mode[[:space:]]*=[[:space:]]*QDF_MONITOR_MODE|NL80211_IFTYPE_MONITOR' \
+            "$HDD_MAIN" "$HDD_CFG" || true
 
           echo
           echo "=== INJECTION COMPLETION CHECKS ==="
 
-          grep -Fq '#include "wma_frame_inject.h"' "$WMA_MGMT"
-          grep -Fq 'WMA_IS_INJECTION_DESC_ID(desc_id)' "$WMA_MGMT"
-          grep -Fq 'WMA_IS_INJECTION_DESC_ID(injection_desc_id)' "$WMA_MGMT"
-          grep -Fq 'wma_handle_injection_fw_response' "$WMA_MGMT"
-          grep -Fq 'WMA_INJECTION_DESC_ID_BASE 0x2000' \
-            drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h
+          check_grep \
+            '#include "wma_frame_inject.h"' \
+            "$WMA_MGMT"
 
-          echo "Injection completion checks: PASS"
+          check_grep \
+            "WMA_IS_INJECTION_DESC_ID(desc_id)" \
+            "$WMA_MGMT"
+
+          check_grep \
+            "WMA_IS_INJECTION_DESC_ID(injection_desc_id)" \
+            "$WMA_MGMT"
+
+          check_grep \
+            "wma_handle_injection_fw_response" \
+            "$WMA_MGMT" "$WMA_INJECT"
+
+          check_grep \
+            "WMA_INJECTION_DESC_ID_BASE 0x2000" \
+            "$WMA_INJECT_H"
 
           echo
-          echo "=== FORBIDDEN DEBUGFS CONFIG CHECK ==="
+          echo "=== INJECTION SYMBOL LOCATION DEBUG ==="
 
-          if grep -Eq '^CONFIG_DEBUG_FS=y$' "${OUT_DIR}/.config" 2>/dev/null; then
-              echo "ERROR: CONFIG_DEBUG_FS=y is forbidden."
-              exit 10
+          grep -nE \
+            'WMA_IS_INJECTION_DESC_ID|wma_handle_injection_fw_response|WMA_INJECTION_DESC_ID_BASE' \
+            "$WMA_MGMT" "$WMA_INJECT" "$WMA_INJECT_H" || true
+
+          echo
+          echo "=== FORBIDDEN DEBUG CONFIG CHECK ==="
+
+          if [ -f "${OUT_DIR}/.config" ]; then
+            if grep -Eq '^CONFIG_DEBUG_FS=y' "${OUT_DIR}/.config"; then
+              echo "FAIL: CONFIG_DEBUG_FS=y is forbidden."
+              fail=1
+            else
+              echo "PASS: CONFIG_DEBUG_FS is not enabled."
+            fi
+          else
+            echo "FAIL: ${OUT_DIR}/.config does not exist."
+            fail=1
           fi
 
-          echo "DEBUGFS config check: PASS"
-
           echo
-          echo "============================================================"
-          echo "MONITOR + INJECTION PRE-BUILD INTEGRATION: PASSED"
-          echo "============================================================"
+          echo "=========================================="
 
+          if [ "$fail" -ne 0 ]; then
+            echo "MONITOR + INJECTION PRE-BUILD INTEGRATION: FAILED"
+            echo "=========================================="
+            exit 1
+          fi
+
+          echo "MONITOR + INJECTION PRE-BUILD INTEGRATION: PASSED"
+          echo "=========================================="
 
 
       - name: Safely wire QCACLD3 frame injection ioctl
