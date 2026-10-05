@@ -3000,17 +3000,11 @@ jobs:
 
           awk '
           BEGIN {
-              in_func = 0
               patched = 0
           }
 
-          /wma_process_mgmt_tx_completion[[:space:]]*\(/ {
-              in_func = 1
-          }
-
-          in_func && !patched && /\{/ {
-              print
-              print ""
+          !patched && /mgmt_txrx_get_nbuf[[:space:]]*\(/ {
+              print "        /* NETHUNTER_INJECTION_COMPLETION_BRIDGE */"
               print "#ifdef FEATURE_FRAME_INJECTION_SUPPORT"
               print "        if (WMA_IS_INJECTION_DESC_ID(desc_id)) {"
               print "                QDF_STATUS injection_status;"
@@ -3027,8 +3021,8 @@ jobs:
               print "        }"
               print "#endif"
               print ""
+              print
               patched = 1
-              in_func = 0
               next
           }
 
@@ -3038,7 +3032,7 @@ jobs:
 
           END {
               if (!patched) {
-                  print "ERROR: Could not find wma_process_mgmt_tx_completion() opening brace."
+                  print "ERROR: Could not find normal MGMT TX descriptor lookup."
                   exit 3
               }
           }
@@ -3051,15 +3045,10 @@ jobs:
 
           awk '
           BEGIN {
-              in_func = 0
               patched = 0
           }
 
-          /int wma_mgmt_tx_bundle_completion_handler\(/ {
-              in_func = 1
-          }
-
-          in_func && !patched &&
+          !patched &&
           /for \(i = 0; i < num_reports; i\+\+\)/ {
 
               print
@@ -3068,30 +3057,24 @@ jobs:
               print ""
               print "#ifdef FEATURE_FRAME_INJECTION_SUPPORT"
               print "                if (WMA_IS_INJECTION_DESC_ID(injection_desc_id)) {"
-              print "                        wma_handle_injection_fw_response("
-              print "                                wma_handle,"
-              print "                                injection_desc_id,"
-              print "                                status[i]);"
+              print "                        QDF_STATUS injection_status;"
+              print ""
+              print "                        injection_status ="
+              print "                                wma_handle_injection_fw_response("
+              print "                                        wma_handle,"
+              print "                                        injection_desc_id,"
+              print "                                        status[i]);"
+              print ""
+              print "                        if (injection_status != QDF_STATUS_SUCCESS)"
+              print "                                wma_err(\"Failed to process bundled injection completion: %d\","
+              print "                                        injection_status);"
+              print ""
               print "                        continue;"
               print "                }"
               print "#endif"
-              print ""
-              print "                wma_process_mgmt_tx_completion("
-              print "                        wma_handle,"
-              print "                        injection_desc_id,"
-              print "                        status[i]);"
               print "        }"
 
               patched = 1
-
-              skip = 1
-              next
-          }
-
-          skip {
-              if ($0 ~ /^}/) {
-                  skip = 0
-              }
               next
           }
 
@@ -3108,18 +3091,6 @@ jobs:
           ' "$WMA_MGMT" > "${WMA_MGMT}.new"
 
           mv "${WMA_MGMT}.new" "$WMA_MGMT"
-
-          echo
-          echo "=== Verifying injection completion routing ==="
-
-          grep -n -A25 -B8 \
-            'WMA_IS_INJECTION_DESC_ID(desc_id)' \
-            "$WMA_MGMT"
-
-          echo
-          grep -n -A30 -B8 \
-            'WMA_IS_INJECTION_DESC_ID(injection_desc_id)' \
-            "$WMA_MGMT"
 
           echo
           echo "=== Verifying injection completion API ==="
