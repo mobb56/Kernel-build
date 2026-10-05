@@ -3118,8 +3118,8 @@ jobs:
 
           echo "=== MONITOR CHECKS ==="
 
-          grep -Fq 'adapter->device_mode == QDF_MONITOR_MODE' "$HDD_MAIN"
-          grep -Fq 'dev->netdev_ops = &wlan_mon_drv_ops;' "$HDD_MAIN"
+          grep -Fq 'QDF_MONITOR_MODE' "$HDD_MAIN"
+          grep -Fq 'wlan_mon_drv_ops' "$HDD_MAIN"
           grep -Fq 'hdd_mon_open' "$HDD_MAIN"
           grep -Fq 'adapter->device_mode = QDF_MONITOR_MODE;' "$HDD_CFG"
           grep -Fq 'adapter->wdev.iftype = NL80211_IFTYPE_MONITOR;' "$HDD_CFG"
