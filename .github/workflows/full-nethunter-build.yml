@@ -3686,11 +3686,15 @@ jobs:
 
           echo
           echo "WMA frame-injection queue initialization inserted successfully."
+
+
+
+
       # ============================================================
-      # 33. ENABLE NL80211 MONITOR INTERFACE CONVERSION
+      # 33. LOCATE EXACT QCACLD3 MONITOR CONVERSION PATH
       # ============================================================
 
-      - name: Enable QCACLD3 monitor interface conversion
+      - name: Locate exact QCACLD3 monitor conversion path
         working-directory: kernel
         shell: bash
         run: |
@@ -3700,116 +3704,37 @@ jobs:
 
           test -f "${CFG_C}"
 
-          echo "=== Locate client interface mode conversion ==="
+          echo "=== Monitor unsupported messages ==="
 
-          grep -n \
-            -A65 \
-            -B10 \
-            "wlan_hdd_change_client_iface_to_new_mode" \
-            "${CFG_C}"
-
-          python3 - <<'PY'
-           from pathlib import Path
-             import re
-
-              path = Path(
-              "drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c"
-              )
-
-               text = path.read_text()
-
-            if "QDF_MONITOR_MODE" in text and \
-             "type == NL80211_IFTYPE_MONITOR" in text:
-              print("Monitor-mode conversion already present.")
-                 raise SystemExit(0)
-
-            # Locate the client-interface conversion function.
-                m = re.search(
-                r'(?m)^static int[ \t]+'
-               r'wlan_hdd_change_client_iface_to_new_mode'
-               r'[ \t]*\([^)]*\)[ \t]*\{',
-                text
-                 )
-
-                 if not m:
-                 raise SystemExit(
-              "ERROR: wlan_hdd_change_client_iface_to_new_mode() not found."
-                 )
-
-               start = m.start()
-               body = m.end()
-
-              # Locate the device_mode assignment block.
-                  pattern = re.compile(
-                r'(?P<indent>[ \t]*)else[ \t]+if[ \t]*'
-                r'\([ \t]*type[ \t]*==[ \t]*NL80211_IFTYPE_ADHOC[ \t]*\)[ \t]*'
-                r'\{(?P<body>.*?)\}[ \t]*else[ \t]*\{',
-                re.S
-                    )
-
-               match = pattern.search(text, body)
-
-                if not match:
-                raise SystemExit(
-                 "ERROR: Could not locate the existing device_mode mapping "
-                 "inside wlan_hdd_change_client_iface_to_new_mode()."
-              )
-
-                 indent = match.group("indent")
-
-                replacement = (
-             f"{indent}if (type == NL80211_IFTYPE_MONITOR) {{\n"
-             f"{indent}    adapter->device_mode = QDF_MONITOR_MODE;\n"
-             f"{indent}}} else "
-             + text[match.start():match.end()]
-               )
-
-           # Preserve the existing ADHOC/STA/P2P mapping and only prepend
-           # the monitor branch.
-              text = text[:match.start()] + replacement + text[match.end():]
-
-           # The existing code sets station operations unconditionally.
-           # Monitor mode needs the monitor operations path.  Only change the
-           # call when the actual monitor helper exists in this tree.
-                   if "hdd_set_mon_ops" in text:
-                   text = text.replace(
-                   "hdd_set_station_ops(adapter->dev);",
-                 """if (type == NL80211_IFTYPE_MONITOR)
-                hdd_set_mon_ops(adapter->dev);
-            else
-                hdd_set_station_ops(adapter->dev);""",
-               1
-            )
-            else:
-                            print(
-                 "WARNING: hdd_set_mon_ops() is not present in this tree; "
-                  "leaving existing netdev ops unchanged."
-                 )
-
-                path.write_text(text)
-
-             print("Monitor-mode conversion patch inserted.")
-              PY
+          grep -n -A12 -B12 \
+            "Monitor.*not supported" \
+            "${CFG_C}" || true
 
           echo
-          echo "=== Verify monitor conversion ==="
+          echo "=== change_iface functions ==="
 
           grep -n \
-            -A35 \
-            -B10 \
-            "wlan_hdd_change_client_iface_to_new_mode" \
-            "${CFG_C}"
+            -E \
+            "change_iface|change_client_iface|QDF_MONITOR_MODE|NL80211_IFTYPE_MONITOR" \
+            "${CFG_C}" || true
 
           echo
-          echo "=== Verify explicit monitor device mode ==="
+          echo "=== hdd_start_adapter references ==="
+
+          grep -n -A12 -B8 \
+            "hdd_start_adapter" \
+            "${CFG_C}" || true
+
+          echo
+          echo "=== Monitor helper references ==="
 
           grep -n \
-            "QDF_MONITOR_MODE" \
-            "${CFG_C}"
+            -E \
+            "hdd_set_mon_rx_cb|mon_chan|MONITOR_MODE|IFTYPE_MONITOR" \
+            "${CFG_C}" || true
 
           echo
-          echo "Monitor interface conversion patch complete."
-
+          echo "=== Exact monitor conversion source inspection complete ==="
 
             
 
