@@ -3396,7 +3396,7 @@ jobs:
             }
           ' "$HDD_MAIN"
 
-          echo
+                      echo
           echo "=========================================="
           echo "PER-INTERFACE MONITOR ROUTING: PASS"
           echo "DUPLICATE DEFINITIONS: REMOVED"
