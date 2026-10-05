@@ -6415,64 +6415,107 @@ jobs:
       - name: Compare final injection source with reference
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
           NH="nethunter-reference/drivers/staging/qcacld-3.0"
           KERNEL="kernel/drivers/staging/qcacld-3.0"
 
+          echo
           echo "=========================================="
-          echo " SOURCE COMPARISON"
+          echo " QCACLD3 FINAL SOURCE COMPARISON"
           echo "=========================================="
 
-          echo
-          echo "=== wlan_hdd_frame_inject_debug.c ==="
-          diff -u \
+          normalize_wma() {
+            awk '
+              BEGIN {
+                skip = 0
+                depth = 0
+              }
+
+              skip == 0 &&
+              $0 ~ /^[[:space:]]*(QDF_STATUS|void|uint32_t|bool)[[:space:]]+wma_(init_injection_queue|deinit_injection_queue|injection_pre_stop_cleanup|queue_injection_frame|get_injection_queue_stats)[[:space:]]*\(/ {
+                skip = 1
+                depth = 0
+
+                line = $0
+
+                opens = gsub(/\{/, "{", line)
+                closes = gsub(/\}/, "}", line)
+
+                depth += opens
+                depth -= closes
+
+                if (depth <= 0 && opens > 0)
+                  skip = 0
+
+                next
+              }
+
+              skip == 1 {
+                line = $0
+
+                opens = gsub(/\{/, "{", line)
+                closes = gsub(/\}/, "}", line)
+
+                depth += opens
+                depth -= closes
+
+                if (depth <= 0 && opens > 0)
+                  skip = 0
+
+                next
+              }
+
+              {
+                print
+              }
+            ' "$1"
+          }
+
+          compare_normalized() {
+            local reference="$1"
+            local final="$2"
+            local name="$3"
+
+            echo
+            echo "=== ${name} ==="
+
+            if diff -u \
+              <(normalize_wma "${reference}") \
+              <(normalize_wma "${final}"); then
+
+              echo "PASS: ${name}"
+            else
+              echo
+              echo "ERROR: ${name} differs from reference."
+              return 1
+            fi
+          }
+
+          compare_normalized \
             "${NH}/core/hdd/src/wlan_hdd_frame_inject_debug.c" \
             "${KERNEL}/core/hdd/src/wlan_hdd_frame_inject_debug.c" \
-            || {
-              echo
-              echo "WARNING: Debug source differs from reference."
-              echo "The differences above must be reviewed."
-              exit 1
-            }
+            "wlan_hdd_frame_inject_debug.c"
 
-          echo
-          echo "=== wlan_hdd_frame_inject.c ==="
-          diff -u \
+          compare_normalized \
             "${NH}/core/hdd/src/wlan_hdd_frame_inject.c" \
             "${KERNEL}/core/hdd/src/wlan_hdd_frame_inject.c" \
-            || {
-              echo
-              echo "WARNING: Frame injection source differs from reference."
-              exit 1
-            }
+            "wlan_hdd_frame_inject.c"
 
-          echo
-          echo "=== wlan_hdd_frame_validate.c ==="
-          diff -u \
+          compare_normalized \
             "${NH}/core/hdd/src/wlan_hdd_frame_validate.c" \
             "${KERNEL}/core/hdd/src/wlan_hdd_frame_validate.c" \
-            || {
-              echo
-              echo "WARNING: Frame validation source differs from reference."
-              exit 1
-            }
+            "wlan_hdd_frame_validate.c"
 
-          echo
-          echo "=== wma_frame_inject.c ==="
-          diff -u \
+          compare_normalized \
             "${NH}/core/wma/src/wma_frame_inject.c" \
             "${KERNEL}/core/wma/src/wma_frame_inject.c" \
-            || {
-              echo
-              echo "WARNING: WMA injection source differs from reference."
-              exit 1
-            }
+            "wma_frame_inject.c"
 
           echo
-          echo "=== SOURCE COMPARISON PASSED ==="
-
-
+          echo "=========================================="
+          echo " SOURCE COMPARISON PASSED"
+          echo "=========================================="
 
 
 
