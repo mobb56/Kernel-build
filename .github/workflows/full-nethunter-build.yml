@@ -3105,6 +3105,41 @@ jobs:
 
 
 
+      - name: Inspect hdd_set_station_ops
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          HDD_MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+
+          awk '
+          /void hdd_set_station_ops\(struct net_device \*dev\)/ {
+              found = 1
+              depth = 0
+          }
+
+          found {
+              print
+          }
+
+          found {
+              line = $0
+              opens = gsub(/\{/, "{", line)
+              closes = gsub(/\}/, "}", line)
+              depth += opens - closes
+
+              if (depth == 0 && closes > 0)
+                  exit
+          }
+          ' "$HDD_MAIN"
+
+
+      
+
+
+
+
       - name: Verify monitor and injection completion integration
         working-directory: kernel
         shell: bash
