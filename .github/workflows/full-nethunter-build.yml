@@ -3757,77 +3757,63 @@ jobs:
           echo "WMA frame-injection queue initialization inserted successfully."
 
 
-     
+
+
+
       - name: Enable QCACLD3 monitor interface conversion
-        working-directory: kernel
         shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
 
-          CFG_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c"
+          HDD_SRC="${GITHUB_WORKSPACE}/kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c"
 
-          test -f "${CFG_C}"
+          test -f "$HDD_SRC"
 
-          echo "=== Checking monitor conversion patch status ==="
+          echo "=== Locating exact monitor unsupported branch ==="
 
-          if grep -Fq "NETLINK_MONITOR_CONVERSION" "${CFG_C}"; then
-            echo "Monitor conversion patch already present."
-            exit 0
-          fi
+          grep -n -B 8 -A 8 \
+            "Changing to device mode .*Monitor.* is not supported" \
+            "$HDD_SRC"
 
-          echo "=== Locating exact change_iface() function ==="
-
-          grep -n \
-            -A12 \
-            -B4 \
-            "static int __wlan_hdd_cfg80211_change_iface" \
-            "${CFG_C}"
-
-          echo
-          echo "=== Inserting monitor conversion with AWK ==="
-
-          TMP="${CFG_C}.monitor.tmp"
+          echo "=== Applying AWK monitor conversion patch ==="
 
           awk '
           BEGIN {
-              in_change_iface = 0
-              inserted = 0
+              patched = 0
           }
 
-          /^static int __wlan_hdd_cfg80211_change_iface[[:space:]]*\(/ {
-              in_change_iface = 1
-          }
+          /hdd_err\("Changing to device mode .*Monitor.* is not supported"/ {
+              if (patched) {
+                  print
+                  next
+              }
 
-          in_change_iface && !inserted && /^[[:space:]]*\{/ {
-              print
+              print "        if (type == NL80211_IFTYPE_MONITOR) {"
+              print "                int monitor_ret;"
               print ""
-              print "#ifdef FEATURE_MONITOR_MODE_SUPPORT"
-              print "    /* NETLINK_MONITOR_CONVERSION */"
-              print "    if (type == NL80211_IFTYPE_MONITOR) {"
-              print "        hdd_debug(\"Changing interface to monitor mode\");"
+              print "                hdd_info(\"Converting interface to monitor mode\");"
               print ""
-              print "        hdd_stop_adapter(pHddCtx, pAdapter, true);"
-              print "        hdd_deinit_adapter(pHddCtx, pAdapter, true);"
+              print "                hdd_stop_adapter(hdd_ctx, adapter, true);"
+              print "                hdd_deinit_adapter(hdd_ctx, adapter, true);"
               print ""
-              print "        pAdapter->device_mode = QDF_MONITOR_MODE;"
-              print "        pAdapter->wdev.iftype = NL80211_IFTYPE_MONITOR;"
+              print "                adapter->device_mode = QDF_MONITOR_MODE;"
+              print "                adapter->wdev.iftype = NL80211_IFTYPE_MONITOR;"
               print ""
-              print "        hdd_set_mon_ops(pAdapter->dev);"
+              print "                monitor_ret = hdd_start_adapter(adapter);"
+              print "                if (monitor_ret) {"
+              print "                        hdd_err(\"Failed to start monitor adapter: %d\","
+              print "                                monitor_ret);"
+              print "                        errno = monitor_ret;"
+              print "                        goto err;"
+              print "                }"
               print ""
-              print "        if (hdd_start_adapter(pAdapter)) {"
-              print "            hdd_err(\"Failed to start monitor adapter\");"
-              print "            return -EINVAL;"
+              print "                hdd_info(\"Monitor interface conversion successful\");"
+              print "                return 0;"
               print "        }"
               print ""
-              print "        cds_set_concurrency_mode(pAdapter->device_mode);"
-              print ""
-              print "        hdd_debug(\"Monitor interface conversion completed\");"
-              print "        return 0;"
-              print "    }"
-              print "#endif"
-              print ""
 
-              inserted = 1
+              print
+              patched = 1
               next
           }
 
@@ -3836,36 +3822,35 @@ jobs:
           }
 
           END {
-              if (!inserted) {
+              if (!patched) {
                   exit 2
               }
           }
-          ' "${CFG_C}" > "${TMP}"
+          ' "$HDD_SRC" > "${HDD_SRC}.new"
 
-          mv "${TMP}" "${CFG_C}"
+          mv "${HDD_SRC}.new" "$HDD_SRC"
 
-          echo
-          echo "=== Verifying monitor conversion patch ==="
+          echo "=== Verifying AWK monitor patch ==="
 
-          grep -n \
-            -A30 \
-            -B5 \
-            "NETLINK_MONITOR_CONVERSION" \
-            "${CFG_C}"
+          grep -n -B 8 -A 35 \
+            "Converting interface to monitor mode" \
+            "$HDD_SRC"
 
-          echo
-          echo "=== Required monitor conversion symbols ==="
+          echo "=== Reject invalid helper from previous patch ==="
 
-          grep -Fq "NETLINK_MONITOR_CONVERSION" "${CFG_C}"
-          grep -Fq "type == NL80211_IFTYPE_MONITOR" "${CFG_C}"
-          grep -Fq "QDF_MONITOR_MODE" "${CFG_C}"
-          grep -Fq "hdd_set_mon_ops(pAdapter->dev)" "${CFG_C}"
-          grep -Fq "hdd_start_adapter(pAdapter)" "${CFG_C}"
+          if grep -n "hdd_set_mon_ops" "$HDD_SRC"; then
+              echo "ERROR: hdd_set_mon_ops still exists in patched source"
+              exit 1
+          fi
 
-          echo
-          echo "QCACLD3 monitor interface conversion patch PASSED."
+          if grep -n "cds_set_concurrency_mode" "$HDD_SRC"; then
+              echo "ERROR: unexpected cds_set_concurrency_mode remains in monitor patch"
+              exit 1
+          fi
 
-            
+          echo "Monitor AWK patch applied successfully."
+
+          
 
       # ============================================================
       # 32. INTEGRATE FRAME-INJECTION DEINITIALIZATION
