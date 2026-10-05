@@ -3246,10 +3246,11 @@ jobs:
 
 
 
-      - name: Verify monitor and injection completion integration
-        shell: bash
-        run: |
-          set -uo pipefail
+          - name: Verify monitor and injection completion integration
+            working-directory: kernel
+            shell: bash
+            run: |
+               set -uo pipefail
 
           HDD_MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
           HDD_CFG="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c"
