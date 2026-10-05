@@ -3693,221 +3693,108 @@ jobs:
         working-directory: kernel
         shell: bash
         run: |
-           set -euo pipefail
-  
-            CFG_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c"
-
-            test -f "${CFG_C}"
-
-            echo "=== Locating QCACLD3 change_iface implementation ==="
-
-            grep -n \
-             -A8 \
-             -B8 \
-            "static int __wlan_hdd_cfg80211_change_iface" \
-            "${CFG_C}"
-
-            echo
-            echo "=== Applying monitor-mode conversion ==="
-
-            python3 - "${CFG_C}" <<'PY'
-            from pathlib import Path
-            import re
-            import sys
-
-            path = Path(sys.argv[1])
-            text = path.read_text()
-
-            FUNC = "static int __wlan_hdd_cfg80211_change_iface"
-
-            start = text.find(FUNC)
-
-             if start < 0:
-              raise SystemExit(
-               "ERROR: __wlan_hdd_cfg80211_change_iface() was not found."
-            )
-
-            # Find the function body using balanced braces.
-                brace = text.find("{", start)
-
-            if brace < 0:
-              raise SystemExit(
-            "ERROR: could not locate change_iface() opening brace."
-           )
-
-              depth = 0
-             end = None
-
-           for i in range(brace, len(text)):
-              if text[i] == "{":
-                depth += 1
-            elif text[i] == "}":
-               depth -= 1
-            if depth == 0:
-                end = i + 1
-                break
-
-           if end is None:
-              raise SystemExit(
-              "ERROR: could not locate end of change_iface() function."
-             )
-
-           func = text[start:end]
-
-           print("=== Existing change_iface() function located ===")
-           print("Function bytes:", len(func))
-
-            # Do not patch twice.
-             if "NETLINK_MONITOR_CONVERSION" in func:
-              print("Monitor conversion patch already present.")
-               raise SystemExit(0)
-
-             # We need the monitor-specific helpers already present in this tree.
-               required_helpers = [
-               "hdd_set_mon_ops",
-               "hdd_start_adapter",
-            ]
-
-           for helper in required_helpers:
-               if helper not in text:
-                raise SystemExit(
-                f"ERROR: required monitor helper '{helper}' "
-                "is not present in this QCACLD3 tree."
-            )
-
-              # Insert immediately after ENTER(); inside this exact function.
-               marker = "ENTER();"
-
-               pos = func.find(marker)
-
-             if pos < 0:
-               raise SystemExit(
-            "ERROR: ENTER(); was not found inside "
-            "__wlan_hdd_cfg80211_change_iface()."
-           )
-
-             monitor_block = r'''
-           #ifdef FEATURE_MONITOR_MODE_SUPPORT
-           /*
-            * NETLINK_MONITOR_CONVERSION
-            *
-            * QCACLD3 advertises NL80211_IFTYPE_MONITOR and the driver
-            * contains QDF_MONITOR_MODE support, but the normal client
-            * interface conversion path rejects monitor mode.
-            *
-            * Convert the existing adapter directly to monitor mode and
-            * let hdd_start_adapter() execute the driver's monitor startup
-            * path.
-            */
-               if (type == NL80211_IFTYPE_MONITOR) {
-                 hdd_debug("Setting interface Type to MONITOR");
-
-                  hdd_stop_adapter(pHddCtx, pAdapter, true);
-                  hdd_deinit_adapter(pHddCtx, pAdapter, true);
-
-               pAdapter->device_mode = QDF_MONITOR_MODE;
-
-                pAdapter->wdev.iftype = NL80211_IFTYPE_MONITOR;
-
-               hdd_set_mon_ops(pAdapter->dev);
-
-                if (hdd_start_adapter(pAdapter)) {
-                 hdd_err("Failed to start monitor adapter");
-                 return -EINVAL;
-            }
-
-             cds_set_concurrency_mode(pAdapter->device_mode);
-
-             hdd_debug("Monitor interface conversion completed");
-
-            return 0;
-             }
-           #endif
-           '''
-
-            insert_at = pos + len(marker)
-
-                func = (
-                func[:insert_at]
-               + monitor_block
-               + func[insert_at:]
-            )
-
-             text = text[:start] + func + text[end:]
-
-             path.write_text(text)
-
-             print("Monitor-mode conversion patch inserted successfully.")
-             print()
-             print("=== Verify monitor conversion ===")
-
-             verify = path.read_text()
-
-              checks = [
-             "NETLINK_MONITOR_CONVERSION",
-             "type == NL80211_IFTYPE_MONITOR",
-             "QDF_MONITOR_MODE",
-             "hdd_set_mon_ops(pAdapter->dev)",
-             "hdd_start_adapter(pAdapter)",
-           ]
- 
-             for item in checks:
-               if item not in verify:
-               raise SystemExit(
-                f"ERROR: verification failed for: {item}"
-            )
-
-             print("PASS:", item)
-
-             print()
-             print("QCACLD3 monitor interface conversion patch PASSED.")
-           PY
-
-      # ============================================================
-      # 33. LOCATE EXACT QCACLD3 MONITOR CONVERSION PATH
-      # ============================================================
-
-      - name: Locate exact QCACLD3 monitor conversion path
-        working-directory: kernel
-        shell: bash
-        run: |
           set -euo pipefail
 
           CFG_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c"
 
           test -f "${CFG_C}"
 
-          echo "=== Monitor unsupported messages ==="
+          echo "=== Checking monitor conversion patch status ==="
 
-          grep -n -A12 -B12 \
-            "Monitor.*not supported" \
-            "${CFG_C}" || true
+          if grep -Fq "NETLINK_MONITOR_CONVERSION" "${CFG_C}"; then
+            echo "Monitor conversion patch already present."
+            exit 0
+          fi
 
-          echo
-          echo "=== change_iface functions ==="
-
-          grep -n \
-            -E \
-            "change_iface|change_client_iface|QDF_MONITOR_MODE|NL80211_IFTYPE_MONITOR" \
-            "${CFG_C}" || true
-
-          echo
-          echo "=== hdd_start_adapter references ==="
-
-          grep -n -A12 -B8 \
-            "hdd_start_adapter" \
-            "${CFG_C}" || true
-
-          echo
-          echo "=== Monitor helper references ==="
+          echo "=== Locating exact change_iface() function ==="
 
           grep -n \
-            -E \
-            "hdd_set_mon_rx_cb|mon_chan|MONITOR_MODE|IFTYPE_MONITOR" \
-            "${CFG_C}" || true
+            -A12 \
+            -B4 \
+            "static int __wlan_hdd_cfg80211_change_iface" \
+            "${CFG_C}"
 
           echo
-          echo "=== Exact monitor conversion source inspection complete ==="
+          echo "=== Inserting monitor conversion with AWK ==="
+
+          TMP="${CFG_C}.monitor.tmp"
+
+          awk '
+          BEGIN {
+              in_change_iface = 0
+              inserted = 0
+          }
+
+          /^static int __wlan_hdd_cfg80211_change_iface[[:space:]]*\(/ {
+              in_change_iface = 1
+          }
+
+          in_change_iface && !inserted && /^[[:space:]]*\{/ {
+              print
+              print ""
+              print "#ifdef FEATURE_MONITOR_MODE_SUPPORT"
+              print "    /* NETLINK_MONITOR_CONVERSION */"
+              print "    if (type == NL80211_IFTYPE_MONITOR) {"
+              print "        hdd_debug(\"Changing interface to monitor mode\");"
+              print ""
+              print "        hdd_stop_adapter(pHddCtx, pAdapter, true);"
+              print "        hdd_deinit_adapter(pHddCtx, pAdapter, true);"
+              print ""
+              print "        pAdapter->device_mode = QDF_MONITOR_MODE;"
+              print "        pAdapter->wdev.iftype = NL80211_IFTYPE_MONITOR;"
+              print ""
+              print "        hdd_set_mon_ops(pAdapter->dev);"
+              print ""
+              print "        if (hdd_start_adapter(pAdapter)) {"
+              print "            hdd_err(\"Failed to start monitor adapter\");"
+              print "            return -EINVAL;"
+              print "        }"
+              print ""
+              print "        cds_set_concurrency_mode(pAdapter->device_mode);"
+              print ""
+              print "        hdd_debug(\"Monitor interface conversion completed\");"
+              print "        return 0;"
+              print "    }"
+              print "#endif"
+              print ""
+
+              inserted = 1
+              next
+          }
+
+          {
+              print
+          }
+
+          END {
+              if (!inserted) {
+                  exit 2
+              }
+          }
+          ' "${CFG_C}" > "${TMP}"
+
+          mv "${TMP}" "${CFG_C}"
+
+          echo
+          echo "=== Verifying monitor conversion patch ==="
+
+          grep -n \
+            -A30 \
+            -B5 \
+            "NETLINK_MONITOR_CONVERSION" \
+            "${CFG_C}"
+
+          echo
+          echo "=== Required monitor conversion symbols ==="
+
+          grep -Fq "NETLINK_MONITOR_CONVERSION" "${CFG_C}"
+          grep -Fq "type == NL80211_IFTYPE_MONITOR" "${CFG_C}"
+          grep -Fq "QDF_MONITOR_MODE" "${CFG_C}"
+          grep -Fq "hdd_set_mon_ops(pAdapter->dev)" "${CFG_C}"
+          grep -Fq "hdd_start_adapter(pAdapter)" "${CFG_C}"
+
+          echo
+          echo "QCACLD3 monitor interface conversion patch PASSED."
 
             
 
