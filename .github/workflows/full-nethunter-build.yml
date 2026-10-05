@@ -3153,30 +3153,32 @@ jobs:
 
           if [ -z "$HDD_MAIN" ]; then
             echo "ERROR: wlan_hdd_main.c not found"
-            find "$GITHUB_WORKSPACE" \
-              -type f \
-              -name 'wlan_hdd_main.c' \
-              -print || true
             exit 1
           fi
 
-          echo "Found:"
-          echo "$HDD_MAIN"
+          echo "HDD_MAIN=$HDD_MAIN"
 
           echo
-          echo "=== VERIFYING hdd_set_station_ops() ==="
+          echo "=== COUNTING hdd_set_station_ops DEFINITIONS ==="
 
-          grep -Fq \
-            'void hdd_set_station_ops(struct net_device *dev)' \
-            "$HDD_MAIN"
+          COUNT="$(grep -cE '^void hdd_set_station_ops\(struct net_device \*dev\)' "$HDD_MAIN" || true)"
 
-          echo "hdd_set_station_ops(): PASS"
+          echo "Definitions found: $COUNT"
+
+          if [ "$COUNT" -ne 1 ]; then
+            echo "ERROR: Expected exactly one hdd_set_station_ops() definition."
+            echo "Current definitions:"
+            grep -nE '^void hdd_set_station_ops\(struct net_device \*dev\)' "$HDD_MAIN" || true
+            exit 1
+          fi
+
+          echo "hdd_set_station_ops definition count: PASS"
 
           echo
           echo "=== VERIFYING MONITOR ROUTING ==="
 
           grep -Fq \
-            'WLAN_HDD_GET_PRIV_PTR(dev)' \
+            'struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);' \
             "$HDD_MAIN"
 
           grep -Fq \
@@ -3203,18 +3205,30 @@ jobs:
             'dev->ethtool_ops = &wlan_ethtool_ops;' \
             "$HDD_MAIN"
 
-          echo
-          echo "=== MONITOR ROUTING SOURCE ==="
-
-          sed -n '/void hdd_set_station_ops(struct net_device \*dev)/,/^}/p' \
-            "$HDD_MAIN"
+          echo "Monitor routing checks: PASS"
 
           echo
-          echo "Per-interface monitor routing: PASS"
-      
+          echo "=== CURRENT hdd_set_station_ops() ==="
 
+          awk '
+            /^void hdd_set_station_ops\(struct net_device \*dev\)/ {
+              show=1
+            }
+            show {
+              print
+            }
+            show && /^}/ {
+              exit
+            }
+          ' "$HDD_MAIN"
 
+          echo
+          echo "=========================================="
+          echo "PER-INTERFACE MONITOR ROUTING: PASS"
+          echo "=========================================="
+          
 
+  
 
           - name: Verify monitor and injection completion integration
             working-directory: kernel
