@@ -3138,14 +3138,35 @@ jobs:
 
 
 
+             
       - name: Route per-interface monitor netdev ops
         shell: bash
         run: |
           set -euo pipefail
 
-          HDD_MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+          echo "=== LOCATING KERNEL SOURCE TREE ==="
 
-          echo "=== Checking expected original hdd_set_station_ops() ==="
+          HDD_MAIN="$(find "$GITHUB_WORKSPACE" \
+            -type f \
+            -path '*/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c' \
+            -print -quit)"
+
+          if [ -z "$HDD_MAIN" ]; then
+            echo "ERROR: wlan_hdd_main.c could not be found."
+            echo
+            echo "Searching for QCACLD3 HDD source:"
+            find "$GITHUB_WORKSPACE" \
+              -type f \
+              -name 'wlan_hdd_main.c' \
+              -print || true
+            exit 1
+          fi
+
+          echo "Found:"
+          echo "$HDD_MAIN"
+
+          echo
+          echo "=== CHECKING EXPECTED ORIGINAL hdd_set_station_ops() ==="
 
           python3 - "$HDD_MAIN" <<'PY'
           import re
@@ -3170,15 +3191,18 @@ jobs:
 
           old = match.group(0)
 
-          print("Original hdd_set_station_ops():")
+          print("Current hdd_set_station_ops():")
           print(old)
 
+          # If the required monitor routing is already present,
+          # do not modify the function again.
           if (
               "WLAN_HDD_GET_PRIV_PTR(dev)" in old
               and "QDF_MONITOR_MODE" in old
               and "wlan_mon_drv_ops" in old
               and "wlan_drv_ops" in old
           ):
+              print()
               print("Monitor routing is already patched.")
               sys.exit(0)
 
@@ -3201,11 +3225,12 @@ jobs:
           with open(path, "w", encoding="utf-8") as f:
               f.write(src)
 
+          print()
           print("Patched hdd_set_station_ops() successfully.")
           PY
 
           echo
-          echo "=== Patched hdd_set_station_ops() ==="
+          echo "=== VERIFYING PATCHED hdd_set_station_ops() ==="
 
           python3 - "$HDD_MAIN" <<'PY'
           import re
@@ -3225,14 +3250,14 @@ jobs:
           match = pattern.search(src)
 
           if not match:
-              print("ERROR: patched hdd_set_station_ops() not found")
+              print("ERROR: hdd_set_station_ops() not found after patch")
               sys.exit(1)
 
           print(match.group(0))
           PY
 
           echo
-          echo "=== Verifying exact monitor routing ==="
+          echo "=== VERIFYING EXACT MONITOR ROUTING ==="
 
           grep -Fq \
             'struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);' \
@@ -3254,9 +3279,8 @@ jobs:
             'dev->ethtool_ops = &wlan_ethtool_ops;' \
             "$HDD_MAIN"
 
+          echo
           echo "Per-interface monitor routing: PASS"
-
-
       
 
 
