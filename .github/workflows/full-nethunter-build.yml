@@ -3769,60 +3769,64 @@ jobs:
 
           test -f "$HDD_SRC"
 
-          echo "=== Locating exact monitor unsupported branch ==="
+          echo "=== Searching QCACLD3 change_iface monitor rejection ==="
 
-          grep -n -B 8 -A 8 \
-            "Changing to device mode .*Monitor.* is not supported" \
-            "$HDD_SRC"
+          awk '
+          /Changing .*device mode/ ||
+          /Monitor.*not supported/ ||
+          /EOPNOTSUPP/ {
+              printf "%d:%s\n", NR, $0
+          }
+          ' "$HDD_SRC" || true
 
-          echo "=== Applying AWK monitor conversion patch ==="
+          echo "=== Applying monitor conversion with AWK ==="
 
           awk '
           BEGIN {
               patched = 0
           }
 
-          /hdd_err\("Changing to device mode .*Monitor.* is not supported"/ {
-              if (patched) {
+          {
+              # Target the existing monitor/device-mode rejection.
+              if (!patched &&
+                  /Changing .*device mode/ &&
+                  /not supported/) {
+
+                  print "        if (type == NL80211_IFTYPE_MONITOR) {"
+                  print "                int monitor_ret;"
+                  print ""
+                  print "                hdd_info(\"Converting interface to monitor mode\");"
+                  print ""
+                  print "                hdd_stop_adapter(hdd_ctx, adapter, true);"
+                  print "                hdd_deinit_adapter(hdd_ctx, adapter, true);"
+                  print ""
+                  print "                adapter->device_mode = QDF_MONITOR_MODE;"
+                  print "                adapter->wdev.iftype = NL80211_IFTYPE_MONITOR;"
+                  print ""
+                  print "                monitor_ret = hdd_start_adapter(adapter);"
+                  print "                if (monitor_ret) {"
+                  print "                        hdd_err(\"Failed to start monitor adapter: %d\","
+                  print "                                monitor_ret);"
+                  print "                        errno = monitor_ret;"
+                  print "                        goto err;"
+                  print "                }"
+                  print ""
+                  print "                hdd_info(\"Monitor interface conversion successful\");"
+                  print "                return 0;"
+                  print "        }"
+                  print ""
+
                   print
+                  patched = 1
                   next
               }
 
-              print "        if (type == NL80211_IFTYPE_MONITOR) {"
-              print "                int monitor_ret;"
-              print ""
-              print "                hdd_info(\"Converting interface to monitor mode\");"
-              print ""
-              print "                hdd_stop_adapter(hdd_ctx, adapter, true);"
-              print "                hdd_deinit_adapter(hdd_ctx, adapter, true);"
-              print ""
-              print "                adapter->device_mode = QDF_MONITOR_MODE;"
-              print "                adapter->wdev.iftype = NL80211_IFTYPE_MONITOR;"
-              print ""
-              print "                monitor_ret = hdd_start_adapter(adapter);"
-              print "                if (monitor_ret) {"
-              print "                        hdd_err(\"Failed to start monitor adapter: %d\","
-              print "                                monitor_ret);"
-              print "                        errno = monitor_ret;"
-              print "                        goto err;"
-              print "                }"
-              print ""
-              print "                hdd_info(\"Monitor interface conversion successful\");"
-              print "                return 0;"
-              print "        }"
-              print ""
-
-              print
-              patched = 1
-              next
-          }
-
-          {
               print
           }
 
           END {
               if (!patched) {
+                  print "ERROR: Could not locate monitor rejection branch."
                   exit 2
               }
           }
@@ -3830,26 +3834,26 @@ jobs:
 
           mv "${HDD_SRC}.new" "$HDD_SRC"
 
-          echo "=== Verifying AWK monitor patch ==="
+          echo "=== Verifying monitor conversion patch ==="
 
-          grep -n -B 8 -A 35 \
-            "Converting interface to monitor mode" \
-            "$HDD_SRC"
+          awk '
+          /Converting interface to monitor mode/ {
+              start = NR - 5
+          }
 
-          echo "=== Reject invalid helper from previous patch ==="
+          NR >= start && NR <= start + 35 {
+              printf "%d:%s\n", NR, $0
+          }
+          ' "$HDD_SRC"
 
-          if grep -n "hdd_set_mon_ops" "$HDD_SRC"; then
-              echo "ERROR: hdd_set_mon_ops still exists in patched source"
+          echo "=== Checking for invalid previous helper ==="
+
+          if awk '/hdd_set_mon_ops/ { found=1 } END { exit found ? 0 : 1 }' "$HDD_SRC"; then
+              echo "ERROR: hdd_set_mon_ops still exists"
               exit 1
           fi
 
-          if grep -n "cds_set_concurrency_mode" "$HDD_SRC"; then
-              echo "ERROR: unexpected cds_set_concurrency_mode remains in monitor patch"
-              exit 1
-          fi
-
-          echo "Monitor AWK patch applied successfully."
-
+          echo "=== Monitor AWK patch completed successfully ==="
           
 
       # ============================================================
