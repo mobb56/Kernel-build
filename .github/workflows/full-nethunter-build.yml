@@ -3661,101 +3661,166 @@ jobs:
       # 32. INITIALIZE WMA FRAME-INJECTION QUEUE
       # ============================================================
 
+      
       - name: Initialize WMA frame-injection queue
         working-directory: kernel
         shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
 
           WMA_MAIN="drivers/staging/qcacld-3.0/core/wma/src/wma_main.c"
-          WMA_INJECT="drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c"
+          WMA_HEADER="drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h"
 
-          test -f "${WMA_MAIN}"
-          test -f "${WMA_INJECT}"
+          test -f "$WMA_MAIN"
+          test -f "$WMA_HEADER"
 
-          echo "=== Verify WMA injection initializer ==="
+          echo "=== Ensuring WMA injection prototype is visible ==="
 
-          grep -n \
-            -A20 \
-            -B5 \
-            "QDF_STATUS wma_init_injection_queue" \
-            "${WMA_INJECT}"
+          if ! grep -Fq 'wma_init_injection_queue(tp_wma_handle wma_handle)' "$WMA_MAIN"; then
+            awk '
+            BEGIN { inserted = 0 }
 
-          echo
-          echo "=== Verify WMA start ==="
+            /^#include/ && !inserted {
+                print
+                next
+            }
 
-          grep -n \
-            -A35 \
-            -B5 \
-            "QDF_STATUS wma_start(void)" \
-            "${WMA_MAIN}"
-
-          echo
-          echo "=== Insert WMA injection queue initialization ==="
-
-          awk '
-            BEGIN {
-              in_wma_validation = 0
-              inserted = 0
+            /^$/ && !inserted {
+                print "#include \"wma_frame_inject.h\""
+                print
+                inserted = 1
+                next
             }
 
             {
-              print
-
-              if ($0 ~ /^[[:space:]]*if[[:space:]]*\(!wma_handle\)[[:space:]]*\{/) {
-                in_wma_validation = 1
-                next
-              }
-
-              if (in_wma_validation && $0 ~ /^[[:space:]]*\}[[:space:]]*$/) {
-                if (!inserted) {
-                  print ""
-                  print "#ifdef FEATURE_FRAME_INJECTION_SUPPORT"
-                  print "    {"
-                  print "        QDF_STATUS injection_queue_status;"
-                  print ""
-                  print "        injection_queue_status ="
-                  print "            wma_init_injection_queue(wma_handle);"
-                  print ""
-                  print "        if (injection_queue_status != QDF_STATUS_SUCCESS) {"
-                  print "            wma_err(\"Failed to initialize frame injection queue: %d\","
-                  print "                    injection_queue_status);"
-                  print "            qdf_status = injection_queue_status;"
-                  print "            goto end;"
-                  print "        }"
-                  print ""
-                  print "        wma_info(\"Frame injection queue initialized\");"
-                  print "    }"
-                  print "#endif"
-                  inserted = 1
-                }
-
-                in_wma_validation = 0
-              }
+                print
             }
 
             END {
-              if (!inserted) {
-                exit 1
-              }
+                if (!inserted) {
+                    print "ERROR: Could not insert WMA injection header"
+                    exit 2
+                }
             }
-          ' "${WMA_MAIN}" > "${WMA_MAIN}.tmp"
+            ' "$WMA_MAIN" > "${WMA_MAIN}.new"
 
-          test -s "${WMA_MAIN}.tmp"
-          mv "${WMA_MAIN}.tmp" "${WMA_MAIN}"
+            mv "${WMA_MAIN}.new" "$WMA_MAIN"
+          fi
 
-          echo
-          echo "=== Verify WMA queue initialization ==="
+          echo "=== Removing previous broken WMA initialization block ==="
+
+          awk '
+          BEGIN {
+              skip = 0
+          }
+
+          /#ifdef FEATURE_FRAME_INJECTION_SUPPORT/ {
+              save = $0
+              getline nextline
+
+              if (nextline ~ /QDF_STATUS injection_queue_status/) {
+                  skip = 1
+                  next
+              }
+
+              print save
+              print nextline
+              next
+          }
+
+          skip {
+              if ($0 ~ /^#endif/) {
+                  skip = 0
+              }
+              next
+          }
+
+          {
+              print
+          }
+          ' "$WMA_MAIN" > "${WMA_MAIN}.new"
+
+          mv "${WMA_MAIN}.new" "$WMA_MAIN"
+
+          echo "=== Finding wma_start() ==="
+
+          awk '
+          /QDF_STATUS wma_start\(void\)/ {
+              print NR ":" $0
+              found = 1
+          }
+          END {
+              if (!found) exit 2
+          }
+          ' "$WMA_MAIN"
+
+          echo "=== Inserting queue initialization using a local status variable ==="
+
+          awk '
+          BEGIN {
+              in_start = 0
+              inserted = 0
+              brace_depth = 0
+          }
+
+          /QDF_STATUS wma_start\(void\)/ {
+              in_start = 1
+          }
+
+          in_start && !inserted &&
+          /wma_handle = cds_get_context\(QDF_MODULE_ID_WMA\);/ {
+
+              print
+
+              print ""
+              print "#ifdef FEATURE_FRAME_INJECTION_SUPPORT"
+              print "        {"
+              print "                QDF_STATUS injection_queue_status;"
+              print ""
+              print "                injection_queue_status ="
+              print "                        wma_init_injection_queue(wma_handle);"
+              print ""
+              print "                if (injection_queue_status != QDF_STATUS_SUCCESS) {"
+              print "                        wma_err(\"Failed to initialize frame injection queue: %d\","
+              print "                                injection_queue_status);"
+              print "                        return injection_queue_status;"
+              print "                }"
+              print ""
+              print "                wma_info(\"Frame injection queue initialized\");"
+              print "        }"
+              print "#endif"
+
+              inserted = 1
+              next
+          }
+
+          {
+              print
+          }
+
+          END {
+              if (!inserted) {
+                  print "ERROR: Could not find wma_handle context assignment"
+                  exit 2
+              }
+          }
+          ' "$WMA_MAIN" > "${WMA_MAIN}.new"
+
+          mv "${WMA_MAIN}.new" "$WMA_MAIN"
+
+          echo "=== Verify WMA initialization ==="
+
+          grep -n -B 8 -A 25 \
+            'wma_init_injection_queue(wma_handle)' \
+            "$WMA_MAIN"
+
+          echo "=== Verify WMA header include ==="
 
           grep -n \
-            -A20 \
-            -B5 \
-            "wma_init_injection_queue(wma_handle)" \
-            "${WMA_MAIN}"
+            '#include "wma_frame_inject.h"' \
+            "$WMA_MAIN"
 
-          echo
-          echo "WMA frame-injection queue initialization inserted successfully."
-
+          echo "WMA frame-injection queue initialization patched successfully."
 
 
       - name: Enable QCACLD3 monitor interface conversion
