@@ -3135,6 +3135,112 @@ jobs:
           ' "$HDD_MAIN"
 
 
+
+
+
+
+      - name: Route per-interface monitor netdev ops
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          HDD_MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+
+          test -f "$HDD_MAIN"
+
+          echo "=== Checking expected original hdd_set_station_ops() ==="
+
+          grep -Fq \
+            'if (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE) {' \
+            "$HDD_MAIN"
+
+          echo "Original monitor condition found."
+
+          cp "$HDD_MAIN" "$HDD_MAIN.monitor-routing.bak"
+
+          awk '
+          /void hdd_set_station_ops\(struct net_device \*dev\)/ {
+              in_func = 1
+              added_adapter = 0
+          }
+
+          in_func && /^[[:space:]]*\{/ && !added_adapter {
+              print
+              print "\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
+              added_adapter = 1
+              next
+          }
+
+          in_func &&
+          /if \(cds_get_conparam\(\) == QDF_GLOBAL_MONITOR_MODE\) \{/ {
+              print "\tif (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||"
+              print "\t    (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {"
+              changed = 1
+              next
+          }
+
+          { print }
+
+          in_func && /^[[:space:]]*}[[:space:]]*$/ {
+              in_func = 0
+          }
+
+          END {
+              if (!changed) {
+                  print "ERROR: Monitor condition was not replaced." > "/dev/stderr"
+                  exit 1
+              }
+
+              if (!added_adapter) {
+                  print "ERROR: Adapter declaration was not inserted." > "/dev/stderr"
+                  exit 1
+              }
+          }
+          ' "$HDD_MAIN.monitor-routing.bak" > "$HDD_MAIN.monitor-routing.new"
+
+          mv "$HDD_MAIN.monitor-routing.new" "$HDD_MAIN"
+          rm -f "$HDD_MAIN.monitor-routing.bak"
+
+          echo
+          echo "=== Patched hdd_set_station_ops() ==="
+
+          awk '
+          /void hdd_set_station_ops\(struct net_device \*dev\)/ {
+              show = 1
+          }
+
+          show {
+              print
+          }
+
+          show && /^[[:space:]]*}[[:space:]]*$/ {
+              exit
+          }
+          ' "$HDD_MAIN"
+
+          echo
+          echo "=== Verifying exact monitor routing ==="
+
+          grep -Fq \
+            'struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);' \
+            "$HDD_MAIN"
+
+          grep -Fq \
+            'adapter && adapter->device_mode == QDF_MONITOR_MODE' \
+            "$HDD_MAIN"
+
+          grep -Fq \
+            'dev->netdev_ops = &wlan_mon_drv_ops;' \
+            "$HDD_MAIN"
+
+          grep -Fq \
+            'dev->netdev_ops = &wlan_drv_ops;' \
+            "$HDD_MAIN"
+
+          echo "Per-interface monitor routing: PASS"
+
+
       
 
 
