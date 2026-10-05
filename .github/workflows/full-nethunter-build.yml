@@ -3586,6 +3586,8 @@ jobs:
 
 
        
+                        
+                          
       # ============================================================
       # 32. INITIALIZE WMA FRAME-INJECTION QUEUE
       # ============================================================
@@ -3605,13 +3607,13 @@ jobs:
           echo "=== Verify WMA injection initializer ==="
 
           grep -n \
-            -A25 \
+            -A20 \
             -B5 \
             "QDF_STATUS wma_init_injection_queue" \
             "${WMA_INJECT}"
 
           echo
-          echo "=== Verify WMA start function ==="
+          echo "=== Verify WMA start ==="
 
           grep -n \
             -A35 \
@@ -3619,106 +3621,71 @@ jobs:
             "QDF_STATUS wma_start(void)" \
             "${WMA_MAIN}"
 
-          python3 - <<'PY'
-          from pathlib import Path
+          echo
+          echo "=== Insert WMA injection queue initialization ==="
 
-            path = Path(
-           "drivers/staging/qcacld-3.0/core/wma/src/wma_main.c"
-            )
+          awk '
+            BEGIN {
+              in_wma_validation = 0
+              inserted = 0
+            }
 
-            text = path.read_text()
+            {
+              print
 
-           call = """#ifdef FEATURE_FRAME_INJECTION_SUPPORT
-           {
-              QDF_STATUS injection_queue_status;
+              if ($0 ~ /^[[:space:]]*if[[:space:]]*\(!wma_handle\)[[:space:]]*\{/) {
+                in_wma_validation = 1
+                next
+              }
 
-               injection_queue_status =
-               wma_init_injection_queue(wma_handle);
+              if (in_wma_validation && $0 ~ /^[[:space:]]*\}[[:space:]]*$/) {
+                if (!inserted) {
+                  print ""
+                  print "#ifdef FEATURE_FRAME_INJECTION_SUPPORT"
+                  print "    {"
+                  print "        QDF_STATUS injection_queue_status;"
+                  print ""
+                  print "        injection_queue_status ="
+                  print "            wma_init_injection_queue(wma_handle);"
+                  print ""
+                  print "        if (injection_queue_status != QDF_STATUS_SUCCESS) {"
+                  print "            wma_err(\"Failed to initialize frame injection queue: %d\","
+                  print "                    injection_queue_status);"
+                  print "            qdf_status = injection_queue_status;"
+                  print "            goto end;"
+                  print "        }"
+                  print ""
+                  print "        wma_info(\"Frame injection queue initialized\");"
+                  print "    }"
+                  print "#endif"
+                  inserted = 1
+                }
 
-              if (injection_queue_status != QDF_STATUS_SUCCESS) {
-              wma_err(
-                "Failed to initialize frame injection queue: %d",
-                injection_queue_status);
-            return injection_queue_status;
-             }
+                in_wma_validation = 0
+              }
+            }
 
-              wma_info("Frame injection queue initialized");
-           }
-          #endif
-              """
+            END {
+              if (!inserted) {
+                exit 1
+              }
+            }
+          ' "${WMA_MAIN}" > "${WMA_MAIN}.tmp"
 
-           if "wma_init_injection_queue(wma_handle)" in text:
-           print("WMA injection queue initialization already present.")
-            raise SystemExit(0)
-
-              anchor = """    wma_handle = cds_get_context(QDF_MODULE_ID_WMA);
-              """
-
-               if anchor not in text:
-            raise SystemExit(
-             "ERROR: Could not find WMA handle initialization."
-             )
-
-               start = text.index(anchor)
-            after_anchor = start + len(anchor)
-
-                validation_start = text.find(
-                  "if (!wma_handle)",
-                   after_anchor
-             )
-
-               if validation_start == -1:
-                  raise SystemExit(
-              "ERROR: Could not find WMA handle validation."
-               )
-
-              brace_start = text.find("{", validation_start)
-
-             if brace_start == -1:
-               raise SystemExit(
-              "ERROR: Could not find WMA validation block."
-            )
-
-            depth = 0
-            end = None
-
-           for i in range(brace_start, len(text)):
-               if text[i] == "{":
-                 depth += 1
-              elif text[i] == "}":
-                 depth -= 1
-             if depth == 0:
-               end = i + 1
-                 break
-
-               if end is None:
-              raise SystemExit(
-               "ERROR: Could not find end of WMA handle validation block."
-              )
-
-            text = text[:end] + "\n\n" + call + text[end:]
-
-              path.write_text(text)
-
-             print(
-               "WMA frame-injection queue initialization inserted "
-               "after WMA handle validation."
-           )
-           PY
+          test -s "${WMA_MAIN}.tmp"
+          mv "${WMA_MAIN}.tmp" "${WMA_MAIN}"
 
           echo
-          echo "=== Verify inserted WMA queue initialization ==="
+          echo "=== Verify WMA queue initialization ==="
 
           grep -n \
-            -A22 \
-            -B8 \
+            -A20 \
+            -B5 \
             "wma_init_injection_queue(wma_handle)" \
             "${WMA_MAIN}"
 
           echo
-          echo "WMA frame-injection queue initialization complete."
-
-
+          echo "WMA frame-injection queue initialization inserted successfully."
       # ============================================================
       # 33. ENABLE NL80211 MONITOR INTERFACE CONVERSION
       # ============================================================
