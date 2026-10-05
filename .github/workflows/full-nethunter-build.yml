@@ -3758,8 +3758,6 @@ jobs:
 
 
 
-
-
       - name: Enable QCACLD3 monitor interface conversion
         shell: bash
         run: |
@@ -3769,16 +3767,6 @@ jobs:
 
           test -f "$HDD_SRC"
 
-          echo "=== Searching QCACLD3 change_iface monitor rejection ==="
-
-          awk '
-          /Changing .*device mode/ ||
-          /Monitor.*not supported/ ||
-          /EOPNOTSUPP/ {
-              printf "%d:%s\n", NR, $0
-          }
-          ' "$HDD_SRC" || true
-
           echo "=== Applying monitor conversion with AWK ==="
 
           awk '
@@ -3787,7 +3775,6 @@ jobs:
           }
 
           {
-              # Target the existing monitor/device-mode rejection.
               if (!patched &&
                   /Changing .*device mode/ &&
                   /not supported/) {
@@ -3797,8 +3784,7 @@ jobs:
                   print ""
                   print "                hdd_info(\"Converting interface to monitor mode\");"
                   print ""
-                  print "                hdd_stop_adapter(hdd_ctx, adapter, true);"
-                  print "                hdd_deinit_adapter(hdd_ctx, adapter, true);"
+                  print "                hdd_stop_adapter(hdd_ctx, adapter);"
                   print ""
                   print "                adapter->device_mode = QDF_MONITOR_MODE;"
                   print "                adapter->wdev.iftype = NL80211_IFTYPE_MONITOR;"
@@ -3826,7 +3812,7 @@ jobs:
 
           END {
               if (!patched) {
-                  print "ERROR: Could not locate monitor rejection branch."
+                  print "ERROR: Monitor rejection branch was not found."
                   exit 2
               }
           }
@@ -3834,26 +3820,20 @@ jobs:
 
           mv "${HDD_SRC}.new" "$HDD_SRC"
 
-          echo "=== Verifying monitor conversion patch ==="
+          echo "=== Verifying monitor patch ==="
 
-          awk '
-          /Converting interface to monitor mode/ {
-              start = NR - 5
-          }
+          grep -n -B 5 -A 30 \
+            "Converting interface to monitor mode" \
+            "$HDD_SRC"
 
-          NR >= start && NR <= start + 35 {
-              printf "%d:%s\n", NR, $0
-          }
-          ' "$HDD_SRC"
+          echo "=== Rejecting obsolete helper ==="
 
-          echo "=== Checking for invalid previous helper ==="
-
-          if awk '/hdd_set_mon_ops/ { found=1 } END { exit found ? 0 : 1 }' "$HDD_SRC"; then
-              echo "ERROR: hdd_set_mon_ops still exists"
+          if grep -q "hdd_set_mon_ops" "$HDD_SRC"; then
+              echo "ERROR: hdd_set_mon_ops remains"
               exit 1
           fi
 
-          echo "=== Monitor AWK patch completed successfully ==="
+          echo "Monitor AWK patch completed successfully."
           
 
       # ============================================================
