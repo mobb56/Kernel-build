@@ -3402,7 +3402,9 @@ jobs:
           echo "DUPLICATE DEFINITIONS: REMOVED"
           echo "=========================================="
 
-  
+          exit 0
+
+        
 
           - name: Verify monitor and injection completion integration
             working-directory: kernel
