@@ -3585,7 +3585,7 @@ jobs:
 
 
 
-
+       
       # ============================================================
       # 32. INITIALIZE WMA FRAME-INJECTION QUEUE
       # ============================================================
@@ -3602,184 +3602,121 @@ jobs:
           test -f "${WMA_MAIN}"
           test -f "${WMA_INJECT}"
 
-          echo "=== Locate WMA injection initializer ==="
+          echo "=== Verify WMA injection initializer ==="
 
           grep -n \
-            -A12 \
+            -A25 \
             -B5 \
-            "wma_init_injection_queue" \
+            "QDF_STATUS wma_init_injection_queue" \
             "${WMA_INJECT}"
 
           echo
-          echo "=== Locate wma_start() ==="
+          echo "=== Verify WMA start function ==="
 
           grep -n \
-            -A12 \
+            -A35 \
             -B5 \
-            "wma_start(" \
+            "QDF_STATUS wma_start(void)" \
             "${WMA_MAIN}"
 
           python3 - <<'PY'
           from pathlib import Path
-           import re
- 
-              path = Path(
+
+            path = Path(
            "drivers/staging/qcacld-3.0/core/wma/src/wma_main.c"
-             )
+            )
 
-          text = path.read_text()
+            text = path.read_text()
 
-          # Do not insert twice.
-          if "wma_init_injection_queue(" in text:
-           print("WMA injection queue initializer reference already exists.")
-            raise SystemExit(0)
+           call = """#ifdef FEATURE_FRAME_INJECTION_SUPPORT
+           {
+              QDF_STATUS injection_queue_status;
 
-              # Find the actual wma_start() definition.
-                 m = re.search(
-              r'(?m)^[ \t]*(?:QDF_STATUS|int)[ \t]+wma_start[ \t]*\([^;]*\)[ \t]*\{',
-                 text
-               )
+               injection_queue_status =
+               wma_init_injection_queue(wma_handle);
 
-                if not m:
-                  raise SystemExit(
-               "ERROR: Could not locate the wma_start() definition."
-              )
-
-             func_start = m.start()
-              body_start = m.end()
-
-          # Find the first executable-looking statement after the opening brace.
-          # We deliberately do NOT insert immediately after '{'.
-             tail = text[body_start:]
-
-           # The WMA context is normally established through the function's
-           # argument before normal startup work begins.  Locate the first
-            # statement that uses the WMA context.
-                lines = tail.splitlines(True)
-
-              insert_pos = None
-               offset = body_start
-
-                for line in lines:
-                stripped = line.strip()
-
-          if stripped.startswith(("/*", "*", "*/", "//")):
-              offset += len(line)
-               continue
-
-            if not stripped:
-                offset += len(line)
-                  continue
-
-             # Avoid inserting before declarations.
-             if re.match(
-               r'^(QDF_STATUS|QDF_STATUS_E|int|uint32_t|bool|struct|'
-               r'wma_handle_t|wma_handle)[ \t]',
-                 stripped
-               ):
-               offset += len(line)
-                continue
-
-               insert_pos = offset
-                  break
-
-             if insert_pos is None:
-               raise SystemExit(
-               "ERROR: Could not determine a safe insertion point in wma_start()."
-               )
-
-          # Extract the wma_start parameter list so we can identify its actual
-          # argument instead of assuming it is called wma_handle.
-                 signature = text[func_start:body_start]
-
-              params = re.search(
-                r'wma_start[ \t]*\((.*?)\)[ \t]*\{',
-                 signature,
-                 re.S
-              )
-
-                if not params:
-                 raise SystemExit(
-                "ERROR: Could not parse wma_start() parameters."
-                 )
-
-               param_text = params.group(1)
-
-           # Look for the WMA context parameter.
-                names = re.findall(
-               r'(?:\*|[ \t])([A-Za-z_][A-Za-z0-9_]*)[ \t]*(?:,|$)',
-               param_text
-               )
-
-               if not names:
-                raise SystemExit(
-               "ERROR: Could not determine wma_start() argument names."
-                )
-
-            # Prefer obvious WMA context names.
-              preferred = [
-               n for n in names
-               if n in (
-              "wma_handle",
-              "wma",
-              "wma_ctx",
-              "wma_context",
-               "handle",
-               "wma_handle_t"
-              )
-            ]
-
-             if len(preferred) != 1:
-                raise SystemExit(
-               "ERROR: WMA handle argument is ambiguous. "
-                f"Parameters: {param_text}"
-              )
-
-          wma_arg = preferred[0]
-
-           injection = f'''
-          #ifdef FEATURE_FRAME_INJECTION_SUPPORT
-           {{
-               QDF_STATUS injection_queue_status;
-
-                 injection_queue_status =
-                 wma_init_injection_queue({wma_arg});
-
-               if (injection_queue_status != QDF_STATUS_SUCCESS) {{
-               wma_err(
+              if (injection_queue_status != QDF_STATUS_SUCCESS) {
+              wma_err(
                 "Failed to initialize frame injection queue: %d",
                 injection_queue_status);
             return injection_queue_status;
-            }}
+             }
 
-            wma_info("Frame injection queue initialized");
-            }}
+              wma_info("Frame injection queue initialized");
+           }
           #endif
+              """
 
-           '''
+           if "wma_init_injection_queue(wma_handle)" in text:
+           print("WMA injection queue initialization already present.")
+            raise SystemExit(0)
 
-           text = text[:insert_pos] + injection + text[insert_pos:]
+              anchor = """    wma_handle = cds_get_context(QDF_MODULE_ID_WMA);
+              """
 
-            path.write_text(text)
-
-              print(
-             "WMA frame-injection queue initialization inserted "
-             f"using argument: {wma_arg}"
+               if anchor not in text:
+            raise SystemExit(
+             "ERROR: Could not find WMA handle initialization."
              )
-            PY
+
+               start = text.index(anchor)
+            after_anchor = start + len(anchor)
+
+                validation_start = text.find(
+                  "if (!wma_handle)",
+                   after_anchor
+             )
+
+               if validation_start == -1:
+                  raise SystemExit(
+              "ERROR: Could not find WMA handle validation."
+               )
+
+              brace_start = text.find("{", validation_start)
+
+             if brace_start == -1:
+               raise SystemExit(
+              "ERROR: Could not find WMA validation block."
+            )
+
+            depth = 0
+            end = None
+
+           for i in range(brace_start, len(text)):
+               if text[i] == "{":
+                 depth += 1
+              elif text[i] == "}":
+                 depth -= 1
+             if depth == 0:
+               end = i + 1
+                 break
+
+               if end is None:
+              raise SystemExit(
+               "ERROR: Could not find end of WMA handle validation block."
+              )
+
+            text = text[:end] + "\n\n" + call + text[end:]
+
+              path.write_text(text)
+
+             print(
+               "WMA frame-injection queue initialization inserted "
+               "after WMA handle validation."
+           )
+           PY
 
           echo
-          echo "=== Verify WMA queue initialization ==="
+          echo "=== Verify inserted WMA queue initialization ==="
 
           grep -n \
-            -A18 \
-            -B5 \
-            "wma_init_injection_queue" \
+            -A22 \
+            -B8 \
+            "wma_init_injection_queue(wma_handle)" \
             "${WMA_MAIN}"
 
           echo
           echo "WMA frame-injection queue initialization complete."
-
 
 
       # ============================================================
