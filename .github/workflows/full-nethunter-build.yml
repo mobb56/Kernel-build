@@ -2949,6 +2949,242 @@ jobs:
 
 
 
+
+
+      - name: Route injection descriptor completions
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          WMA_MGMT="drivers/staging/qcacld-3.0/core/wma/src/wma_mgmt.c"
+
+          test -f "$WMA_MGMT"
+
+          echo "=== Ensuring WMA frame injection header is included ==="
+
+          if ! grep -Fq '#include "wma_frame_inject.h"' "$WMA_MGMT"; then
+
+            awk '
+            BEGIN {
+                inserted = 0
+            }
+
+            /^#include/ {
+                print
+                if (!inserted &&
+                    $0 ~ /#include "wma\.h"/) {
+                    print "#include \"wma_frame_inject.h\""
+                    inserted = 1
+                }
+                next
+            }
+
+            {
+                print
+            }
+
+            END {
+                if (!inserted) {
+                    print "ERROR: Could not insert wma_frame_inject.h"
+                    exit 2
+                }
+            }
+            ' "$WMA_MGMT" > "${WMA_MGMT}.new"
+
+            mv "${WMA_MGMT}.new" "$WMA_MGMT"
+          fi
+
+          echo
+          echo "=== Patching single management-TX completion ==="
+
+          awk '
+          BEGIN {
+              patched = 0
+          }
+
+          /static int wma_process_mgmt_tx_completion\(/ {
+              in_func = 1
+          }
+
+          in_func && !patched &&
+          /if \(wma_validate_handle\(wma_handle\)\)/ {
+
+              print
+              print ""
+              print "#ifdef FEATURE_FRAME_INJECTION_SUPPORT"
+              print "        if (WMA_IS_INJECTION_DESC_ID(desc_id)) {"
+              print "                QDF_STATUS injection_status;"
+              print ""
+              print "                injection_status ="
+              print "                        wma_handle_injection_fw_response("
+              print "                                wma_handle, desc_id, status);"
+              print ""
+              print "                if (injection_status != QDF_STATUS_SUCCESS)"
+              print "                        wma_err(\"Failed to process injection completion: %d\","
+              print "                                injection_status);"
+              print ""
+              print "                return 0;"
+              print "        }"
+              print "#endif"
+              print ""
+
+              patched = 1
+              next
+          }
+
+          {
+              print
+          }
+
+          END {
+              if (!patched) {
+                  print "ERROR: Could not find management completion validation anchor."
+                  exit 3
+              }
+          }
+          ' "$WMA_MGMT" > "${WMA_MGMT}.new"
+
+          mv "${WMA_MGMT}.new" "$WMA_MGMT"
+
+          echo
+          echo "=== Patching bundled management-TX completion ==="
+
+          awk '
+          BEGIN {
+              in_func = 0
+              patched = 0
+          }
+
+          /int wma_mgmt_tx_bundle_completion_handler\(/ {
+              in_func = 1
+          }
+
+          in_func && !patched &&
+          /for \(i = 0; i < num_reports; i\+\+\)/ {
+
+              print
+              print "        {"
+              print "                uint32_t injection_desc_id = desc_ids[i];"
+              print ""
+              print "#ifdef FEATURE_FRAME_INJECTION_SUPPORT"
+              print "                if (WMA_IS_INJECTION_DESC_ID(injection_desc_id)) {"
+              print "                        wma_handle_injection_fw_response("
+              print "                                wma_handle,"
+              print "                                injection_desc_id,"
+              print "                                status[i]);"
+              print "                        continue;"
+              print "                }"
+              print "#endif"
+              print ""
+              print "                wma_process_mgmt_tx_completion("
+              print "                        wma_handle,"
+              print "                        injection_desc_id,"
+              print "                        status[i]);"
+              print "        }"
+
+              patched = 1
+
+              skip = 1
+              next
+          }
+
+          skip {
+              if ($0 ~ /^}/) {
+                  skip = 0
+              }
+              next
+          }
+
+          {
+              print
+          }
+
+          END {
+              if (!patched) {
+                  print "ERROR: Could not find management bundle completion loop."
+                  exit 4
+              }
+          }
+          ' "$WMA_MGMT" > "${WMA_MGMT}.new"
+
+          mv "${WMA_MGMT}.new" "$WMA_MGMT"
+
+          echo
+          echo "=== Verifying injection completion routing ==="
+
+          grep -n -A25 -B8 \
+            'WMA_IS_INJECTION_DESC_ID(desc_id)' \
+            "$WMA_MGMT"
+
+          echo
+          grep -n -A30 -B8 \
+            'WMA_IS_INJECTION_DESC_ID(injection_desc_id)' \
+            "$WMA_MGMT"
+
+          echo
+          echo "=== Verifying injection completion API ==="
+
+          grep -n \
+            'wma_handle_injection_fw_response' \
+            "$WMA_MGMT"
+
+          echo
+          echo "Injection completion routing patch completed successfully."
+
+
+
+
+      - name: Verify monitor and injection completion integration
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          HDD_MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+          HDD_CFG="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c"
+          WMA_MGMT="drivers/staging/qcacld-3.0/core/wma/src/wma_mgmt.c"
+          WMA_INJECT="drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c"
+
+          echo "=== MONITOR CHECKS ==="
+
+          grep -Fq 'adapter->device_mode == QDF_MONITOR_MODE' "$HDD_MAIN"
+          grep -Fq 'dev->netdev_ops = &wlan_mon_drv_ops;' "$HDD_MAIN"
+          grep -Fq 'hdd_mon_open' "$HDD_MAIN"
+          grep -Fq 'adapter->device_mode = QDF_MONITOR_MODE;' "$HDD_CFG"
+          grep -Fq 'adapter->wdev.iftype = NL80211_IFTYPE_MONITOR;' "$HDD_CFG"
+
+          echo "Monitor lifecycle checks: PASS"
+
+          echo
+          echo "=== INJECTION COMPLETION CHECKS ==="
+
+          grep -Fq '#include "wma_frame_inject.h"' "$WMA_MGMT"
+          grep -Fq 'WMA_IS_INJECTION_DESC_ID(desc_id)' "$WMA_MGMT"
+          grep -Fq 'WMA_IS_INJECTION_DESC_ID(injection_desc_id)' "$WMA_MGMT"
+          grep -Fq 'wma_handle_injection_fw_response' "$WMA_MGMT"
+          grep -Fq 'WMA_INJECTION_DESC_ID_BASE 0x2000' \
+            drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h
+
+          echo "Injection completion checks: PASS"
+
+          echo
+          echo "=== FORBIDDEN DEBUGFS CONFIG CHECK ==="
+
+          if grep -Eq '^CONFIG_DEBUG_FS=y$' "${OUT_DIR}/.config" 2>/dev/null; then
+              echo "ERROR: CONFIG_DEBUG_FS=y is forbidden."
+              exit 10
+          fi
+
+          echo "DEBUGFS config check: PASS"
+
+          echo
+          echo "============================================================"
+          echo "MONITOR + INJECTION PRE-BUILD INTEGRATION: PASSED"
+          echo "============================================================"
+
+
+
       - name: Safely wire QCACLD3 frame injection ioctl
         working-directory: kernel
         shell: bash
@@ -3823,16 +4059,20 @@ jobs:
           echo "WMA frame-injection queue initialization patched successfully."
 
 
-      - name: Enable QCACLD3 monitor interface conversion
+
+
+      - name: Enable QCACLD3 monitor interface lifecycle
         shell: bash
         run: |
           set -euxo pipefail
 
-          HDD_SRC="${GITHUB_WORKSPACE}/kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c"
+          HDD_CFG="${GITHUB_WORKSPACE}/kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c"
+          HDD_MAIN="${GITHUB_WORKSPACE}/kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
 
-          test -f "$HDD_SRC"
+          test -f "$HDD_CFG"
+          test -f "$HDD_MAIN"
 
-          echo "=== Applying monitor conversion with AWK ==="
+          echo "=== Patching monitor interface conversion ==="
 
           awk '
           BEGIN {
@@ -3850,6 +4090,7 @@ jobs:
                   print "                hdd_info(\"Converting interface to monitor mode\");"
                   print ""
                   print "                hdd_stop_adapter(hdd_ctx, adapter);"
+                  print "                hdd_deinit_adapter(hdd_ctx, adapter);"
                   print ""
                   print "                adapter->device_mode = QDF_MONITOR_MODE;"
                   print "                adapter->wdev.iftype = NL80211_IFTYPE_MONITOR;"
@@ -3881,25 +4122,91 @@ jobs:
                   exit 2
               }
           }
-          ' "$HDD_SRC" > "${HDD_SRC}.new"
+          ' "$HDD_CFG" > "${HDD_CFG}.new"
 
-          mv "${HDD_SRC}.new" "$HDD_SRC"
+          mv "${HDD_CFG}.new" "$HDD_CFG"
 
-          echo "=== Verifying monitor patch ==="
+          echo "=== Patching per-interface monitor netdev operations ==="
 
-          grep -n -B 5 -A 30 \
-            "Converting interface to monitor mode" \
-            "$HDD_SRC"
+          awk '
+          BEGIN {
+              patched = 0
+          }
 
+          /void hdd_set_station_ops\(struct net_device \*dev\)/ {
+              in_func = 1
+          }
+
+          in_func && !patched &&
+          /if \(cds_get_conparam\(\) == QDF_GLOBAL_MONITOR_MODE\)/ {
+
+              print "void hdd_set_station_ops(struct net_device *dev)"
+              print "{"
+              print "#ifdef FEATURE_MONITOR_MODE_SUPPORT"
+              print "        struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
+              print ""
+              print "        if (adapter && adapter->device_mode == QDF_MONITOR_MODE) {"
+              print "                dev->netdev_ops = &wlan_mon_drv_ops;"
+              print "                return;"
+              print "        }"
+              print "#endif"
+              print ""
+              print "        if (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE)"
+              print "                dev->netdev_ops = &wlan_mon_drv_ops;"
+              print "        else"
+              print "                dev->netdev_ops = &wlan_drv_ops;"
+              print "}"
+              
+              patched = 1
+
+              skip = 1
+              next
+          }
+
+          skip {
+              if ($0 ~ /^}/) {
+                  skip = 0
+              }
+              next
+          }
+
+          {
+              print
+          }
+
+          END {
+              if (!patched) {
+                  print "ERROR: hdd_set_station_ops monitor branch not found."
+                  exit 3
+              }
+          }
+          ' "$HDD_MAIN" > "${HDD_MAIN}.new"
+
+          mv "${HDD_MAIN}.new" "$HDD_MAIN"
+
+          echo "=== Verifying monitor netdev ops ==="
+
+          grep -n -A25 -B5 \
+            'void hdd_set_station_ops(struct net_device \*dev)' \
+            "$HDD_MAIN"
+
+          echo
+          echo "=== Verifying monitor conversion ==="
+
+          grep -n -A30 -B5 \
+            'Converting interface to monitor mode' \
+            "$HDD_CFG"
+
+          echo
           echo "=== Rejecting obsolete helper ==="
 
-          if grep -q "hdd_set_mon_ops" "$HDD_SRC"; then
-              echo "ERROR: hdd_set_mon_ops remains"
-              exit 1
+          if grep -q 'hdd_set_mon_ops' "$HDD_CFG" "$HDD_MAIN"; then
+              echo "ERROR: obsolete hdd_set_mon_ops found"
+              exit 4
           fi
 
-          echo "Monitor AWK patch completed successfully."
-          
+          echo
+          echo "Monitor lifecycle patch completed successfully."
 
       # ============================================================
       # 32. INTEGRATE FRAME-INJECTION DEINITIALIZATION
