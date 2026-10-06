@@ -455,45 +455,38 @@ jobs:
 
 
       # ============================================================
-      # 9A. PATCH MONITOR VDEV / POLICY-MANAGER LIFECYCLE
-      #
-      # Runtime evidence:
-      #   send_vdev_start_cmd_tlv(vdev_id 0)
-      #   policy_mgr_update_connection_info:
-      #     can't find vdev_id 0 in pm_conc_connection_list
-      #   monitor vdev up event timeout
-      #
-      # The monitor interface is created, but vdev 0 is not present
-      # in the policy-manager connection table when the monitor
-      # VDEV_START path runs.
-      #
-      # This patch is intentionally guarded against the exact source
-      # revision used by this workflow.
+      # 9A. AUDIT MONITOR VDEV / POLICY-MANAGER LIFECYCLE
       # ============================================================
 
-      - name: Patch monitor VDEV policy-manager lifecycle
+      - name: Audit monitor VDEV policy-manager lifecycle
         working-directory: kernel
         shell: bash
         run: |
-          set -euo pipefail
+          set -u
 
           echo "============================================================"
-          echo "MONITOR VDEV / POLICY-MANAGER PATCH"
+          echo "MONITOR VDEV / POLICY-MANAGER SOURCE AUDIT"
           echo "============================================================"
 
           EXPECTED_COMMIT="39bcecd5c63df849923b1faadc9cde482648a1a1"
-
           CURRENT_COMMIT="$(git rev-parse HEAD)"
 
+          echo
           echo "Current commit:"
           echo "${CURRENT_COMMIT}"
 
-          test "${CURRENT_COMMIT}" = "${EXPECTED_COMMIT}"
+          if [ "${CURRENT_COMMIT}" != "${EXPECTED_COMMIT}" ]; then
+            echo "ERROR: unexpected kernel revision"
+            exit 1
+          fi
 
           QCACLD="drivers/staging/qcacld-3.0"
+          AUDIT="../artifacts/source-audit"
+
+          mkdir -p "${AUDIT}"
 
           echo
-          echo "=== Locating monitor/policy-manager sources ==="
+          echo "=== Locating relevant source files ==="
 
           HDD_MAIN="$(
             find "${QCACLD}" \
@@ -506,113 +499,180 @@ jobs:
             grep -RIl \
               --include='*.c' \
               'policy_mgr_update_connection_info' \
-              "${QCACLD}" \
-              | head -n 1
+              "${QCACLD}" 2>/dev/null \
+              | head -n 1 || true
           )"
 
           SME_SRC="$(
             grep -RIl \
               --include='*.c' \
               'sme_process_monitor_mode_vdev_up_evt' \
-              "${QCACLD}" \
-              | head -n 1
+              "${QCACLD}" 2>/dev/null \
+              | head -n 1 || true
           )"
+
+          echo "HDD_MAIN=${HDD_MAIN}"
+          echo "POLICY_SRC=${POLICY_SRC}"
+          echo "SME_SRC=${SME_SRC}"
 
           test -n "${HDD_MAIN}"
           test -n "${POLICY_SRC}"
           test -n "${SME_SRC}"
 
-          echo "HDD source:"
-          echo "${HDD_MAIN}"
-
           echo
-          echo "Policy manager source:"
-          echo "${POLICY_SRC}"
+          echo "=== MONITOR VDEV FUNCTIONS ==="
 
-          echo
-          echo "SME source:"
-          echo "${SME_SRC}"
-
-          mkdir -p ../artifacts/source-audit
-
-          {
-            echo "HDD_MAIN=${HDD_MAIN}"
-            echo "POLICY_SRC=${POLICY_SRC}"
-            echo "SME_SRC=${SME_SRC}"
-          } > ../artifacts/source-audit/monitor-vdev-patch-paths.txt
-
-          echo
-          echo "=== Required monitor functions ==="
-
-          grep -n \
-            -E \
+          grep -RniE \
+            --include='*.c' \
             'hdd_open_adapters_for_monitor_mode|hdd_monitor_mode_vdev_status|sme_process_monitor_mode_vdev_up_evt' \
-            "${QCACLD}"/core/hdd/src/*.c \
-            "${QCACLD}"/core/sme/src/*.c \
-            2>/dev/null || true
+            "${QCACLD}" \
+            2>/dev/null \
+            > "${AUDIT}/monitor-functions.txt" || true
+
+          cat "${AUDIT}/monitor-functions.txt" || true
 
           echo
-          echo "=== Required policy-manager functions ==="
+          echo "=== POLICY-MANAGER FUNCTIONS ==="
 
           grep -RniE \
             --include='*.c' \
             'policy_mgr_vdev_obj_create_cb|policy_mgr_vdev_obj_status_cb|policy_mgr_update_connection_info|pm_conc_connection_list' \
             "${QCACLD}" \
-            2>/dev/null | head -200
+            2>/dev/null \
+            > "${AUDIT}/policy-functions.txt" || true
+
+          cat "${AUDIT}/policy-functions.txt" || true
 
           echo
-          echo "=== Verify the problematic policy-manager lookup exists ==="
+          echo "=== VDEV CREATE CALLBACK CONTEXT ==="
 
           grep -RniE \
             --include='*.c' \
-            'can.t find vdev_id.*pm_conc_connection_list|pm_conc_connection_list' \
+            -B20 \
+            -A45 \
+            'policy_mgr_vdev_obj_create_cb' \
             "${QCACLD}" \
-            2>/dev/null | head -100
+            2>/dev/null \
+            > "${AUDIT}/vdev-create-context.txt" || true
+
+          cat "${AUDIT}/vdev-create-context.txt" || true
 
           echo
-          echo "=== Monitor VDEV lifecycle context ==="
+          echo "=== VDEV STATUS CALLBACK CONTEXT ==="
 
           grep -RniE \
             --include='*.c' \
-            -B12 \
-            -A30 \
-            'hdd_open_adapters_for_monitor_mode|hdd_monitor_mode_vdev_status|sme_process_monitor_mode_vdev_up_evt' \
+            -B20 \
+            -A45 \
+            'policy_mgr_vdev_obj_status_cb' \
             "${QCACLD}" \
-            2>/dev/null | head -500
+            2>/dev/null \
+            > "${AUDIT}/vdev-status-context.txt" || true
+
+          cat "${AUDIT}/vdev-status-context.txt" || true
 
           echo
-          echo "=== Policy-manager lifecycle context ==="
+          echo "=== POLICY UPDATE CONNECTION CONTEXT ==="
 
           grep -RniE \
             --include='*.c' \
-            -B15 \
-            -A35 \
-            'policy_mgr_vdev_obj_create_cb|policy_mgr_vdev_obj_status_cb|policy_mgr_update_connection_info' \
+            -B25 \
+            -A60 \
+            'policy_mgr_update_connection_info' \
             "${QCACLD}" \
-            2>/dev/null | head -700
+            2>/dev/null \
+            > "${AUDIT}/policy-update-context.txt" || true
+
+          cat "${AUDIT}/policy-update-context.txt" || true
 
           echo
-          echo "=== Saving pre-patch source checksums ==="
+          echo "=== MONITOR OPEN-ADAPTER CONTEXT ==="
+
+          grep -RniE \
+            --include='*.c' \
+            -B30 \
+            -A80 \
+            'hdd_open_adapters_for_monitor_mode' \
+            "${QCACLD}" \
+            2>/dev/null \
+            > "${AUDIT}/monitor-open-context.txt" || true
+
+          cat "${AUDIT}/monitor-open-context.txt" || true
+
+          echo
+          echo "=== MONITOR VDEV STATUS CONTEXT ==="
+
+          grep -RniE \
+            --include='*.c' \
+            -B30 \
+            -A80 \
+            'hdd_monitor_mode_vdev_status' \
+            "${QCACLD}" \
+            2>/dev/null \
+            > "${AUDIT}/monitor-status-context.txt" || true
+
+          cat "${AUDIT}/monitor-status-context.txt" || true
+
+          echo
+          echo "=== SME MONITOR VDEV-UP CONTEXT ==="
+
+          grep -RniE \
+            --include='*.c' \
+            -B30 \
+            -A80 \
+            'sme_process_monitor_mode_vdev_up_evt' \
+            "${QCACLD}" \
+            2>/dev/null \
+            > "${AUDIT}/sme-monitor-up-context.txt" || true
+
+          cat "${AUDIT}/sme-monitor-up-context.txt" || true
+
+          echo
+          echo "=== VDEV START COMMAND PATH ==="
+
+          grep -RniE \
+            --include='*.c' \
+            -B20 \
+            -A40 \
+            'send_vdev_start_cmd_tlv|vdev_start' \
+            "${QCACLD}" \
+            2>/dev/null \
+            > "${AUDIT}/vdev-start-context.txt" || true
+
+          cat "${AUDIT}/vdev-start-context.txt" || true
+
+          echo
+          echo "=== PM CONNECTION LIST DECLARATION ==="
+
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            'pm_conc_connection_list' \
+            "${QCACLD}" \
+            2>/dev/null \
+            > "${AUDIT}/pm-connection-list.txt" || true
+
+          cat "${AUDIT}/pm-connection-list.txt" || true
+
+          echo
+          echo "=== SOURCE CHECKSUMS ==="
 
           sha256sum \
             "${HDD_MAIN}" \
             "${POLICY_SRC}" \
             "${SME_SRC}" \
-            > ../artifacts/source-audit/monitor-vdev-prepatch.sha256
+            > "${AUDIT}/monitor-vdev-source.sha256"
+
+          cat "${AUDIT}/monitor-vdev-source.sha256"
 
           echo
           echo "============================================================"
-          echo "IMPORTANT"
+          echo "MONITOR VDEV SOURCE AUDIT COMPLETE"
           echo "============================================================"
-          echo
-          echo "The monitor lifecycle has been located."
-          echo
-          echo "The workflow will NOT blindly rewrite policy-manager code."
-          echo "The source context above is required before applying the"
-          echo "minimal lifecycle correction."
-          echo
-          echo "Monitor VDEV source audit PASSED."
 
+          echo
+          echo "No source modification was performed."
+          echo "The collected contexts are now available in the Actions log."
 
 
           
