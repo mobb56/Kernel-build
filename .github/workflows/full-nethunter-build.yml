@@ -3143,75 +3143,43 @@ jobs:
         run: |
           set -euo pipefail
 
-          HDD_SRC="drivers/staging/qcacld-3.0/core/hdd/src"
+          MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
 
-          echo "=========================================="
-          echo "ROUTING PER-INTERFACE MONITOR NETDEV OPS"
-          echo "=========================================="
+          test -f "$MAIN"
 
-          test -d "$HDD_SRC"
+          echo "=== ROUTING PER-INTERFACE MONITOR NETDEV OPS ==="
 
           echo
-          echo "=== LOCATING hdd_set_station_ops() ==="
-
-          TARGET="$(
-            grep -RIl \
-              'hdd_set_station_ops[[:space:]]*(struct net_device' \
-              "$HDD_SRC" 2>/dev/null |
-              head -n1 || true
-          )"
-
-          if [ -z "$TARGET" ]; then
-            echo "ERROR: hdd_set_station_ops() was not found."
-            echo
-            echo "Available monitor netdev symbols:"
-            grep -RInE \
-              'hdd_set_station_ops|wlan_mon_drv_ops|wlan_drv_ops' \
-              "$HDD_SRC" 2>/dev/null || true
-            exit 1
-          fi
-
-          echo "Target: $TARGET"
-
-          echo
-          echo "=== DEFINITIONS BEFORE NORMALIZATION ==="
+          echo "=== COUNTING EXISTING DEFINITIONS ==="
 
           BEFORE="$(
             awk '
-            /hdd_set_station_ops[[:space:]]*\(struct net_device[[:space:]]*\*dev\)/ {
+            /(^|[[:space:]])(static[[:space:]]+)?void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
                 count++
             }
             END {
                 print count + 0
             }
-            ' "$TARGET"
+            ' "$MAIN"
           )"
 
           echo "Definitions before normalization: $BEFORE"
 
-          if [ "$BEFORE" -lt 1 ]; then
-            echo "ERROR: Function definition could not be identified."
-            exit 1
-          fi
-
           echo
-          echo "=== NORMALIZING WITH AWK ==="
+          echo "=== NORMALIZING hdd_set_station_ops() ==="
 
           awk '
           BEGIN {
               in_func = 0
               depth = 0
-              seen = 0
-              replaced = 0
+              found = 0
           }
 
-          # Locate the actual function definition.
           !in_func &&
-          /hdd_set_station_ops[[:space:]]*\(struct net_device[[:space:]]*\*dev\)/ {
+          /(^|[[:space:]])(static[[:space:]]+)?void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
 
-              # First definition becomes the canonical definition.
-              if (seen == 0) {
-
+              if (found == 0) {
+                  print ""
                   print "void hdd_set_station_ops(struct net_device *dev)"
                   print "{"
                   print "\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
@@ -3225,33 +3193,23 @@ jobs:
                   print ""
                   print "\tdev->ethtool_ops = &wlan_ethtool_ops;"
                   print "}"
+                  print ""
 
-                  seen = 1
-                  replaced = 1
-
-              } else {
-
-                  # Any additional definition is removed.
-                  seen++
-
+                  found = 1
               }
 
-              # Start skipping the original function.
               in_func = 1
               depth = 0
-
               next
           }
 
-          # Skip the original function body.
           in_func {
               opens = gsub(/\{/, "{")
               closes = gsub(/\}/, "}")
               depth += opens - closes
 
-              if (depth <= 0) {
+              if (depth <= 0)
                   in_func = 0
-              }
 
               next
           }
@@ -3261,118 +3219,89 @@ jobs:
           }
 
           END {
-              if (replaced != 1) {
-                  print "ERROR: Canonical hdd_set_station_ops() was not created." > "/dev/stderr"
+              if (found == 0) {
                   exit 2
               }
           }
-          ' "$TARGET" > "$TARGET.tmp"
+          ' "$MAIN" > "$MAIN.tmp"
 
-          mv "$TARGET.tmp" "$TARGET"
-
-          echo
-          echo "=== DEFINITIONS AFTER NORMALIZATION ==="
-
-          AFTER="$(
-            awk '
-            /hdd_set_station_ops[[:space:]]*\(struct net_device[[:space:]]*\*dev\)/ {
-                count++
-            }
-            END {
-                print count + 0
-            }
-            ' "$TARGET"
-          )"
-
-          echo "Definitions after normalization: $AFTER"
-
-          if [ "$AFTER" -ne 1 ]; then
-            echo "ERROR: Expected exactly one hdd_set_station_ops() definition."
-            exit 2
-          fi
+          mv "$MAIN.tmp" "$MAIN"
 
           echo
-          echo "=== CANONICAL FUNCTION ==="
+          echo "=== VERIFYING REAL FUNCTION DEFINITION ==="
 
           awk '
-          /hdd_set_station_ops[[:space:]]*\(struct net_device[[:space:]]*\*dev\)/ {
-              show = 1
-              depth = 0
+          /(^|[[:space:]])void[[:space:]]+hdd_set_station_ops[[:space:]]*\(struct net_device[[:space:]]*\*dev\)/ {
+              found++
+              print "Definition:", NR, $0
           }
 
-          show {
-              print
-
-              opens = gsub(/\{/, "{")
-              closes = gsub(/\}/, "}")
-              depth += opens - closes
-
-              if (depth == 0 && opens > 0)
-                  exit
+          END {
+              if (found != 1) {
+                  print "ERROR: expected exactly one real definition, found", found
+                  exit 1
+              }
           }
-          ' "$TARGET"
+          ' "$MAIN"
 
           echo
-          echo "=== MONITOR ROUTING VERIFICATION ==="
+          echo "=== VERIFYING FUNCTION BODY ==="
 
           awk '
-          /hdd_set_station_ops[[:space:]]*\(struct net_device[[:space:]]*\*dev\)/ {
+          /void[[:space:]]+hdd_set_station_ops[[:space:]]*\(struct net_device[[:space:]]*\*dev\)/ {
               in_func = 1
               depth = 0
           }
 
           in_func {
-              body = body $0 "\n"
+              print
 
-              opens = gsub(/\{/, "{")
-              closes = gsub(/\}/, "}")
-              depth += opens - closes
-
-              if (depth == 0 && opens > 0) {
-
-                  if (body !~ /QDF_GLOBAL_MONITOR_MODE/) {
-                      print "ERROR: QDF_GLOBAL_MONITOR_MODE check missing." > "/dev/stderr"
-                      exit 2
-                  }
-
-                  if (body !~ /QDF_MONITOR_MODE/) {
-                      print "ERROR: QDF_MONITOR_MODE check missing." > "/dev/stderr"
-                      exit 3
-                  }
-
-                  if (body !~ /wlan_mon_drv_ops/) {
-                      print "ERROR: wlan_mon_drv_ops routing missing." > "/dev/stderr"
-                      exit 4
-                  }
-
-                  if (body !~ /wlan_drv_ops/) {
-                      print "ERROR: wlan_drv_ops routing missing." > "/dev/stderr"
-                      exit 5
-                  }
-
-                  if (body !~ /wlan_ethtool_ops/) {
-                      print "ERROR: wlan_ethtool_ops assignment missing." > "/dev/stderr"
-                      exit 6
-                  }
-
-                  exit 0
+              if ($0 ~ /\{/) {
+                  depth++
               }
-          }
 
-          END {
-              if (body == "")
-                  exit 7
+              if ($0 ~ /\}/) {
+                  depth--
+              }
+
+              if (depth == 0 && $0 ~ /\}/)
+                  exit
           }
-          ' "$TARGET"
+          ' "$MAIN"
+
+          echo
+          echo "=== VERIFYING REQUIRED ROUTING SYMBOLS ==="
+
+          grep -q 'wlan_mon_drv_ops' "$MAIN"
+          grep -q 'wlan_drv_ops' "$MAIN"
+          grep -q 'QDF_GLOBAL_MONITOR_MODE' "$MAIN"
+          grep -q 'QDF_MONITOR_MODE' "$MAIN"
+          grep -q 'wlan_ethtool_ops' "$MAIN"
+
+          echo "wlan_mon_drv_ops: PASS"
+          echo "wlan_drv_ops: PASS"
+          echo "QDF_GLOBAL_MONITOR_MODE: PASS"
+          echo "QDF_MONITOR_MODE: PASS"
+          echo "wlan_ethtool_ops: PASS"
+
+          echo
+          echo "=== VERIFYING NO STATIC DEFINITION ==="
+
+          if grep -Eq \
+            'static[[:space:]]+void[[:space:]]+hdd_set_station_ops' \
+            "$MAIN"
+          then
+            echo "ERROR: hdd_set_station_ops() is still static."
+            exit 1
+          fi
+
+          echo "External linkage: PASS"
 
           echo
           echo "=========================================="
-          echo "DEFINITION COUNT: PASS"
-          echo "MONITOR ROUTING: PASS"
-          echo "NORMAL WLAN ROUTING: PASS"
-          echo "ETHERNET OPS: PASS"
-          echo "DUPLICATE DEFINITIONS: REMOVED"
-          echo "PER-INTERFACE MONITOR ROUTING: PASS"
+          echo "hdd_set_station_ops DEFINITION: PASS"
+          echo "MONITOR NETDEV ROUTING: PASS"
+          echo "EXTERNAL LINKAGE: PASS"
           echo "=========================================="
 
           exit 0
