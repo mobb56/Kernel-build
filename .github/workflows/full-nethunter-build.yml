@@ -3136,80 +3136,65 @@ jobs:
 
 
 
-
       - name: Route per-interface monitor netdev ops
         working-directory: kernel
         shell: bash
         run: |
           set -euo pipefail
 
-          MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+          HDD_MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
 
-          test -f "$MAIN"
+          test -f "$HDD_MAIN"
 
-          echo "=== ROUTING PER-INTERFACE MONITOR NETDEV OPS ==="
+          echo "=== NORMALIZING hdd_set_station_ops ==="
 
-          echo
-          echo "=== COUNTING EXISTING DEFINITIONS ==="
-
-          BEFORE="$(
-            awk '
-            /(^|[[:space:]])(static[[:space:]]+)?void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
-                count++
-            }
-            END {
-                print count + 0
-            }
-            ' "$MAIN"
-          )"
-
-          echo "Definitions before normalization: $BEFORE"
-
-          echo
-          echo "=== NORMALIZING hdd_set_station_ops() ==="
+          cp "$HDD_MAIN" "${HDD_MAIN}.before-netdev-routing"
 
           awk '
           BEGIN {
               in_func = 0
-              depth = 0
+              brace = 0
               found = 0
           }
 
-          !in_func &&
-          /(^|[[:space:]])(static[[:space:]]+)?void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
-
-              if (found == 0) {
-                  print ""
-                  print "void hdd_set_station_ops(struct net_device *dev)"
-                  print "{"
-                  print "\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
-                  print ""
-                  print "\tif (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||"
-                  print "\t    (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {"
-                  print "\t\tdev->netdev_ops = &wlan_mon_drv_ops;"
-                  print "\t} else {"
-                  print "\t\tdev->netdev_ops = &wlan_drv_ops;"
-                  print "\t}"
-                  print ""
-                  print "\tdev->ethtool_ops = &wlan_ethtool_ops;"
-                  print "}"
-                  print ""
-
-                  found = 1
-              }
-
+          # Locate the existing global function definition.
+          /^[[:space:]]*(void|static[[:space:]]+void)[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
+              found = 1
               in_func = 1
-              depth = 0
+              brace = 0
+
+              print "void hdd_set_station_ops(struct net_device *dev)"
+              print "{"
+              print "\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
+              print ""
+              print "\tif (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||"
+              print "\t    (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {"
+              print "\t\tdev->netdev_ops = &wlan_mon_drv_ops;"
+              print "\t} else {"
+              print "\t\tdev->netdev_ops = &wlan_drv_ops;"
+              print "\t}"
+              print ""
+              print "\tdev->ethtool_ops = &wlan_ethtool_ops;"
+              print "}"
+
               next
           }
 
+          # Skip the old function body.
           in_func {
-              opens = gsub(/\{/, "{")
-              closes = gsub(/\}/, "}")
-              depth += opens - closes
+              if ($0 ~ /\{/) {
+                  n = gsub(/\{/, "{")
+                  brace += n
+              }
 
-              if (depth <= 0)
+              if ($0 ~ /\}/) {
+                  n = gsub(/\}/, "}")
+                  brace -= n
+              }
+
+              if (brace <= 0) {
                   in_func = 0
+              }
 
               next
           }
@@ -3219,92 +3204,67 @@ jobs:
           }
 
           END {
-              if (found == 0) {
-                  exit 2
+              if (!found) {
+                  print "NO_EXISTING_DEFINITION"
               }
           }
-          ' "$MAIN" > "$MAIN.tmp"
+          ' "$HDD_MAIN" > "${HDD_MAIN}.new"
 
-          mv "$MAIN.tmp" "$MAIN"
+          if grep -q '^NO_EXISTING_DEFINITION$' "${HDD_MAIN}.new"; then
+              sed -i '/^NO_EXISTING_DEFINITION$/d' "${HDD_MAIN}.new"
 
-          echo
-          echo "=== VERIFYING REAL FUNCTION DEFINITION ==="
+              cat >> "${HDD_MAIN}.new" <<'EOF'
 
-          awk '
-          /(^|[[:space:]])void[[:space:]]+hdd_set_station_ops[[:space:]]*\(struct net_device[[:space:]]*\*dev\)/ {
-              found++
-              print "Definition:", NR, $0
-          }
+           /*
+           * NetHunter per-interface monitor netdev routing.
+           * Kept global because QCACLD3 references hdd_set_station_ops()
+           * across the HDD compilation units.
+           */
+           void hdd_set_station_ops(struct net_device *dev)
+            {
+            	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
 
-          END {
-              if (found != 1) {
-                  print "ERROR: expected exactly one real definition, found", found
-                  exit 1
-              }
-          }
-          ' "$MAIN"
+           if (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||
+          (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {
+          dev->netdev_ops = &wlan_mon_drv_ops;
+          	} else {
+            		dev->netdev_ops = &wlan_drv_ops;
+           	}
 
-          echo
-          echo "=== VERIFYING FUNCTION BODY ==="
+          	dev->ethtool_ops = &wlan_ethtool_ops;
+           }
+             EOF
+           fi
 
-          awk '
-          /void[[:space:]]+hdd_set_station_ops[[:space:]]*\(struct net_device[[:space:]]*\*dev\)/ {
-              in_func = 1
-              depth = 0
-          }
-
-          in_func {
-              print
-
-              if ($0 ~ /\{/) {
-                  depth++
-              }
-
-              if ($0 ~ /\}/) {
-                  depth--
-              }
-
-              if (depth == 0 && $0 ~ /\}/)
-                  exit
-          }
-          ' "$MAIN"
+          mv "${HDD_MAIN}.new" "$HDD_MAIN"
 
           echo
-          echo "=== VERIFYING REQUIRED ROUTING SYMBOLS ==="
+          echo "=== VERIFYING GLOBAL DEFINITION ==="
 
-          grep -q 'wlan_mon_drv_ops' "$MAIN"
-          grep -q 'wlan_drv_ops' "$MAIN"
-          grep -q 'QDF_GLOBAL_MONITOR_MODE' "$MAIN"
-          grep -q 'QDF_MONITOR_MODE' "$MAIN"
-          grep -q 'wlan_ethtool_ops' "$MAIN"
+          grep -n -A18 \
+            '^void hdd_set_station_ops(struct net_device \*dev)' \
+            "$HDD_MAIN"
 
-          echo "wlan_mon_drv_ops: PASS"
-          echo "wlan_drv_ops: PASS"
-          echo "QDF_GLOBAL_MONITOR_MODE: PASS"
-          echo "QDF_MONITOR_MODE: PASS"
-          echo "wlan_ethtool_ops: PASS"
+          COUNT=$(grep -c \
+            '^void hdd_set_station_ops(struct net_device \*dev)' \
+            "$HDD_MAIN" || true)
 
-          echo
-          echo "=== VERIFYING NO STATIC DEFINITION ==="
-
-          if grep -Eq \
-            'static[[:space:]]+void[[:space:]]+hdd_set_station_ops' \
-            "$MAIN"
-          then
-            echo "ERROR: hdd_set_station_ops() is still static."
-            exit 1
+          if [ "$COUNT" -ne 1 ]; then
+              echo "ERROR: expected exactly one global hdd_set_station_ops definition; found $COUNT"
+              exit 2
           fi
 
-          echo "External linkage: PASS"
+          grep -q 'dev->netdev_ops = &wlan_mon_drv_ops;' "$HDD_MAIN"
+          grep -q 'dev->netdev_ops = &wlan_drv_ops;' "$HDD_MAIN"
+          grep -q 'dev->ethtool_ops = &wlan_ethtool_ops;' "$HDD_MAIN"
 
           echo
-          echo "=========================================="
-          echo "hdd_set_station_ops DEFINITION: PASS"
-          echo "MONITOR NETDEV ROUTING: PASS"
-          echo "EXTERNAL LINKAGE: PASS"
-          echo "=========================================="
-
-          exit 0
+          echo "=== NETDEV ROUTING FIX COMPLETE ==="
+          echo "Global hdd_set_station_ops: PASS"
+          echo "Monitor netdev routing: PASS"
+          echo "Normal netdev routing: PASS"
+          echo "Single definition: PASS"
+          
           
 
         
