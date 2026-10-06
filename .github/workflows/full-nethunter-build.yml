@@ -4443,6 +4443,14 @@ jobs:
 
 
 
+    
+
+
+
+
+
+
+
       - name: Enable QCACLD3 monitor interface lifecycle
         working-directory: kernel
         shell: bash
@@ -4452,111 +4460,39 @@ jobs:
           HDD_CFG="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c"
 
           echo "=== QCACLD3 MONITOR INTERFACE LIFECYCLE ==="
-          echo "Target: $HDD_CFG"
-
           test -f "$HDD_CFG"
 
-          echo "=== CHECKING EXISTING MONITOR LIFECYCLE ==="
+          echo "=== EXISTING MONITOR IMPLEMENTATION ==="
 
-          if grep -Fq 'adapter->device_mode = QDF_MONITOR_MODE;' "$HDD_CFG" &&
-             grep -Fq 'adapter->vdev.iftype = NL80211_IFTYPE_MONITOR;' "$HDD_CFG"; then
-              echo "Monitor lifecycle code already present."
-              echo "No patch required."
-              exit 0
-          fi
-
-          echo "Monitor lifecycle code is not present."
-          echo "Locating stable monitor conversion anchor..."
-
-          if ! grep -nF 'if (type == NL80211_IFTYPE_MONITOR)' "$HDD_CFG"; then
-              echo "ERROR: NL80211_IFTYPE_MONITOR anchor not found."
-              echo "Available monitor references:"
-              grep -nE 'MONITOR|monitor|NL80211_IFTYPE' "$HDD_CFG" || true
-              exit 2
-          fi
-
-          cp "$HDD_CFG" "${HDD_CFG}.before-monitor-lifecycle"
-
-          python3 - "$HDD_CFG" <<'PY'
-          import sys
-          from pathlib import Path
-
-          path = Path(sys.argv[1])
-          text = path.read_text()
-
-          required = [
-              "adapter->device_mode = QDF_MONITOR_MODE;",
-              "adapter->vdev.iftype = NL80211_IFTYPE_MONITOR;",
-          ]
-
-          if all(x in text for x in required):
-              print("Monitor lifecycle already installed.")
-              sys.exit(0)
-
-          anchor = "if (type == NL80211_IFTYPE_MONITOR) {"
-
-          if anchor not in text:
-              print("ERROR: monitor conversion anchor not found.")
-              sys.exit(2)
-
-          lifecycle = r'''if (type == NL80211_IFTYPE_MONITOR) {
-              int monitor_ret;
-
-              hdd_info("Converting interface to monitor mode");
-
-              hdd_stop_adapter(hdd_ctx, adapter);
-              hdd_deinit_adapter(hdd_ctx, adapter);
-
-              adapter->device_mode = QDF_MONITOR_MODE;
-              adapter->vdev.iftype = NL80211_IFTYPE_MONITOR;
-
-              monitor_ret = hdd_start_adapter(adapter);
-              if (monitor_ret) {
-                  hdd_err("Failed to start monitor adapter: %d",
-                          monitor_ret);
-                  errno = monitor_ret;
-                  goto err;
-              }
-
-              hdd_info("Monitor interface conversion successful");
-              return 0;
-          }'''
-
-          text = text.replace(anchor, lifecycle, 1)
-
-          path.write_text(text)
-          print("Installed monitor lifecycle conversion.")
-          PY
-
-          echo
-          echo "=== VERIFYING MONITOR LIFECYCLE ==="
-
-          grep -Fq \
-            'adapter->device_mode = QDF_MONITOR_MODE;' \
-            "$HDD_CFG"
-
-          grep -Fq \
-            'adapter->vdev.iftype = NL80211_IFTYPE_MONITOR;' \
-            "$HDD_CFG"
-
-          grep -Fq \
-            'hdd_start_adapter(adapter)' \
-            "$HDD_CFG"
-
-          echo "Monitor lifecycle verification: PASS"
-
-          echo
-          echo "=== MONITOR REFERENCES ==="
           grep -nE \
-            'QDF_MONITOR_MODE|NL80211_IFTYPE_MONITOR|hdd_start_adapter\(adapter\)' \
+            'FEATURE_MONITOR_MODE_SUPPORT|QDF_GLOBAL_MONITOR_MODE|QDF_MONITOR_MODE|NL80211_IFTYPE_MONITOR|monitor mode|monitor_mode' \
             "$HDD_CFG" || true
 
           echo
-          echo "=========================================="
-          echo "QCACLD3 MONITOR INTERFACE LIFECYCLE: PASS"
-          echo "=========================================="
+          echo "=== SEARCHING INTERFACE-MODE HANDLERS ==="
+
+          grep -nE \
+            'change_iface|change_interface|set_interface|set_iface|interface.*type|type.*interface' \
+            "$HDD_CFG" || true
+
+          echo
+          echo "=== SEARCHING MONITOR CONVERSION FUNCTIONS ==="
+
+          grep -nE \
+            'monitor.*adapter|adapter.*monitor|start.*adapter|stop.*adapter|deinit.*adapter' \
+            "$HDD_CFG" || true
+
+          echo
+          echo "=== MONITOR LIFECYCLE SOURCE DISCOVERY COMPLETE ==="
+          echo "No source modification performed."
+          echo "This step intentionally stops here so we can identify the"
+          echo "actual QCACLD3 interface-conversion path before patching it."
+
+          exit 1
 
 
+
+          
       - name: Route per-interface monitor netdev ops
         working-directory: kernel
         shell: bash
