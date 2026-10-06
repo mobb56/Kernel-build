@@ -449,6 +449,173 @@ jobs:
           } > ../artifacts/source-audit/qcacld3-paths.txt
 
           echo "QCACLD3 source tree verified."
+
+
+
+
+
+      # ============================================================
+      # 9A. PATCH MONITOR VDEV / POLICY-MANAGER LIFECYCLE
+      #
+      # Runtime evidence:
+      #   send_vdev_start_cmd_tlv(vdev_id 0)
+      #   policy_mgr_update_connection_info:
+      #     can't find vdev_id 0 in pm_conc_connection_list
+      #   monitor vdev up event timeout
+      #
+      # The monitor interface is created, but vdev 0 is not present
+      # in the policy-manager connection table when the monitor
+      # VDEV_START path runs.
+      #
+      # This patch is intentionally guarded against the exact source
+      # revision used by this workflow.
+      # ============================================================
+
+      - name: Patch monitor VDEV policy-manager lifecycle
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "============================================================"
+          echo "MONITOR VDEV / POLICY-MANAGER PATCH"
+          echo "============================================================"
+
+          EXPECTED_COMMIT="39bcecd5c63df849923b1faadc9cde482648a1a1"
+
+          CURRENT_COMMIT="$(git rev-parse HEAD)"
+
+          echo "Current commit:"
+          echo "${CURRENT_COMMIT}"
+
+          test "${CURRENT_COMMIT}" = "${EXPECTED_COMMIT}"
+
+          QCACLD="drivers/staging/qcacld-3.0"
+
+          echo
+          echo "=== Locating monitor/policy-manager sources ==="
+
+          HDD_MAIN="$(
+            find "${QCACLD}" \
+              -type f \
+              -name 'wlan_hdd_main.c' \
+              -print -quit
+          )"
+
+          POLICY_SRC="$(
+            grep -RIl \
+              --include='*.c' \
+              'policy_mgr_update_connection_info' \
+              "${QCACLD}" \
+              | head -n 1
+          )"
+
+          SME_SRC="$(
+            grep -RIl \
+              --include='*.c' \
+              'sme_process_monitor_mode_vdev_up_evt' \
+              "${QCACLD}" \
+              | head -n 1
+          )"
+
+          test -n "${HDD_MAIN}"
+          test -n "${POLICY_SRC}"
+          test -n "${SME_SRC}"
+
+          echo "HDD source:"
+          echo "${HDD_MAIN}"
+
+          echo
+          echo "Policy manager source:"
+          echo "${POLICY_SRC}"
+
+          echo
+          echo "SME source:"
+          echo "${SME_SRC}"
+
+          mkdir -p ../artifacts/source-audit
+
+          {
+            echo "HDD_MAIN=${HDD_MAIN}"
+            echo "POLICY_SRC=${POLICY_SRC}"
+            echo "SME_SRC=${SME_SRC}"
+          } > ../artifacts/source-audit/monitor-vdev-patch-paths.txt
+
+          echo
+          echo "=== Required monitor functions ==="
+
+          grep -n \
+            -E \
+            'hdd_open_adapters_for_monitor_mode|hdd_monitor_mode_vdev_status|sme_process_monitor_mode_vdev_up_evt' \
+            "${QCACLD}"/core/hdd/src/*.c \
+            "${QCACLD}"/core/sme/src/*.c \
+            2>/dev/null || true
+
+          echo
+          echo "=== Required policy-manager functions ==="
+
+          grep -RniE \
+            --include='*.c' \
+            'policy_mgr_vdev_obj_create_cb|policy_mgr_vdev_obj_status_cb|policy_mgr_update_connection_info|pm_conc_connection_list' \
+            "${QCACLD}" \
+            2>/dev/null | head -200
+
+          echo
+          echo "=== Verify the problematic policy-manager lookup exists ==="
+
+          grep -RniE \
+            --include='*.c' \
+            'can.t find vdev_id.*pm_conc_connection_list|pm_conc_connection_list' \
+            "${QCACLD}" \
+            2>/dev/null | head -100
+
+          echo
+          echo "=== Monitor VDEV lifecycle context ==="
+
+          grep -RniE \
+            --include='*.c' \
+            -B12 \
+            -A30 \
+            'hdd_open_adapters_for_monitor_mode|hdd_monitor_mode_vdev_status|sme_process_monitor_mode_vdev_up_evt' \
+            "${QCACLD}" \
+            2>/dev/null | head -500
+
+          echo
+          echo "=== Policy-manager lifecycle context ==="
+
+          grep -RniE \
+            --include='*.c' \
+            -B15 \
+            -A35 \
+            'policy_mgr_vdev_obj_create_cb|policy_mgr_vdev_obj_status_cb|policy_mgr_update_connection_info' \
+            "${QCACLD}" \
+            2>/dev/null | head -700
+
+          echo
+          echo "=== Saving pre-patch source checksums ==="
+
+          sha256sum \
+            "${HDD_MAIN}" \
+            "${POLICY_SRC}" \
+            "${SME_SRC}" \
+            > ../artifacts/source-audit/monitor-vdev-prepatch.sha256
+
+          echo
+          echo "============================================================"
+          echo "IMPORTANT"
+          echo "============================================================"
+          echo
+          echo "The monitor lifecycle has been located."
+          echo
+          echo "The workflow will NOT blindly rewrite policy-manager code."
+          echo "The source context above is required before applying the"
+          echo "minimal lifecycle correction."
+          echo
+          echo "Monitor VDEV source audit PASSED."
+
+
+
+          
       # ============================================================
       # 10. CLONE NETHUNTER REFERENCE
       # ============================================================
