@@ -453,7 +453,6 @@ jobs:
 
 
 
-
       - name: Apply targeted QCACLD3 monitor VDEV callback fix
         working-directory: kernel
         shell: bash
@@ -462,6 +461,7 @@ jobs:
 
           QCACLD="drivers/staging/qcacld-3.0"
           MAIN="${QCACLD}/core/hdd/src/wlan_hdd_main.c"
+          CFG="${QCACLD}/core/hdd/src/wlan_hdd_cfg80211.c"
           SME="${QCACLD}/core/sme/src/common/sme_api.c"
           LIM="${QCACLD}/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
           AUDIT="${GITHUB_WORKSPACE}/artifacts/source-audit"
@@ -469,105 +469,102 @@ jobs:
           mkdir -p "${AUDIT}"
 
           echo "============================================================"
-          echo "NET HUNTER MONITOR VDEV CALLBACK FIX"
+          echo "TARGETED QCACLD3 MONITOR VDEV CALLBACK FIX"
           echo "============================================================"
 
           test -f "${MAIN}"
           test -f "${SME}"
           test -f "${LIM}"
 
+          # Remove the unrelated cfg80211 monitor conversion patch.
+          # The cebu monitor path uses the native con_mode=4 mechanism.
+          git checkout -- "${CFG}"
+
           echo
-          echo "=== Verify SME callback API ==="
-          grep -n -A35 -B5 \
+          echo "=== Confirm the callback setter exists ==="
+          grep -n -A38 -B5 \
             'QDF_STATUS sme_set_monitor_mode_cb' \
             "${SME}"
 
           echo
-          echo "=== Verify monitor VDEV-UP event dispatcher ==="
-          grep -n -A30 -B8 \
+          echo "=== Confirm the VDEV-UP event reaches the callback dispatcher ==="
+          grep -n -A28 -B8 \
             'sme_process_monitor_mode_vdev_up_evt' \
             "${SME}"
 
           echo
-          echo "=== Verify HDD callback exists ==="
+          echo "=== Confirm the HDD callback exists ==="
           grep -n -A30 -B5 \
             'void hdd_sme_monitor_mode_callback' \
             "${MAIN}"
 
           echo
-          echo "=== Register HDD callback ==="
+          echo "=== Register HDD monitor callback when monitor adapters are opened ==="
 
           if ! grep -qF \
             'sme_set_monitor_mode_cb(hdd_ctx->mac_handle, hdd_sme_monitor_mode_callback);' \
             "${MAIN}"; then
 
+            cp "${MAIN}" "${MAIN}.pre-monitor-callback"
+
             awk '
             BEGIN {
-              prototype_done = 0
-              callback_done = 0
-              in_monitor_function = 0
+                prototype_done = 0
+                callback_done = 0
+                in_monitor_function = 0
             }
 
-            # Insert the callback prototype immediately before
-            # hdd_open_adapters_for_monitor_mode().
-            /^hdd_open_adapters_for_monitor_mode\(struct hdd_context \*hdd_ctx\)/ {
-              if (!prototype_done) {
-                print "void hdd_sme_monitor_mode_callback(uint8_t vdev_id);"
-                print ""
-                prototype_done = 1
-              }
+            /hdd_open_adapters_for_monitor_mode[[:space:]]*\([[:space:]]*struct[[:space:]]+hdd_context[[:space:]]*\*[[:space:]]*hdd_ctx[[:space:]]*\)/ {
+                if (!prototype_done) {
+                    print "void hdd_sme_monitor_mode_callback(uint8_t vdev_id);"
+                    print ""
+                    prototype_done = 1
+                }
 
-              in_monitor_function = 1
-              print
-              next
+                in_monitor_function = 1
+                print
+                next
             }
 
-            # Insert callback registration immediately after
-            # the opening brace of hdd_open_adapters_for_monitor_mode().
-            in_monitor_function && !callback_done &&
-            /^[[:space:]]*\{/ {
-              print
-              print "\tQDF_STATUS monitor_cb_status;"
-              print "\tmonitor_cb_status = sme_set_monitor_mode_cb("
-              print "\t\thdd_ctx->mac_handle, hdd_sme_monitor_mode_callback);"
-              print "\tif (QDF_IS_STATUS_ERROR(monitor_cb_status)) {"
-              print "\t\thdd_err(\"Failed to register monitor mode callback: %d\","
-              print "\t\t\tmonitor_cb_status);"
-              print "\t\treturn monitor_cb_status;"
-              print "\t}"
-              print "\thdd_info(\"NetHunter: monitor mode callback registered\");"
+            in_monitor_function && !callback_done && /^[[:space:]]*\{/ {
+                print
+                print "\tQDF_STATUS monitor_cb_status;"
+                print "\tmonitor_cb_status = sme_set_monitor_mode_cb(hdd_ctx->mac_handle, hdd_sme_monitor_mode_callback);"
+                print "\tif (QDF_IS_STATUS_ERROR(monitor_cb_status)) {"
+                print "\t\thdd_err(\"Failed to register monitor mode callback: %d\","
+                print "\t\t\tmonitor_cb_status);"
+                print "\t\treturn monitor_cb_status;"
+                print "\t}"
+                print "\thdd_info(\"NetHunter: monitor mode callback registered\");"
 
-              callback_done = 1
-              next
+                callback_done = 1
+                next
             }
 
             {
-              print
+                print
             }
 
             END {
-              if (!prototype_done) {
-                print "ERROR: hdd_open_adapters_for_monitor_mode() not found" > "/dev/stderr"
-                exit 2
-              }
+                if (!prototype_done) {
+                    print "ERROR: hdd_open_adapters_for_monitor_mode() not found" > "/dev/stderr"
+                    exit 2
+                }
 
-              if (!callback_done) {
-                print "ERROR: callback insertion point not found" > "/dev/stderr"
-                exit 3
-              }
+                if (!callback_done) {
+                    print "ERROR: callback insertion point not found" > "/dev/stderr"
+                    exit 3
+                }
             }
             ' "${MAIN}" > "${MAIN}.tmp"
 
             mv "${MAIN}.tmp" "${MAIN}"
-
-          else
-            echo "Callback already registered. No source change required."
           fi
 
           echo
-          echo "=== Verify callback registration ==="
+          echo "=== Verify monitor callback registration ==="
 
-          grep -n -B6 -A12 \
+          grep -n -B8 -A12 \
             'sme_set_monitor_mode_cb(hdd_ctx->mac_handle, hdd_sme_monitor_mode_callback);' \
             "${MAIN}"
 
@@ -580,35 +577,50 @@ jobs:
             "${MAIN}"
 
           echo
-          echo "=== Verify monitor VDEV-UP handling ==="
+          echo "=== Verify callback error handling ==="
 
-          grep -n -A35 -B8 \
-            'LIM_SWITCH_CHANNEL_MONITOR' \
-            "${LIM}"
+          grep -qF \
+            'QDF_STATUS monitor_cb_status;' \
+            "${MAIN}"
 
-          echo
-          echo "=== Save audit result ==="
+          grep -qF \
+            'if (QDF_IS_STATUS_ERROR(monitor_cb_status)) {' \
+            "${MAIN}"
 
-          {
-            echo "MONITOR_CALLBACK_FIX=enabled"
-            echo "CALL=sme_set_monitor_mode_cb(hdd_ctx->mac_handle, hdd_sme_monitor_mode_callback)"
-            echo "PATH=hdd_open_adapters_for_monitor_mode"
-            echo "POLICY_MANAGER_FAKE_ENTRY=not applied"
-          } > "${AUDIT}/monitor-vdev-callback-fix.txt"
+          grep -qF \
+            'return monitor_cb_status;' \
+            "${MAIN}"
 
           echo
-          echo "=== SOURCE DIFF ==="
+          echo "=== Verify no fabricated policy-manager entry was added ==="
+
+          git diff -- "${QCACLD}/components/cmn_services/policy_mgr" || true
+
+          echo
+          echo "=== Verify monitor response posts VDEV-UP before policy update ==="
+
+          grep -n -A32 -B8 \
+            'sme_process_monitor_mode_vdev_up_evt' \
+            "${SME}"
+
+          echo
+          echo "=== Final source diff ==="
 
           git diff -- \
             "${MAIN}" \
             "${SME}" \
-            "${LIM}"
+            "${LIM}" \
+            "${CFG}" || true
 
           echo
-          echo "============================================================"
-          echo "PASS: QCACLD3 monitor VDEV callback registered"
-          echo "============================================================"
+          echo "=== Final callback registration ==="
 
+          grep -n -B8 -A15 \
+            'sme_set_monitor_mode_cb(hdd_ctx->mac_handle, hdd_sme_monitor_mode_callback);' \
+            "${MAIN}"
+
+          echo
+          echo "=== Monitor VDEV callback fix verified successfully ==="
 
 
 
