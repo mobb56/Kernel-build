@@ -3146,50 +3146,32 @@ jobs:
 
           HDD_SRC="drivers/staging/qcacld-3.0/core/hdd/src"
 
-          echo "=== ROUTING PER-INTERFACE MONITOR NETDEV OPS ==="
+          echo "=== ROUTING PER-INTERFACE MONITOR ADAPTERS ==="
 
           TARGET="$(grep -RIl \
             'void hdd_set_station_ops(struct net_device \*dev)' \
             "$HDD_SRC" 2>/dev/null | head -n1 || true)"
 
           if [ -z "$TARGET" ]; then
-            echo "ERROR: hdd_set_station_ops() was not found."
+            echo "ERROR: hdd_set_station_ops() not found in QCACLD3 HDD sources."
+            echo
+            echo "Searching for related netdev operations:"
+            grep -RIn \
+              'wlan_mon_drv_ops\|wlan_drv_ops\|hdd_set_station_ops' \
+              "$HDD_SRC" 2>/dev/null || true
             exit 1
           fi
 
           echo "Target: $TARGET"
 
           echo
-          echo "=== EXISTING FUNCTION ==="
-
-          awk '
-          /void hdd_set_station_ops\(struct net_device \*dev\)/ {
-              show=1
-              depth=0
-          }
-
-          show {
-              print
-          }
-
-          show {
-              opens=gsub(/\{/, "{")
-              closes=gsub(/\}/, "}")
-              depth += opens - closes
-
-              if (depth == 0 && opens > 0)
-                  exit
-          }
-          ' "$TARGET"
-
-          echo
-          echo "=== NORMALIZING hdd_set_station_ops() ==="
+          echo "=== NORMALIZING hdd_set_station_ops() WITH AWK ==="
 
           awk '
           BEGIN {
-              in_func=0
-              depth=0
-              replaced=0
+              in_func = 0
+              depth = 0
+              replaced = 0
           }
 
           !in_func &&
@@ -3209,23 +3191,21 @@ jobs:
               print "\tdev->ethtool_ops = &wlan_ethtool_ops;"
               print "}"
 
-              in_func=1
-              replaced=1
+              in_func = 1
+              replaced = 1
 
-              opens=gsub(/\{/, "{")
-              closes=gsub(/\}/, "}")
-              depth=opens-closes
+              depth = 1
 
               next
           }
 
           in_func {
-              opens=gsub(/\{/, "{")
-              closes=gsub(/\}/, "}")
-              depth += opens-closes
+              opens = gsub(/\{/, "{")
+              closes = gsub(/\}/, "}")
+              depth += opens - closes
 
               if (depth <= 0)
-                  in_func=0
+                  in_func = 0
 
               next
           }
@@ -3236,35 +3216,35 @@ jobs:
 
           END {
               if (replaced != 1) {
-                  print "ERROR: hdd_set_station_ops() replacement failed." > "/dev/stderr"
+                  print "ERROR: hdd_set_station_ops() was not replaced." > "/dev/stderr"
                   exit 2
               }
           }
-          ' "$TARGET" > "${TARGET}.tmp"
+          ' "$TARGET" > "$TARGET.tmp"
 
-          mv "${TARGET}.tmp" "$TARGET"
+          mv "$TARGET.tmp" "$TARGET"
 
           echo
-          echo "=== VERIFYING MONITOR ROUTING ==="
+          echo "=== VERIFYING RESULT ==="
 
           awk '
           /void hdd_set_station_ops\(struct net_device \*dev\)/ {
-              found=1
-              show=1
-              depth=0
+              in_func = 1
+              depth = 1
+              found = 1
           }
 
-          show {
+          in_func {
               print
-          }
 
-          show {
-              opens=gsub(/\{/, "{")
-              closes=gsub(/\}/, "}")
-              depth += opens-closes
+              opens = gsub(/\{/, "{")
+              closes = gsub(/\}/, "}")
+              depth += opens - closes
 
-              if (depth == 0 && opens > 0)
+              if (depth <= 0) {
+                  in_func = 0
                   exit
+              }
           }
 
           END {
@@ -3273,32 +3253,41 @@ jobs:
           }
           ' "$TARGET"
 
-          
           echo
-          echo "=== ROUTING CHECKS ==="
+          echo "=== MONITOR ROUTING CHECKS ==="
 
           awk '
           /void hdd_set_station_ops\(struct net_device \*dev\)/ {
-              in_func=1
-              depth=0
+              in_func = 1
+              depth = 1
           }
 
           in_func {
-              text=text $0 "\n"
+              body = body $0 "\n"
 
-              opens=gsub(/\{/, "{")
-              closes=gsub(/\}/, "}")
-              depth += opens-closes
+              opens = gsub(/\{/, "{")
+              closes = gsub(/\}/, "}")
+              depth += opens - closes
 
-              if (depth == 0 && opens > 0) {
-                  if (text !~ /wlan_mon_drv_ops/) {
+              if (depth <= 0) {
+                  if (body !~ /wlan_mon_drv_ops/) {
                       print "ERROR: wlan_mon_drv_ops missing." > "/dev/stderr"
                       exit 2
                   }
 
-                  if (text !~ /wlan_drv_ops/) {
+                  if (body !~ /wlan_drv_ops/) {
                       print "ERROR: wlan_drv_ops missing." > "/dev/stderr"
                       exit 3
+                  }
+
+                  if (body !~ /QDF_GLOBAL_MONITOR_MODE/) {
+                      print "ERROR: global monitor check missing." > "/dev/stderr"
+                      exit 4
+                  }
+
+                  if (body !~ /QDF_MONITOR_MODE/) {
+                      print "ERROR: per-adapter monitor check missing." > "/dev/stderr"
+                      exit 5
                   }
 
                   exit 0
@@ -3306,14 +3295,15 @@ jobs:
           }
 
           END {
-              if (!in_func && text == "")
-                  exit 4
+              if (!body)
+                  exit 6
           }
           ' "$TARGET"
 
           echo
           echo "PER-INTERFACE MONITOR ROUTING: PASS"
-          echo "DUPLICATE DEFINITIONS: CHECKED"
+          echo "hdd_set_station_ops(): NORMALIZED"
+          echo "MONITOR NETDEV OPS: PRESENT"
 
           exit 0
           
