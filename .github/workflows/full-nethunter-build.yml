@@ -3137,7 +3137,6 @@ jobs:
 
 
 
-       
       - name: Route per-interface monitor netdev ops
         working-directory: kernel
         shell: bash
@@ -3146,18 +3145,28 @@ jobs:
 
           HDD_SRC="drivers/staging/qcacld-3.0/core/hdd/src"
 
-          echo "=== ROUTING PER-INTERFACE MONITOR ADAPTERS ==="
+          echo "=========================================="
+          echo "ROUTING PER-INTERFACE MONITOR NETDEV OPS"
+          echo "=========================================="
 
-          TARGET="$(grep -RIl \
-            'void hdd_set_station_ops(struct net_device \*dev)' \
-            "$HDD_SRC" 2>/dev/null | head -n1 || true)"
+          test -d "$HDD_SRC"
+
+          echo
+          echo "=== LOCATING hdd_set_station_ops() ==="
+
+          TARGET="$(
+            grep -RIl \
+              'hdd_set_station_ops[[:space:]]*(struct net_device' \
+              "$HDD_SRC" 2>/dev/null |
+              head -n1 || true
+          )"
 
           if [ -z "$TARGET" ]; then
-            echo "ERROR: hdd_set_station_ops() not found in QCACLD3 HDD sources."
+            echo "ERROR: hdd_set_station_ops() was not found."
             echo
-            echo "Searching for related netdev operations:"
-            grep -RIn \
-              'wlan_mon_drv_ops\|wlan_drv_ops\|hdd_set_station_ops' \
+            echo "Available monitor netdev symbols:"
+            grep -RInE \
+              'hdd_set_station_ops|wlan_mon_drv_ops|wlan_drv_ops' \
               "$HDD_SRC" 2>/dev/null || true
             exit 1
           fi
@@ -3165,47 +3174,84 @@ jobs:
           echo "Target: $TARGET"
 
           echo
-          echo "=== NORMALIZING hdd_set_station_ops() WITH AWK ==="
+          echo "=== DEFINITIONS BEFORE NORMALIZATION ==="
+
+          BEFORE="$(
+            awk '
+            /hdd_set_station_ops[[:space:]]*\(struct net_device[[:space:]]*\*dev\)/ {
+                count++
+            }
+            END {
+                print count + 0
+            }
+            ' "$TARGET"
+          )"
+
+          echo "Definitions before normalization: $BEFORE"
+
+          if [ "$BEFORE" -lt 1 ]; then
+            echo "ERROR: Function definition could not be identified."
+            exit 1
+          fi
+
+          echo
+          echo "=== NORMALIZING WITH AWK ==="
 
           awk '
           BEGIN {
               in_func = 0
               depth = 0
+              seen = 0
               replaced = 0
           }
 
+          # Locate the actual function definition.
           !in_func &&
-          /void hdd_set_station_ops\(struct net_device \*dev\)/ {
+          /hdd_set_station_ops[[:space:]]*\(struct net_device[[:space:]]*\*dev\)/ {
 
-              print "void hdd_set_station_ops(struct net_device *dev)"
-              print "{"
-              print "\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
-              print ""
-              print "\tif (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||"
-              print "\t    (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {"
-              print "\t\tdev->netdev_ops = &wlan_mon_drv_ops;"
-              print "\t} else {"
-              print "\t\tdev->netdev_ops = &wlan_drv_ops;"
-              print "\t}"
-              print ""
-              print "\tdev->ethtool_ops = &wlan_ethtool_ops;"
-              print "}"
+              # First definition becomes the canonical definition.
+              if (seen == 0) {
 
+                  print "void hdd_set_station_ops(struct net_device *dev)"
+                  print "{"
+                  print "\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
+                  print ""
+                  print "\tif (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||"
+                  print "\t    (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {"
+                  print "\t\tdev->netdev_ops = &wlan_mon_drv_ops;"
+                  print "\t} else {"
+                  print "\t\tdev->netdev_ops = &wlan_drv_ops;"
+                  print "\t}"
+                  print ""
+                  print "\tdev->ethtool_ops = &wlan_ethtool_ops;"
+                  print "}"
+
+                  seen = 1
+                  replaced = 1
+
+              } else {
+
+                  # Any additional definition is removed.
+                  seen++
+
+              }
+
+              # Start skipping the original function.
               in_func = 1
-              replaced = 1
-
-              depth = 1
+              depth = 0
 
               next
           }
 
+          # Skip the original function body.
           in_func {
               opens = gsub(/\{/, "{")
               closes = gsub(/\}/, "}")
               depth += opens - closes
 
-              if (depth <= 0)
+              if (depth <= 0) {
                   in_func = 0
+              }
 
               next
           }
@@ -3216,7 +3262,7 @@ jobs:
 
           END {
               if (replaced != 1) {
-                  print "ERROR: hdd_set_station_ops() was not replaced." > "/dev/stderr"
+                  print "ERROR: Canonical hdd_set_station_ops() was not created." > "/dev/stderr"
                   exit 2
               }
           }
@@ -3225,41 +3271,54 @@ jobs:
           mv "$TARGET.tmp" "$TARGET"
 
           echo
-          echo "=== VERIFYING RESULT ==="
+          echo "=== DEFINITIONS AFTER NORMALIZATION ==="
+
+          AFTER="$(
+            awk '
+            /hdd_set_station_ops[[:space:]]*\(struct net_device[[:space:]]*\*dev\)/ {
+                count++
+            }
+            END {
+                print count + 0
+            }
+            ' "$TARGET"
+          )"
+
+          echo "Definitions after normalization: $AFTER"
+
+          if [ "$AFTER" -ne 1 ]; then
+            echo "ERROR: Expected exactly one hdd_set_station_ops() definition."
+            exit 2
+          fi
+
+          echo
+          echo "=== CANONICAL FUNCTION ==="
 
           awk '
-          /void hdd_set_station_ops\(struct net_device \*dev\)/ {
-              in_func = 1
-              depth = 1
-              found = 1
+          /hdd_set_station_ops[[:space:]]*\(struct net_device[[:space:]]*\*dev\)/ {
+              show = 1
+              depth = 0
           }
 
-          in_func {
+          show {
               print
 
               opens = gsub(/\{/, "{")
               closes = gsub(/\}/, "}")
               depth += opens - closes
 
-              if (depth <= 0) {
-                  in_func = 0
+              if (depth == 0 && opens > 0)
                   exit
-              }
-          }
-
-          END {
-              if (!found)
-                  exit 2
           }
           ' "$TARGET"
 
           echo
-          echo "=== MONITOR ROUTING CHECKS ==="
+          echo "=== MONITOR ROUTING VERIFICATION ==="
 
           awk '
-          /void hdd_set_station_ops\(struct net_device \*dev\)/ {
+          /hdd_set_station_ops[[:space:]]*\(struct net_device[[:space:]]*\*dev\)/ {
               in_func = 1
-              depth = 1
+              depth = 0
           }
 
           in_func {
@@ -3269,25 +3328,31 @@ jobs:
               closes = gsub(/\}/, "}")
               depth += opens - closes
 
-              if (depth <= 0) {
-                  if (body !~ /wlan_mon_drv_ops/) {
-                      print "ERROR: wlan_mon_drv_ops missing." > "/dev/stderr"
+              if (depth == 0 && opens > 0) {
+
+                  if (body !~ /QDF_GLOBAL_MONITOR_MODE/) {
+                      print "ERROR: QDF_GLOBAL_MONITOR_MODE check missing." > "/dev/stderr"
                       exit 2
                   }
 
-                  if (body !~ /wlan_drv_ops/) {
-                      print "ERROR: wlan_drv_ops missing." > "/dev/stderr"
+                  if (body !~ /QDF_MONITOR_MODE/) {
+                      print "ERROR: QDF_MONITOR_MODE check missing." > "/dev/stderr"
                       exit 3
                   }
 
-                  if (body !~ /QDF_GLOBAL_MONITOR_MODE/) {
-                      print "ERROR: global monitor check missing." > "/dev/stderr"
+                  if (body !~ /wlan_mon_drv_ops/) {
+                      print "ERROR: wlan_mon_drv_ops routing missing." > "/dev/stderr"
                       exit 4
                   }
 
-                  if (body !~ /QDF_MONITOR_MODE/) {
-                      print "ERROR: per-adapter monitor check missing." > "/dev/stderr"
+                  if (body !~ /wlan_drv_ops/) {
+                      print "ERROR: wlan_drv_ops routing missing." > "/dev/stderr"
                       exit 5
+                  }
+
+                  if (body !~ /wlan_ethtool_ops/) {
+                      print "ERROR: wlan_ethtool_ops assignment missing." > "/dev/stderr"
+                      exit 6
                   }
 
                   exit 0
@@ -3295,15 +3360,20 @@ jobs:
           }
 
           END {
-              if (!body)
-                  exit 6
+              if (body == "")
+                  exit 7
           }
           ' "$TARGET"
 
           echo
+          echo "=========================================="
+          echo "DEFINITION COUNT: PASS"
+          echo "MONITOR ROUTING: PASS"
+          echo "NORMAL WLAN ROUTING: PASS"
+          echo "ETHERNET OPS: PASS"
+          echo "DUPLICATE DEFINITIONS: REMOVED"
           echo "PER-INTERFACE MONITOR ROUTING: PASS"
-          echo "hdd_set_station_ops(): NORMALIZED"
-          echo "MONITOR NETDEV OPS: PRESENT"
+          echo "=========================================="
 
           exit 0
           
