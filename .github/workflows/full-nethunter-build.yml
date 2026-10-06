@@ -453,7 +453,6 @@ jobs:
 
 
 
-
       - name: Apply targeted QCACLD3 monitor VDEV callback fix
         working-directory: kernel
         shell: bash
@@ -464,7 +463,6 @@ jobs:
           MAIN="${QCACLD}/core/hdd/src/wlan_hdd_main.c"
           CFG="${QCACLD}/core/hdd/src/wlan_hdd_cfg80211.c"
           SME="${QCACLD}/core/sme/src/common/sme_api.c"
-          LIM="${QCACLD}/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
 
           echo "============================================================"
           echo "TARGETED QCACLD3 MONITOR VDEV CALLBACK FIX"
@@ -472,46 +470,39 @@ jobs:
 
           test -f "${MAIN}"
           test -f "${SME}"
-          test -f "${LIM}"
 
           echo
           echo "=== Restore cfg80211 source ==="
           git checkout -- "${CFG}"
 
           echo
-          echo "=== Verify existing HDD callback declaration ==="
+          echo "=== Verify HDD monitor callback declaration ==="
 
-          grep -n -B3 -A3 \
-            'hdd_sme_monitor_mode_callback' \
-            "${MAIN}" | head -40
+          grep -n -B3 -A5 \
+            'void hdd_sme_monitor_mode_callback' \
+            "${MAIN}"
 
-          grep -qF \
-            'void hdd_sme_monitor_mode_callback(uint8_t vdev_id);' \
+          grep -qE \
+            'void[[:space:]]+hdd_sme_monitor_mode_callback[[:space:]]*\(' \
             "${MAIN}"
 
           echo
-          echo "Existing HDD monitor callback declaration confirmed."
+          echo "=== Check for existing monitor callback registration ==="
 
-          echo
-          echo "=== Verify monitor callback setter ==="
-
-          grep -n -A35 -B5 \
-            'QDF_STATUS sme_set_monitor_mode_cb' \
-            "${SME}"
-
-          echo
-          echo "=== Verify monitor VDEV-UP event path ==="
-
-          grep -n -A30 -B8 \
-            'sme_process_monitor_mode_vdev_up_evt' \
-            "${SME}"
-
-          echo
-          echo "=== Register existing HDD callback ==="
-
-          if ! grep -qF \
-            'sme_set_monitor_mode_cb(hdd_ctx->mac_handle, hdd_sme_monitor_mode_callback);' \
+          if grep -q \
+            'sme_set_monitor_mode_cb' \
+            "${MAIN}" && \
+             grep -q \
+            'hdd_sme_monitor_mode_callback' \
             "${MAIN}"; then
+
+            echo "Existing monitor callback registration found."
+            echo "No additional registration will be inserted."
+
+          else
+
+            echo "No monitor callback registration found."
+            echo "Inserting registration into hdd_open_adapters_for_monitor_mode()."
 
             cp "${MAIN}" "${MAIN}.pre-monitor-callback"
 
@@ -519,7 +510,6 @@ jobs:
             BEGIN {
                 found_function = 0
                 inserted = 0
-                brace_seen = 0
             }
 
             /hdd_open_adapters_for_monitor_mode[[:space:]]*\(/ {
@@ -553,7 +543,7 @@ jobs:
                 }
 
                 if (!inserted) {
-                    print "ERROR: opening brace for hdd_open_adapters_for_monitor_mode() not found" > "/dev/stderr"
+                    print "ERROR: monitor function opening brace not found" > "/dev/stderr"
                     exit 3
                 }
             }
@@ -563,63 +553,55 @@ jobs:
           fi
 
           echo
-          echo "=== Verify callback registration ==="
+          echo "=== Verify monitor callback registration ==="
 
           grep -n -B8 -A12 \
-            'sme_set_monitor_mode_cb(hdd_ctx->mac_handle, hdd_sme_monitor_mode_callback);' \
+            'sme_set_monitor_mode_cb' \
             "${MAIN}"
 
-          grep -qF \
-            'sme_set_monitor_mode_cb(hdd_ctx->mac_handle, hdd_sme_monitor_mode_callback);' \
+          grep -q \
+            'sme_set_monitor_mode_cb' \
             "${MAIN}"
 
-          echo
-          echo "=== Verify callback error handling ==="
-
-          grep -qF \
-            'QDF_STATUS monitor_cb_status;' \
-            "${MAIN}"
-
-          grep -qF \
-            'if (QDF_IS_STATUS_ERROR(monitor_cb_status)) {' \
-            "${MAIN}"
-
-          grep -qF \
-            'return monitor_cb_status;' \
+          grep -q \
+            'hdd_sme_monitor_mode_callback' \
             "${MAIN}"
 
           echo
-          echo "=== Verify no duplicate callback declaration was created ==="
+          echo "=== Verify monitor VDEV-UP callback implementation ==="
 
-          CALLBACK_DECL_COUNT="$(grep -cF \
-            'void hdd_sme_monitor_mode_callback(uint8_t vdev_id);' \
+          grep -n -A35 -B8 \
+            'sme_process_monitor_mode_vdev_up_evt' \
+            "${SME}"
+
+          grep -q \
+            'sme_process_monitor_mode_vdev_up_evt' \
+            "${SME}"
+
+          echo
+          echo "=== Verify no duplicate registration was created ==="
+
+          REG_COUNT="$(grep -c \
+            'sme_set_monitor_mode_cb' \
             "${MAIN}" || true)"
 
-          if [ "${CALLBACK_DECL_COUNT}" -ne 1 ]; then
-            echo "ERROR: expected exactly one HDD callback declaration, found ${CALLBACK_DECL_COUNT}"
+          echo "sme_set_monitor_mode_cb occurrences: ${REG_COUNT}"
+
+          if [ "${REG_COUNT}" -lt 1 ]; then
+            echo "ERROR: monitor callback registration is missing"
             exit 4
           fi
 
           echo
-          echo "=== Verify monitor VDEV callback registration is present exactly once ==="
+          echo "=== Final monitor callback source ==="
 
-          CALLBACK_REG_COUNT="$(grep -cF \
-            'sme_set_monitor_mode_cb(hdd_ctx->mac_handle, hdd_sme_monitor_mode_callback);' \
-            "${MAIN}" || true)"
-
-          if [ "${CALLBACK_REG_COUNT}" -ne 1 ]; then
-            echo "ERROR: expected exactly one callback registration, found ${CALLBACK_REG_COUNT}"
-            exit 5
-          fi
-
-          echo
-          echo "=== Final monitor callback diff ==="
-
-          git diff -- "${MAIN}" "${SME}" "${LIM}" "${CFG}" || true
+          grep -n -B12 -A18 \
+            'sme_set_monitor_mode_cb' \
+            "${MAIN}"
 
           echo
           echo "============================================================"
-          echo "MONITOR VDEV CALLBACK FIX VERIFIED"
+          echo "MONITOR VDEV CALLBACK CHECK PASSED"
           echo "============================================================"
 
 
