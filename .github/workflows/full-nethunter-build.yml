@@ -3137,275 +3137,185 @@ jobs:
 
 
 
-
+       
       - name: Route per-interface monitor netdev ops
+        working-directory: kernel
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "NORMALIZE PER-INTERFACE MONITOR ROUTING"
-          echo "=========================================="
+          HDD_SRC="drivers/staging/qcacld-3.0/core/hdd/src"
 
-          echo
-          echo "=== LOCATING KERNEL SOURCE TREE ==="
+          echo "=== ROUTING PER-INTERFACE MONITOR NETDEV OPS ==="
 
-          HDD_MAIN="$(find "$GITHUB_WORKSPACE" \
-            -type f \
-            -path '*/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c' \
-            -print -quit)"
+          TARGET="$(grep -RIl \
+            'void hdd_set_station_ops(struct net_device \*dev)' \
+            "$HDD_SRC" 2>/dev/null | head -n1 || true)"
 
-          if [ -z "$HDD_MAIN" ]; then
-            echo "ERROR: wlan_hdd_main.c not found."
+          if [ -z "$TARGET" ]; then
+            echo "ERROR: hdd_set_station_ops() was not found."
             exit 1
           fi
 
-          echo "HDD_MAIN=$HDD_MAIN"
+          echo "Target: $TARGET"
 
           echo
-          echo "=== LOCATING EXISTING hdd_set_station_ops() DEFINITIONS ==="
+          echo "=== EXISTING FUNCTION ==="
 
-          BEFORE_COUNT="$(
-            grep -cE \
-              '^void[[:space:]]+hdd_set_station_ops[[:space:]]*\(struct[[:space:]]+net_device[[:space:]]*\*dev\)' \
-              "$HDD_MAIN" || true
-          )"
+          awk '
+          /void hdd_set_station_ops\(struct net_device \*dev\)/ {
+              show=1
+              depth=0
+          }
 
-          echo "Definitions before normalization: $BEFORE_COUNT"
+          show {
+              print
+          }
 
-          if [ "$BEFORE_COUNT" -eq 0 ]; then
-            echo "ERROR: hdd_set_station_ops() does not exist."
-            exit 1
-          fi
+          show {
+              opens=gsub(/\{/, "{")
+              closes=gsub(/\}/, "}")
+              depth += opens - closes
 
-          grep -nE \
-            '^void[[:space:]]+hdd_set_station_ops[[:space:]]*\(struct[[:space:]]+net_device[[:space:]]*\*dev\)' \
-            "$HDD_MAIN"
+              if (depth == 0 && opens > 0)
+                  exit
+          }
+          ' "$TARGET"
 
           echo
-          echo "=== REPLACING ALL DUPLICATES WITH ONE CANONICAL DEFINITION ==="
+          echo "=== NORMALIZING hdd_set_station_ops() ==="
 
-          python3 - "$HDD_MAIN" <<'PY'
-          import sys
+          awk '
+          BEGIN {
+              in_func=0
+              depth=0
+              replaced=0
+          }
 
-          path = sys.argv[1]
+          !in_func &&
+          /void hdd_set_station_ops\(struct net_device \*dev\)/ {
 
-          with open(path, "r", encoding="utf-8") as f:
-              src = f.read()
+              print "void hdd_set_station_ops(struct net_device *dev)"
+              print "{"
+              print "\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
+              print ""
+              print "\tif (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||"
+              print "\t    (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {"
+              print "\t\tdev->netdev_ops = &wlan_mon_drv_ops;"
+              print "\t} else {"
+              print "\t\tdev->netdev_ops = &wlan_drv_ops;"
+              print "\t}"
+              print ""
+              print "\tdev->ethtool_ops = &wlan_ethtool_ops;"
+              print "}"
 
-          signature = "void hdd_set_station_ops(struct net_device *dev)"
+              in_func=1
+              replaced=1
 
-          positions = []
-          pos = 0
+              opens=gsub(/\{/, "{")
+              closes=gsub(/\}/, "}")
+              depth=opens-closes
 
-          while True:
-              idx = src.find(signature, pos)
-              if idx == -1:
-                  break
-              positions.append(idx)
-              pos = idx + len(signature)
+              next
+          }
 
-          if not positions:
-              print("ERROR: No hdd_set_station_ops() definition found.")
-              sys.exit(1)
+          in_func {
+              opens=gsub(/\{/, "{")
+              closes=gsub(/\}/, "}")
+              depth += opens-closes
 
-          def find_matching_brace(text, open_pos):
-              depth = 0
-              i = open_pos
-              state = "normal"
+              if (depth <= 0)
+                  in_func=0
 
-              while i < len(text):
-                  c = text[i]
-                  n = text[i + 1] if i + 1 < len(text) else ""
+              next
+          }
 
-                  if state == "normal":
-                      if c == "/" and n == "/":
-                          state = "line_comment"
-                          i += 2
-                          continue
-
-                      if c == "/" and n == "*":
-                          state = "block_comment"
-                          i += 2
-                          continue
-
-                      if c == '"':
-                          state = "string"
-                          i += 1
-                          continue
-
-                      if c == "'":
-                          state = "char"
-                          i += 1
-                          continue
-
-                      if c == "{":
-                          depth += 1
-
-                      elif c == "}":
-                          depth -= 1
-                          if depth == 0:
-                              return i
-
-                      i += 1
-                      continue
-
-                  if state == "line_comment":
-                      if c == "\n":
-                          state = "normal"
-                      i += 1
-                      continue
-
-                  if state == "block_comment":
-                      if c == "*" and n == "/":
-                          state = "normal"
-                          i += 2
-                      else:
-                          i += 1
-                      continue
-
-                  if state == "string":
-                      if c == "\\":
-                          i += 2
-                          continue
-                      if c == '"':
-                          state = "normal"
-                      i += 1
-                      continue
-
-                  if state == "char":
-                      if c == "\\":
-                          i += 2
-                          continue
-                      if c == "'":
-                          state = "normal"
-                      i += 1
-                      continue
-
-              raise RuntimeError("Could not find matching closing brace")
-
-          ranges = []
-
-          for start in positions:
-              brace = src.find("{", start + len(signature))
-
-              if brace == -1:
-                  raise RuntimeError(
-                      "Found hdd_set_station_ops() but no opening brace"
-                  )
-
-              end = find_matching_brace(src, brace)
-
-              ranges.append((start, end + 1))
-
-          canonical = """void hdd_set_station_ops(struct net_device *dev)
           {
-              struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
+              print
+          }
 
-              if (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||
-                  (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {
-                  dev->netdev_ops = &wlan_mon_drv_ops;
-              } else {
-                  dev->netdev_ops = &wlan_drv_ops;
+          END {
+              if (replaced != 1) {
+                  print "ERROR: hdd_set_station_ops() replacement failed." > "/dev/stderr"
+                  exit 2
               }
+          }
+          ' "$TARGET" > "${TARGET}.tmp"
 
-              dev->ethtool_ops = &wlan_ethtool_ops;
-          }"""
-
-          # Replace every existing definition with one canonical definition.
-          first_start = ranges[0][0]
-          last_end = ranges[-1][1]
-
-          replacement = canonical
-
-          src = src[:first_start] + replacement + src[last_end:]
-
-          with open(path, "w", encoding="utf-8") as f:
-              f.write(src)
-
-          print("Removed duplicate definitions.")
-          print("Installed one canonical hdd_set_station_ops().")
-          PY
-
-          echo
-          echo "=== VERIFYING DEFINITION COUNT ==="
-
-          COUNT="$(
-            grep -cE \
-              '^void[[:space:]]+hdd_set_station_ops[[:space:]]*\(struct[[:space:]]+net_device[[:space:]]*\*dev\)' \
-              "$HDD_MAIN" || true
-          )"
-
-          echo "Definitions after normalization: $COUNT"
-
-          if [ "$COUNT" -ne 1 ]; then
-            echo "ERROR: Expected exactly ONE hdd_set_station_ops() definition."
-            grep -nE \
-              '^void[[:space:]]+hdd_set_station_ops[[:space:]]*\(struct[[:space:]]+net_device[[:space:]]*\*dev\)' \
-              "$HDD_MAIN" || true
-            exit 1
-          fi
-
-          echo "Definition count: PASS"
+          mv "${TARGET}.tmp" "$TARGET"
 
           echo
           echo "=== VERIFYING MONITOR ROUTING ==="
 
-          grep -Fq \
-            'struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);' \
-            "$HDD_MAIN"
+          awk '
+          /void hdd_set_station_ops\(struct net_device \*dev\)/ {
+              found=1
+              show=1
+              depth=0
+          }
 
-          grep -Fq \
-            'QDF_MONITOR_MODE' \
-            "$HDD_MAIN"
+          show {
+              print
+          }
 
-          grep -Fq \
-            'wlan_mon_drv_ops' \
-            "$HDD_MAIN"
+          show {
+              opens=gsub(/\{/, "{")
+              closes=gsub(/\}/, "}")
+              depth += opens-closes
 
-          grep -Fq \
-            'wlan_drv_ops' \
-            "$HDD_MAIN"
+              if (depth == 0 && opens > 0)
+                  exit
+          }
 
-          grep -Fq \
-            'dev->netdev_ops = &wlan_mon_drv_ops;' \
-            "$HDD_MAIN"
-
-          grep -Fq \
-            'dev->netdev_ops = &wlan_drv_ops;' \
-            "$HDD_MAIN"
-
-          grep -Fq \
-            'dev->ethtool_ops = &wlan_ethtool_ops;' \
-            "$HDD_MAIN"
-
-          echo "Monitor routing checks: PASS"
+          END {
+              if (!found)
+                  exit 2
+          }
+          ' "$TARGET"
 
           echo
-          echo "=== FINAL hdd_set_station_ops() ==="
+          echo "=== ROUTING CHECKS ==="
 
           awk '
-            /^void hdd_set_station_ops\(struct net_device \*dev\)/ {
-              show=1
-            }
-            show {
-              print
-            }
-            show && /^}/ {
-              exit
-            }
-          ' "$HDD_MAIN"
+          /void hdd_set_station_ops\(struct net_device \*dev\)/ {
+              in_func=1
+              depth=0
+          }
 
-                      echo
-          echo "=========================================="
+          in_func {
+              text=text $0 "\n"
+
+              opens=gsub(/\{/, "{")
+              closes=gsub(/\}/, "}")
+              depth += opens-closes
+
+              if (depth == 0 && opens > 0) {
+                  if (text !~ /wlan_mon_drv_ops/) {
+                      print "ERROR: wlan_mon_drv_ops missing." > "/dev/stderr"
+                      exit 2
+                  }
+
+                  if (text !~ /wlan_drv_ops/) {
+                      print "ERROR: wlan_drv_ops missing." > "/dev/stderr"
+                      exit 3
+                  }
+
+                  exit 0
+              }
+          }
+
+          END {
+              if (!in_func && text == "")
+                  exit 4
+          }
+          ' "$TARGET"
+
+          echo
           echo "PER-INTERFACE MONITOR ROUTING: PASS"
-          echo "DUPLICATE DEFINITIONS: REMOVED"
-          echo "=========================================="
 
-          exit 0
+          
 
         
-
           - name: Verify monitor and injection completion integration
             working-directory: kernel
             shell: bash
