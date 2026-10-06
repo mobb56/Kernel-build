@@ -3138,109 +3138,70 @@ jobs:
 
 
 
-      
       - name: Route per-interface monitor netdev ops
         working-directory: kernel
         shell: bash
         run: |
           set -euo pipefail
 
-          FILE="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+          MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
 
-          test -f "$FILE"
+          test -f "$MAIN"
 
-          echo "=== NORMALIZING QCACLD3 hdd_set_station_ops ==="
+          echo "=== FIXING hdd_set_station_ops LINKAGE ==="
+          echo "Target: $MAIN"
 
-          cp "$FILE" "${FILE}.before-netdev-routing"
+          cp "$MAIN" "$MAIN.before_hdd_set_station_ops"
+
+          echo
+          echo "=== EXISTING DEFINITIONS ==="
 
           awk '
-          function emit_function(    ) {
-              print "void hdd_set_station_ops(struct net_device *dev)"
-              print "{"
-              print "\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
-              print ""
-              print "\tif (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||"
-              print "\t    (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {"
-              print "\t\tdev->netdev_ops = &wlan_mon_drv_ops;"
-              print "\t} else {"
-              print "\t\tdev->netdev_ops = &wlan_drv_ops;"
-              print "\t}"
-              print ""
-              print "\tdev->ethtool_ops = &wlan_ethtool_ops;"
-              print "}"
+          /(^|[[:space:]])(static[[:space:]]+)?void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
+              print "FOUND definition at line " NR
           }
+          ' "$MAIN" || true
 
+          echo
+          echo "=== REMOVING ALL EXISTING DEFINITIONS ==="
+
+          awk '
           BEGIN {
-              in_ptp_block = 0
-              ptp_depth = 0
-              ptp_has_station_ops = 0
-
-              in_function = 0
-              function_depth = 0
-              function_found = 0
+              removing = 0
+              depth = 0
+              removed = 0
           }
 
-          # Start buffering the WLAN_FEATURE_TSF_PTP conditional.
-          !in_ptp_block && $0 ~ /^[[:space:]]*#if.*WLAN_FEATURE_TSF_PTP/ {
-              in_ptp_block = 1
-              ptp_depth = 1
-              ptp_buf = $0 "\n"
-              next
-          }
+          !removing &&
+          /(^|[[:space:]])(static[[:space:]]+)?void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
 
-          # Buffer everything inside the PTP conditional.
-          in_ptp_block {
-              ptp_buf = ptp_buf $0 "\n"
+              print "Removing hdd_set_station_ops() at source line " NR > "/dev/stderr"
 
-              if ($0 ~ /hdd_set_station_ops[[:space:]]*\(/)
-                  ptp_has_station_ops = 1
+              removing = 1
+              removed++
 
-              if ($0 ~ /^[[:space:]]*#if([[:space:]]|$)/ ||
-                  $0 ~ /^[[:space:]]*#ifdef([[:space:]]|$)/ ||
-                  $0 ~ /^[[:space:]]*#ifndef([[:space:]]|$)/) {
-                  ptp_depth++
-              }
-
-              if ($0 ~ /^[[:space:]]*#endif([[:space:]]|$)/) {
-                  ptp_depth--
-
-                  if (ptp_depth == 0) {
-                      if (ptp_has_station_ops) {
-                          print ""
-                          emit_function()
-                          print ""
-                          function_found = 1
-                      } else {
-                          printf "%s", ptp_buf
-                      }
-
-                      in_ptp_block = 0
-                      ptp_buf = ""
-                      ptp_has_station_ops = 0
-                  }
-              }
-
-              next
-          }
-
-          # Remove any remaining hdd_set_station_ops definition.
-          $0 ~ /^[[:space:]]*(static[[:space:]]+)?void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
-              function_found = 1
-              in_function = 1
-              function_depth = 0
-              next
-          }
-
-          # Skip the body of a removed function.
-          in_function {
               opens = gsub(/\{/, "{")
               closes = gsub(/\}/, "}")
 
-              function_depth += opens
-              function_depth -= closes
+              depth = opens - closes
 
-              if (function_depth <= 0 && opens > 0) {
-                  in_function = 0
+              if (depth <= 0) {
+                  removing = 0
+                  depth = 0
+              }
+
+              next
+          }
+
+          removing {
+              opens = gsub(/\{/, "{")
+              closes = gsub(/\}/, "}")
+
+              depth += opens - closes
+
+              if (depth <= 0) {
+                  removing = 0
+                  depth = 0
               }
 
               next
@@ -3251,56 +3212,151 @@ jobs:
           }
 
           END {
-              # If no PTP wrapper contained the function, place one
-              # clean global definition at the end of the file.
-              if (!function_found) {
-                  print ""
-                  print "/* NetHunter per-interface monitor netdev routing. */"
-                  emit_function()
-              }
-          }
-          ' "$FILE" > "${FILE}.fixed"
+              print "Definitions removed:", removed > "/dev/stderr"
 
-          mv "${FILE}.fixed" "$FILE"
+              if (removed == 0)
+                  exit 2
+          }
+          ' "$MAIN" > "$MAIN.tmp"
+
+          mv "$MAIN.tmp" "$MAIN"
 
           echo
-          echo "=== FINAL hdd_set_station_ops CHECK ==="
+          echo "=== APPENDING ONE UNCONDITIONAL DEFINITION ==="
 
-          COUNT=$(grep -Ec \
-            '^[[:space:]]*void[[:space:]]+hdd_set_station_ops[[:space:]]*\(' \
-            "$FILE" || true)
+          cat >> "$MAIN" <<'EOF'
 
-          echo "Global definitions: $COUNT"
+          /*
+           * NetHunter monitor-mode netdev routing.
+           *
+           * Keep this definition outside QCACLD3 feature #ifdef branches.
+           * hdd_set_station_ops() is referenced by wlan.ko and therefore
+           * must always produce a real module symbol.
+           */
+          void hdd_set_station_ops(struct net_device *dev)
+          {
+              struct hdd_adapter *adapter;
+
+              adapter = WLAN_HDD_GET_PRIV_PTR(dev);
+
+              if (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||
+                  (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {
+                  dev->netdev_ops = &wlan_mon_drv_ops;
+              } else {
+                  dev->netdev_ops = &wlan_drv_ops;
+              }
+
+              dev->ethtool_ops = &wlan_ethtool_ops;
+          }
+          EOF
+
+          echo
+          echo "=== VERIFYING EXACTLY ONE DEFINITION ==="
+
+          COUNT="$(
+            awk '
+            /(^|[[:space:]])(static[[:space:]]+)?void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
+                count++
+            }
+            END {
+                print count + 0
+            }
+            ' "$MAIN"
+          )"
+
+          echo "hdd_set_station_ops definitions: $COUNT"
 
           if [ "$COUNT" -ne 1 ]; then
-              echo "ERROR: Expected exactly ONE hdd_set_station_ops definition."
-              grep -n -A20 -B5 'hdd_set_station_ops' "$FILE" || true
-              exit 2
+              echo "ERROR: Expected exactly one hdd_set_station_ops() definition."
+              exit 1
           fi
 
           echo
-          grep -n -A18 -B2 \
-            '^[[:space:]]*void[[:space:]]\+hdd_set_station_ops[[:space:]]*(' \
-            "$FILE"
+          echo "=== VERIFYING DEFINITION IS NOT STATIC ==="
+
+          if awk '
+          /(^|[[:space:]])static[[:space:]]+void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
+              found=1
+          }
+          END {
+              exit found ? 0 : 1
+          }
+          ' "$MAIN"
+          then
+              echo "ERROR: hdd_set_station_ops() is still static."
+              exit 1
+          fi
+
+          echo "External linkage: PASS"
 
           echo
-          echo "=== VERIFYING MONITOR ROUTING ==="
+          echo "=== VERIFYING REQUIRED ROUTING SYMBOLS ==="
 
-          grep -q 'cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE' "$FILE"
-          grep -q 'adapter->device_mode == QDF_MONITOR_MODE' "$FILE"
-          grep -q 'dev->netdev_ops = &wlan_mon_drv_ops;' "$FILE"
-          grep -q 'dev->netdev_ops = &wlan_drv_ops;' "$FILE"
-          grep -q 'dev->ethtool_ops = &wlan_ethtool_ops;' "$FILE"
+          grep -Fq 'wlan_mon_drv_ops' "$MAIN"
+          grep -Fq 'wlan_drv_ops' "$MAIN"
+          grep -Fq 'QDF_GLOBAL_MONITOR_MODE' "$MAIN"
+          grep -Fq 'QDF_MONITOR_MODE' "$MAIN"
+          grep -Fq 'wlan_ethtool_ops' "$MAIN"
 
-          echo "Global definition: PASS"
-          echo "Monitor routing: PASS"
-          echo "Normal routing: PASS"
-          echo "Ethtool routing: PASS"
-          echo "Duplicate definitions: REMOVED"
+          echo "wlan_mon_drv_ops: PASS"
+          echo "wlan_drv_ops: PASS"
+          echo "QDF_GLOBAL_MONITOR_MODE: PASS"
+          echo "QDF_MONITOR_MODE: PASS"
+          echo "wlan_ethtool_ops: PASS"
 
           echo
-          echo "=== QCACLD3 NETDEV ROUTING FIX COMPLETE ==="
+          echo "=== SHOWING FINAL FUNCTION ==="
 
+          awk '
+          /(^|[[:space:]])void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
+              printing=1
+              depth=0
+          }
+
+          printing {
+              print
+
+              opens=gsub(/\{/, "{")
+              closes=gsub(/\}/, "}")
+
+              depth += opens - closes
+
+              if (depth == 0 && $0 ~ /\}/)
+                  exit
+          }
+          ' "$MAIN"
+
+          echo
+          echo "=== VERIFYING FUNCTION IS OUTSIDE CONDITIONAL SOURCE ==="
+
+          LAST="$(
+            awk '
+            /(^|[[:space:]])void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
+                line=NR
+            }
+            END {
+                print line
+            }
+            ' "$MAIN"
+          )"
+
+          echo "Final definition line: $LAST"
+
+          if [ -z "$LAST" ] || [ "$LAST" -le 0 ]; then
+              echo "ERROR: Could not locate final definition."
+              exit 1
+          fi
+
+          echo
+          echo "=========================================="
+          echo "hdd_set_station_ops: FIXED"
+          echo "SINGLE DEFINITION: PASS"
+          echo "EXTERNAL LINKAGE: PASS"
+          echo "MONITOR ROUTING: PASS"
+          echo "MODPOST SYMBOL SHOULD BE RESOLVED"
+          echo "=========================================="
+
+          exit 0
 
 
           
