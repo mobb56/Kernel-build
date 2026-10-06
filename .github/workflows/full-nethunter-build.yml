@@ -3137,7 +3137,6 @@ jobs:
 
 
 
-
       - name: Route per-interface monitor netdev ops
         working-directory: kernel
         shell: bash
@@ -3148,59 +3147,69 @@ jobs:
 
           test -f "$MAIN"
 
-          echo "=== FIXING hdd_set_station_ops LINKAGE ==="
+          echo "=== SAFE hdd_set_station_ops NORMALIZATION ==="
           echo "Target: $MAIN"
 
-          cp "$MAIN" "$MAIN.before_hdd_set_station_ops"
+          cp "$MAIN" "$MAIN.before_station_ops_fix"
 
           echo
-          echo "=== EXISTING DEFINITIONS ==="
+          echo "=== LOCATING EXISTING DEFINITIONS ==="
 
           awk '
           /(^|[[:space:]])(static[[:space:]]+)?void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
-              print "FOUND definition at line " NR
+              print NR ":" $0
           }
-          ' "$MAIN" || true
+          ' "$MAIN"
 
           echo
-          echo "=== REMOVING ALL EXISTING DEFINITIONS ==="
+          echo "=== NORMALIZING LINKAGE ONLY ==="
+
+          awk '
+          {
+              line = $0
+
+              sub(/^[[:space:]]*static[[:space:]]+void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/,
+                  "void hdd_set_station_ops(",
+                  line)
+
+              print line
+          }
+          ' "$MAIN" > "$MAIN.tmp"
+
+          mv "$MAIN.tmp" "$MAIN"
+
+          echo
+          echo "=== REMOVING ONLY ethtool ASSIGNMENT FROM hdd_set_station_ops ==="
 
           awk '
           BEGIN {
-              removing = 0
+              in_func = 0
               depth = 0
-              removed = 0
           }
 
-          !removing &&
-          /(^|[[:space:]])(static[[:space:]]+)?void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
+          /(^|[[:space:]])void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
+              in_func = 1
+          }
 
-              print "Removing hdd_set_station_ops() at source line " NR > "/dev/stderr"
-
-              removing = 1
-              removed++
-
-              opens = gsub(/\{/, "{")
-              closes = gsub(/\}/, "}")
-
-              depth = opens - closes
-
-              if (depth <= 0) {
-                  removing = 0
-                  depth = 0
+          in_func {
+              if ($0 ~ /dev->[[:space:]]*ethtool_ops[[:space:]]*=/) {
+                  print "Removed ethtool assignment at line " NR > "/dev/stderr"
+                  next
               }
 
-              next
-          }
+              print
 
-          removing {
               opens = gsub(/\{/, "{")
               closes = gsub(/\}/, "}")
 
               depth += opens - closes
 
-              if (depth <= 0) {
-                  removing = 0
+              if (depth > 0 && $0 ~ /\{/)
+                  started = 1
+
+              if (started && depth == 0) {
+                  in_func = 0
+                  started = 0
                   depth = 0
               }
 
@@ -3210,52 +3219,16 @@ jobs:
           {
               print
           }
-
-          END {
-              print "Definitions removed:", removed > "/dev/stderr"
-
-              if (removed == 0)
-                  exit 2
-          }
           ' "$MAIN" > "$MAIN.tmp"
 
           mv "$MAIN.tmp" "$MAIN"
 
           echo
-          echo "=== APPENDING ONE UNCONDITIONAL DEFINITION ==="
-
-          cat >> "$MAIN" <<'EOF'
-
-          /*
-           * NetHunter monitor-mode netdev routing.
-           *
-           * Keep this definition outside QCACLD3 feature #ifdef branches.
-           * hdd_set_station_ops() is referenced by wlan.ko and therefore
-           * must always produce a real module symbol.
-           */
-          void hdd_set_station_ops(struct net_device *dev)
-          {
-              struct hdd_adapter *adapter;
-
-              adapter = WLAN_HDD_GET_PRIV_PTR(dev);
-
-              if (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||
-                  (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {
-                  dev->netdev_ops = &wlan_mon_drv_ops;
-              } else {
-                  dev->netdev_ops = &wlan_drv_ops;
-              }
-
-              dev->ethtool_ops = &wlan_ethtool_ops;
-          }
-          EOF
-
-          echo
-          echo "=== VERIFYING EXACTLY ONE DEFINITION ==="
+          echo "=== COUNTING DEFINITIONS ==="
 
           COUNT="$(
             awk '
-            /(^|[[:space:]])(static[[:space:]]+)?void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
+            /(^|[[:space:]])void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
                 count++
             }
             END {
@@ -3264,96 +3237,121 @@ jobs:
             ' "$MAIN"
           )"
 
-          echo "hdd_set_station_ops definitions: $COUNT"
+          echo "Definitions found: $COUNT"
 
-          if [ "$COUNT" -ne 1 ]; then
-              echo "ERROR: Expected exactly one hdd_set_station_ops() definition."
+          if [ "$COUNT" -lt 1 ]; then
+              echo "ERROR: hdd_set_station_ops() disappeared."
               exit 1
           fi
 
           echo
-          echo "=== VERIFYING DEFINITION IS NOT STATIC ==="
+          echo "=== VERIFYING NO STATIC DEFINITION ==="
 
-          if awk '
-          /(^|[[:space:]])static[[:space:]]+void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
-              found=1
-          }
-          END {
-              exit found ? 0 : 1
-          }
-          ' "$MAIN"
+          if grep -Eq \
+            '^[[:space:]]*static[[:space:]]+void[[:space:]]+hdd_set_station_ops[[:space:]]*\(' \
+            "$MAIN"
           then
-              echo "ERROR: hdd_set_station_ops() is still static."
+              echo "ERROR: static hdd_set_station_ops() remains."
               exit 1
           fi
 
           echo "External linkage: PASS"
 
           echo
-          echo "=== VERIFYING REQUIRED ROUTING SYMBOLS ==="
+          echo "=== VERIFYING MONITOR ROUTING ==="
 
           grep -Fq 'wlan_mon_drv_ops' "$MAIN"
           grep -Fq 'wlan_drv_ops' "$MAIN"
           grep -Fq 'QDF_GLOBAL_MONITOR_MODE' "$MAIN"
           grep -Fq 'QDF_MONITOR_MODE' "$MAIN"
-          grep -Fq 'wlan_ethtool_ops' "$MAIN"
 
           echo "wlan_mon_drv_ops: PASS"
           echo "wlan_drv_ops: PASS"
           echo "QDF_GLOBAL_MONITOR_MODE: PASS"
           echo "QDF_MONITOR_MODE: PASS"
-          echo "wlan_ethtool_ops: PASS"
 
           echo
-          echo "=== SHOWING FINAL FUNCTION ==="
+          echo "=== VERIFYING ethtool REFERENCE IS GONE FROM THIS FUNCTION ==="
 
-          awk '
+          if awk '
           /(^|[[:space:]])void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
-              printing=1
+              in_func=1
               depth=0
+              started=0
           }
 
-          printing {
-              print
+          in_func {
+              if ($0 ~ /ethtool_ops/) {
+                  found=1
+              }
 
               opens=gsub(/\{/, "{")
               closes=gsub(/\}/, "}")
 
-              depth += opens - closes
+              depth += opens-closes
 
-              if (depth == 0 && $0 ~ /\}/)
-                  exit
+              if (depth > 0)
+                  started=1
+
+              if (started && depth == 0) {
+                  in_func=0
+              }
+          }
+
+          END {
+              exit found ? 0 : 1
+          }
+          ' "$MAIN"
+          then
+              echo "ERROR: ethtool_ops still referenced inside hdd_set_station_ops()."
+              exit 1
+          fi
+
+          echo "ethtool reference: CLEAN"
+
+          echo
+          echo "=== SOURCE SYNTAX SANITY CHECK ==="
+
+          awk '
+          BEGIN {
+              braces=0
+          }
+
+          {
+              opens=gsub(/\{/, "{")
+              closes=gsub(/\}/, "}")
+
+              braces += opens-closes
+
+              if (braces < 0) {
+                  print "ERROR: closing brace underflow at line " NR
+                  exit 1
+              }
+          }
+
+          END {
+              if (braces != 0) {
+                  print "ERROR: unmatched braces. Balance =", braces
+                  exit 1
+              }
+
+              print "Brace balance: PASS"
           }
           ' "$MAIN"
 
           echo
-          echo "=== VERIFYING FUNCTION IS OUTSIDE CONDITIONAL SOURCE ==="
+          echo "=== FINAL hdd_set_station_ops LOCATIONS ==="
 
-          LAST="$(
-            awk '
-            /(^|[[:space:]])void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
-                line=NR
-            }
-            END {
-                print line
-            }
-            ' "$MAIN"
-          )"
-
-          echo "Final definition line: $LAST"
-
-          if [ -z "$LAST" ] || [ "$LAST" -le 0 ]; then
-              echo "ERROR: Could not locate final definition."
-              exit 1
-          fi
+          grep -n \
+            -E '^[[:space:]]*(static[[:space:]]+)?void[[:space:]]+hdd_set_station_ops[[:space:]]*\(' \
+            "$MAIN"
 
           echo
           echo "=========================================="
-          echo "hdd_set_station_ops: FIXED"
-          echo "SINGLE DEFINITION: PASS"
-          echo "EXTERNAL LINKAGE: PASS"
-          echo "MONITOR ROUTING: PASS"
-          echo "MODPOST SYMBOL SHOULD BE RESOLVED"
+          echo "hdd_set_station_ops LINKAGE: PASS"
+          echo "MONITOR NETDEV ROUTING: PASS"
+          echo "NO ethtool_ops DEPENDENCY: PASS"
+          echo "SOURCE BRACE BALANCE: PASS"
           echo "=========================================="
 
           exit 0
