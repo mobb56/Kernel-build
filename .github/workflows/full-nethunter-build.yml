@@ -3138,6 +3138,7 @@ jobs:
 
 
 
+      
       - name: Route per-interface monitor netdev ops
         working-directory: kernel
         shell: bash
@@ -3148,89 +3149,98 @@ jobs:
 
           test -f "$FILE"
 
-          echo "=== FIXING hdd_set_station_ops ==="
+          echo "=== NORMALIZING QCACLD3 hdd_set_station_ops ==="
 
-          cp "$FILE" "${FILE}.pre-netdev-fix"
+          cp "$FILE" "${FILE}.before-netdev-routing"
 
           awk '
+          function emit_function(    ) {
+              print "void hdd_set_station_ops(struct net_device *dev)"
+              print "{"
+              print "\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
+              print ""
+              print "\tif (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||"
+              print "\t    (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {"
+              print "\t\tdev->netdev_ops = &wlan_mon_drv_ops;"
+              print "\t} else {"
+              print "\t\tdev->netdev_ops = &wlan_drv_ops;"
+              print "\t}"
+              print ""
+              print "\tdev->ethtool_ops = &wlan_ethtool_ops;"
+              print "}"
+          }
+
           BEGIN {
-              replacing = 0
-              brace_depth = 0
-              found = 0
-              pending = 0
+              in_ptp_block = 0
+              ptp_depth = 0
+              ptp_has_station_ops = 0
+
+              in_function = 0
+              function_depth = 0
+              function_found = 0
           }
 
-          # Match the actual function definition, including a definition
-          # whose opening brace is on the following line.
-          /^[[:space:]]*(static[[:space:]]+)?void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
-              found = 1
-              pending = 1
+          # Start buffering the WLAN_FEATURE_TSF_PTP conditional.
+          !in_ptp_block && $0 ~ /^[[:space:]]*#if.*WLAN_FEATURE_TSF_PTP/ {
+              in_ptp_block = 1
+              ptp_depth = 1
+              ptp_buf = $0 "\n"
+              next
+          }
 
-              # If the opening brace is already on this line, begin
-              # replacement immediately.
-              if ($0 ~ /\{/) {
-                  replacing = 1
-                  pending = 0
-                  brace_depth = 1
+          # Buffer everything inside the PTP conditional.
+          in_ptp_block {
+              ptp_buf = ptp_buf $0 "\n"
 
-                  print "void hdd_set_station_ops(struct net_device *dev)"
-                  print "{"
-                  print "\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
-                  print ""
-                  print "\tif (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||"
-                  print "\t    (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {"
-                  print "\t\tdev->netdev_ops = &wlan_mon_drv_ops;"
-                  print "\t} else {"
-                  print "\t\tdev->netdev_ops = &wlan_drv_ops;"
-                  print "\t}"
-                  print ""
-                  print "\tdev->ethtool_ops = &wlan_ethtool_ops;"
-                  print "}"
-                  replacing = 0
-                  brace_depth = 0
+              if ($0 ~ /hdd_set_station_ops[[:space:]]*\(/)
+                  ptp_has_station_ops = 1
+
+              if ($0 ~ /^[[:space:]]*#if([[:space:]]|$)/ ||
+                  $0 ~ /^[[:space:]]*#ifdef([[:space:]]|$)/ ||
+                  $0 ~ /^[[:space:]]*#ifndef([[:space:]]|$)/) {
+                  ptp_depth++
+              }
+
+              if ($0 ~ /^[[:space:]]*#endif([[:space:]]|$)/) {
+                  ptp_depth--
+
+                  if (ptp_depth == 0) {
+                      if (ptp_has_station_ops) {
+                          print ""
+                          emit_function()
+                          print ""
+                          function_found = 1
+                      } else {
+                          printf "%s", ptp_buf
+                      }
+
+                      in_ptp_block = 0
+                      ptp_buf = ""
+                      ptp_has_station_ops = 0
+                  }
               }
 
               next
           }
 
-          # We found the function signature but its { is on a later line.
-          pending {
-              if ($0 ~ /\{/) {
-                  replacing = 1
-                  pending = 0
-                  brace_depth = 1
-
-                  print "void hdd_set_station_ops(struct net_device *dev)"
-                  print "{"
-                  print "\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
-                  print ""
-                  print "\tif (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||"
-                  print "\t    (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {"
-                  print "\t\tdev->netdev_ops = &wlan_mon_drv_ops;"
-                  print "\t} else {"
-                  print "\t\tdev->netdev_ops = &wlan_drv_ops;"
-                  print "\t}"
-                  print ""
-                  print "\tdev->ethtool_ops = &wlan_ethtool_ops;"
-                  print "}"
-                  replacing = 0
-                  brace_depth = 0
-                  next
-              }
-
+          # Remove any remaining hdd_set_station_ops definition.
+          $0 ~ /^[[:space:]]*(static[[:space:]]+)?void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
+              function_found = 1
+              in_function = 1
+              function_depth = 0
               next
           }
 
-          # Skip the old function body if we are replacing it.
-          replacing {
+          # Skip the body of a removed function.
+          in_function {
               opens = gsub(/\{/, "{")
               closes = gsub(/\}/, "}")
-              brace_depth += opens
-              brace_depth -= closes
 
-              if (brace_depth <= 0) {
-                  replacing = 0
-                  brace_depth = 0
+              function_depth += opens
+              function_depth -= closes
+
+              if (function_depth <= 0 && opens > 0) {
+                  in_function = 0
               }
 
               next
@@ -3241,81 +3251,59 @@ jobs:
           }
 
           END {
-              if (!found) {
-                  print "__HDD_SET_STATION_OPS_NOT_FOUND__"
+              # If no PTP wrapper contained the function, place one
+              # clean global definition at the end of the file.
+              if (!function_found) {
+                  print ""
+                  print "/* NetHunter per-interface monitor netdev routing. */"
+                  emit_function()
               }
           }
           ' "$FILE" > "${FILE}.fixed"
 
-          # If the existing definition was not found, remove the marker
-          # and append a complete global definition using AWK itself.
-          if grep -q '^__HDD_SET_STATION_OPS_NOT_FOUND__$' "${FILE}.fixed"; then
-
-              sed -i '/^__HDD_SET_STATION_OPS_NOT_FOUND__$/d' "${FILE}.fixed"
-
-              awk '
-              BEGIN {
-                  print ""
-                  print "/* NetHunter per-interface monitor netdev routing. */"
-                  print "void hdd_set_station_ops(struct net_device *dev)"
-                  print "{"
-                  print "\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
-                  print ""
-                  print "\tif (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||"
-                  print "\t    (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {"
-                  print "\t\tdev->netdev_ops = &wlan_mon_drv_ops;"
-                  print "\t} else {"
-                  print "\t\tdev->netdev_ops = &wlan_drv_ops;"
-                  print "\t}"
-                  print ""
-                  print "\tdev->ethtool_ops = &wlan_ethtool_ops;"
-                  print "}"
-              }
-              ' >> "${FILE}.fixed"
-          fi
-
           mv "${FILE}.fixed" "$FILE"
 
           echo
-          echo "=== VERIFYING FINAL FUNCTION ==="
+          echo "=== FINAL hdd_set_station_ops CHECK ==="
 
-          COUNT=$(grep -c \
-            '^[[:space:]]*void[[:space:]]\+hdd_set_station_ops[[:space:]]*(' \
+          COUNT=$(grep -Ec \
+            '^[[:space:]]*void[[:space:]]+hdd_set_station_ops[[:space:]]*\(' \
             "$FILE" || true)
 
-          echo "Global definition count: $COUNT"
+          echo "Global definitions: $COUNT"
 
           if [ "$COUNT" -ne 1 ]; then
-              echo "ERROR: hdd_set_station_ops definition count is $COUNT"
-              grep -n -A25 -B5 'hdd_set_station_ops' "$FILE" || true
+              echo "ERROR: Expected exactly ONE hdd_set_station_ops definition."
+              grep -n -A20 -B5 'hdd_set_station_ops' "$FILE" || true
               exit 2
           fi
 
           echo
-          echo "=== FUNCTION BODY ==="
-
           grep -n -A18 -B2 \
             '^[[:space:]]*void[[:space:]]\+hdd_set_station_ops[[:space:]]*(' \
             "$FILE"
 
           echo
-          echo "=== REQUIRED SYMBOL CHECKS ==="
+          echo "=== VERIFYING MONITOR ROUTING ==="
 
+          grep -q 'cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE' "$FILE"
+          grep -q 'adapter->device_mode == QDF_MONITOR_MODE' "$FILE"
           grep -q 'dev->netdev_ops = &wlan_mon_drv_ops;' "$FILE"
           grep -q 'dev->netdev_ops = &wlan_drv_ops;' "$FILE"
           grep -q 'dev->ethtool_ops = &wlan_ethtool_ops;' "$FILE"
-          grep -q 'adapter->device_mode == QDF_MONITOR_MODE' "$FILE"
-          grep -q 'cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE' "$FILE"
 
-          echo "Monitor netdev routing: PASS"
-          echo "Normal netdev routing: PASS"
-          echo "Global function definition: PASS"
-          echo "Single definition: PASS"
+          echo "Global definition: PASS"
+          echo "Monitor routing: PASS"
+          echo "Normal routing: PASS"
+          echo "Ethtool routing: PASS"
+          echo "Duplicate definitions: REMOVED"
 
           echo
-          echo "=== hdd_set_station_ops FIX COMPLETE ==="
-          
+          echo "=== QCACLD3 NETDEV ROUTING FIX COMPLETE ==="
 
+
+
+          
         
           - name: Verify monitor and injection completion integration
             working-directory: kernel
