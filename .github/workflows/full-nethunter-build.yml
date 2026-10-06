@@ -3136,64 +3136,101 @@ jobs:
 
 
 
+
+
       - name: Route per-interface monitor netdev ops
         working-directory: kernel
         shell: bash
         run: |
           set -euo pipefail
 
-          HDD_MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+          FILE="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
 
-          test -f "$HDD_MAIN"
+          test -f "$FILE"
 
-          echo "=== NORMALIZING hdd_set_station_ops ==="
+          echo "=== FIXING hdd_set_station_ops ==="
 
-          cp "$HDD_MAIN" "${HDD_MAIN}.before-netdev-routing"
+          cp "$FILE" "${FILE}.pre-netdev-fix"
 
           awk '
           BEGIN {
-              in_func = 0
-              brace = 0
+              replacing = 0
+              brace_depth = 0
               found = 0
+              pending = 0
           }
 
-          # Locate the existing global function definition.
-          /^[[:space:]]*(void|static[[:space:]]+void)[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
+          # Match the actual function definition, including a definition
+          # whose opening brace is on the following line.
+          /^[[:space:]]*(static[[:space:]]+)?void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
               found = 1
-              in_func = 1
-              brace = 0
+              pending = 1
 
-              print "void hdd_set_station_ops(struct net_device *dev)"
-              print "{"
-              print "\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
-              print ""
-              print "\tif (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||"
-              print "\t    (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {"
-              print "\t\tdev->netdev_ops = &wlan_mon_drv_ops;"
-              print "\t} else {"
-              print "\t\tdev->netdev_ops = &wlan_drv_ops;"
-              print "\t}"
-              print ""
-              print "\tdev->ethtool_ops = &wlan_ethtool_ops;"
-              print "}"
+              # If the opening brace is already on this line, begin
+              # replacement immediately.
+              if ($0 ~ /\{/) {
+                  replacing = 1
+                  pending = 0
+                  brace_depth = 1
+
+                  print "void hdd_set_station_ops(struct net_device *dev)"
+                  print "{"
+                  print "\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
+                  print ""
+                  print "\tif (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||"
+                  print "\t    (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {"
+                  print "\t\tdev->netdev_ops = &wlan_mon_drv_ops;"
+                  print "\t} else {"
+                  print "\t\tdev->netdev_ops = &wlan_drv_ops;"
+                  print "\t}"
+                  print ""
+                  print "\tdev->ethtool_ops = &wlan_ethtool_ops;"
+                  print "}"
+                  replacing = 0
+                  brace_depth = 0
+              }
 
               next
           }
 
-          # Skip the old function body.
-          in_func {
+          # We found the function signature but its { is on a later line.
+          pending {
               if ($0 ~ /\{/) {
-                  n = gsub(/\{/, "{")
-                  brace += n
+                  replacing = 1
+                  pending = 0
+                  brace_depth = 1
+
+                  print "void hdd_set_station_ops(struct net_device *dev)"
+                  print "{"
+                  print "\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
+                  print ""
+                  print "\tif (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||"
+                  print "\t    (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {"
+                  print "\t\tdev->netdev_ops = &wlan_mon_drv_ops;"
+                  print "\t} else {"
+                  print "\t\tdev->netdev_ops = &wlan_drv_ops;"
+                  print "\t}"
+                  print ""
+                  print "\tdev->ethtool_ops = &wlan_ethtool_ops;"
+                  print "}"
+                  replacing = 0
+                  brace_depth = 0
+                  next
               }
 
-              if ($0 ~ /\}/) {
-                  n = gsub(/\}/, "}")
-                  brace -= n
-              }
+              next
+          }
 
-              if (brace <= 0) {
-                  in_func = 0
+          # Skip the old function body if we are replacing it.
+          replacing {
+              opens = gsub(/\{/, "{")
+              closes = gsub(/\}/, "}")
+              brace_depth += opens
+              brace_depth -= closes
+
+              if (brace_depth <= 0) {
+                  replacing = 0
+                  brace_depth = 0
               }
 
               next
@@ -3205,66 +3242,78 @@ jobs:
 
           END {
               if (!found) {
-                  print "NO_EXISTING_DEFINITION"
+                  print "__HDD_SET_STATION_OPS_NOT_FOUND__"
               }
           }
-          ' "$HDD_MAIN" > "${HDD_MAIN}.new"
+          ' "$FILE" > "${FILE}.fixed"
 
-          if grep -q '^NO_EXISTING_DEFINITION$' "${HDD_MAIN}.new"; then
-              sed -i '/^NO_EXISTING_DEFINITION$/d' "${HDD_MAIN}.new"
+          # If the existing definition was not found, remove the marker
+          # and append a complete global definition using AWK itself.
+          if grep -q '^__HDD_SET_STATION_OPS_NOT_FOUND__$' "${FILE}.fixed"; then
 
-              cat >> "${HDD_MAIN}.new" <<'EOF'
+              sed -i '/^__HDD_SET_STATION_OPS_NOT_FOUND__$/d' "${FILE}.fixed"
 
-           /*
-           * NetHunter per-interface monitor netdev routing.
-           * Kept global because QCACLD3 references hdd_set_station_ops()
-           * across the HDD compilation units.
-           */
-           void hdd_set_station_ops(struct net_device *dev)
-            {
-            	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
+              awk '
+              BEGIN {
+                  print ""
+                  print "/* NetHunter per-interface monitor netdev routing. */"
+                  print "void hdd_set_station_ops(struct net_device *dev)"
+                  print "{"
+                  print "\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
+                  print ""
+                  print "\tif (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||"
+                  print "\t    (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {"
+                  print "\t\tdev->netdev_ops = &wlan_mon_drv_ops;"
+                  print "\t} else {"
+                  print "\t\tdev->netdev_ops = &wlan_drv_ops;"
+                  print "\t}"
+                  print ""
+                  print "\tdev->ethtool_ops = &wlan_ethtool_ops;"
+                  print "}"
+              }
+              ' >> "${FILE}.fixed"
+          fi
 
-           if (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||
-          (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {
-          dev->netdev_ops = &wlan_mon_drv_ops;
-          	} else {
-            		dev->netdev_ops = &wlan_drv_ops;
-           	}
-
-          	dev->ethtool_ops = &wlan_ethtool_ops;
-           }
-             EOF
-           fi
-
-          mv "${HDD_MAIN}.new" "$HDD_MAIN"
+          mv "${FILE}.fixed" "$FILE"
 
           echo
-          echo "=== VERIFYING GLOBAL DEFINITION ==="
-
-          grep -n -A18 \
-            '^void hdd_set_station_ops(struct net_device \*dev)' \
-            "$HDD_MAIN"
+          echo "=== VERIFYING FINAL FUNCTION ==="
 
           COUNT=$(grep -c \
-            '^void hdd_set_station_ops(struct net_device \*dev)' \
-            "$HDD_MAIN" || true)
+            '^[[:space:]]*void[[:space:]]\+hdd_set_station_ops[[:space:]]*(' \
+            "$FILE" || true)
+
+          echo "Global definition count: $COUNT"
 
           if [ "$COUNT" -ne 1 ]; then
-              echo "ERROR: expected exactly one global hdd_set_station_ops definition; found $COUNT"
+              echo "ERROR: hdd_set_station_ops definition count is $COUNT"
+              grep -n -A25 -B5 'hdd_set_station_ops' "$FILE" || true
               exit 2
           fi
 
-          grep -q 'dev->netdev_ops = &wlan_mon_drv_ops;' "$HDD_MAIN"
-          grep -q 'dev->netdev_ops = &wlan_drv_ops;' "$HDD_MAIN"
-          grep -q 'dev->ethtool_ops = &wlan_ethtool_ops;' "$HDD_MAIN"
+          echo
+          echo "=== FUNCTION BODY ==="
+
+          grep -n -A18 -B2 \
+            '^[[:space:]]*void[[:space:]]\+hdd_set_station_ops[[:space:]]*(' \
+            "$FILE"
 
           echo
-          echo "=== NETDEV ROUTING FIX COMPLETE ==="
-          echo "Global hdd_set_station_ops: PASS"
+          echo "=== REQUIRED SYMBOL CHECKS ==="
+
+          grep -q 'dev->netdev_ops = &wlan_mon_drv_ops;' "$FILE"
+          grep -q 'dev->netdev_ops = &wlan_drv_ops;' "$FILE"
+          grep -q 'dev->ethtool_ops = &wlan_ethtool_ops;' "$FILE"
+          grep -q 'adapter->device_mode == QDF_MONITOR_MODE' "$FILE"
+          grep -q 'cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE' "$FILE"
+
           echo "Monitor netdev routing: PASS"
           echo "Normal netdev routing: PASS"
+          echo "Global function definition: PASS"
           echo "Single definition: PASS"
-          
+
+          echo
+          echo "=== hdd_set_station_ops FIX COMPLETE ==="
           
 
         
