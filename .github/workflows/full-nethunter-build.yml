@@ -4460,37 +4460,64 @@ jobs:
           HDD_CFG="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c"
 
           echo "=== QCACLD3 MONITOR INTERFACE LIFECYCLE ==="
+          echo "Target: $HDD_CFG"
+          echo
+
           test -f "$HDD_CFG"
 
-          echo "=== EXISTING MONITOR IMPLEMENTATION ==="
+          echo "=== CHANGE-IFACE IMPLEMENTATION ==="
 
-          grep -nE \
-            'FEATURE_MONITOR_MODE_SUPPORT|QDF_GLOBAL_MONITOR_MODE|QDF_MONITOR_MODE|NL80211_IFTYPE_MONITOR|monitor mode|monitor_mode' \
+          START="$(grep -n -m1 \
+            'static int __wlan_hdd_cfg80211_change_iface' \
+            "$HDD_CFG" | cut -d: -f1 || true)"
+
+          if [ -z "$START" ]; then
+            echo "ERROR: __wlan_hdd_cfg80211_change_iface() not found"
+            exit 1
+          fi
+
+          echo "Found implementation at line: $START"
+          echo
+
+          END=$((START + 260))
+
+          sed -n "${START},${END}p" "$HDD_CFG"
+
+          echo
+          echo "=== MONITOR TRANSITION REFERENCES INSIDE CHANGE-IFACE ==="
+
+          sed -n "${START},${END}p" "$HDD_CFG" | \
+            grep -nE \
+            'NL80211_IFTYPE_MONITOR|QDF_MONITOR_MODE|QDF_GLOBAL_MONITOR_MODE|device_mode|vdev|monitor|start_adapter|stop_adapter|deinit_adapter' \
+            || true
+
+          echo
+          echo "=== WRAPPER FUNCTION ==="
+
+          WRAPPER="$(grep -n -m1 \
+            'static int wlan_hdd_cfg80211_change_iface' \
+            "$HDD_CFG" | cut -d: -f1 || true)"
+
+          if [ -n "$WRAPPER" ]; then
+            sed -n "${WRAPPER},$((WRAPPER + 70))p" "$HDD_CFG"
+          fi
+
+          echo
+          echo "=== CFG80211 REGISTRATION ==="
+
+          grep -n -A4 -B4 \
+            'change_virtual_intf.*wlan_hdd_cfg80211_change_iface' \
             "$HDD_CFG" || true
 
           echo
-          echo "=== SEARCHING INTERFACE-MODE HANDLERS ==="
+          echo "=== EXISTING MONITOR LIFECYCLE ==="
 
           grep -nE \
-            'change_iface|change_interface|set_interface|set_iface|interface.*type|type.*interface' \
-            "$HDD_CFG" || true
-
-          echo
-          echo "=== SEARCHING MONITOR CONVERSION FUNCTIONS ==="
-
-          grep -nE \
-            'monitor.*adapter|adapter.*monitor|start.*adapter|stop.*adapter|deinit.*adapter' \
+            'FEATURE_MONITOR_MODE_SUPPORT|QDF_GLOBAL_MONITOR_MODE|QDF_MONITOR_MODE|NL80211_IFTYPE_MONITOR|monitor_mode_vdev|wlan_hdd_cfg80211_set_mon_ch' \
             "$HDD_CFG" || true
 
           echo
           echo "=== MONITOR LIFECYCLE SOURCE DISCOVERY COMPLETE ==="
-          echo "No source modification performed."
-          echo "This step intentionally stops here so we can identify the"
-          echo "actual QCACLD3 interface-conversion path before patching it."
-
-          exit 1
-
-
 
           
       - name: Route per-interface monitor netdev ops
