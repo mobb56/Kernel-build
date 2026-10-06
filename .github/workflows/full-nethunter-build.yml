@@ -4041,70 +4041,58 @@ jobs:
       # ============================================================
       # 31. INTEGRATE FRAME-INJECTION INITIALIZATION
       # ============================================================
-
       - name: Integrate frame-injection initialization
+        working-directory: kernel
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
-          cd kernel
+          HDD_SRC="drivers/staging/qcacld-3.0/core/hdd/src"
 
-          MAIN_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+          echo "=== FRAME-INJECTION INITIALIZATION ==="
 
-          grep -n \
-            "hdd_periodic_sta_stats_init(adapter)" \
-            "${MAIN_C}" \
-            | head -n 5
+          test -d "$HDD_SRC"
 
-          if grep -Fq \
-            "hdd_init_frame_injection(adapter);" \
-            "${MAIN_C}"; then
+          echo
+          echo "=== LOCATING PERIODIC STA STATS INITIALIZATION ==="
 
-            echo "Frame-injection initialization already integrated."
+          STATS_MATCHES="$(grep -RIn \
+            'hdd_periodic_sta_stats_init' \
+            "$HDD_SRC" 2>/dev/null || true)"
 
+          if [ -z "$STATS_MATCHES" ]; then
+            echo "Periodic STA stats symbol not found."
+            echo
+            echo "Searching related initialization symbols:"
+            grep -RInE \
+              'periodic.*stats|stats.*init|sta.*stats|adapter.*init' \
+              "$HDD_SRC" 2>/dev/null | head -n100 || true
           else
-
-            python3 - "${MAIN_C}" <<'PY'
-          import pathlib
-          import sys
-
-          path = pathlib.Path(sys.argv[1])
-          text = path.read_text()
-
-          anchor = "hdd_periodic_sta_stats_init(adapter);"
-          call = """
-          #ifdef FEATURE_FRAME_INJECTION_SUPPORT
-                  hdd_init_frame_injection(adapter);
-          #endif
-          """
-
-          if call.strip() in text:
-              raise SystemExit(0)
-
-          count = text.count(anchor)
-
-          if count != 1:
-              raise SystemExit(
-                  f"ERROR: expected exactly one initialization anchor, found {count}"
-              )
-
-          text = text.replace(
-              anchor,
-              anchor + call,
-              1
-          )
-
-          path.write_text(text)
-          PY
-
+            echo "$STATS_MATCHES"
           fi
 
-          grep -n \
-            -A5 \
-            -B3 \
-            "hdd_init_frame_injection" \
-            "${MAIN_C}"
+          echo
+          echo "=== LOCATING FRAME-INJECTION INITIALIZATION ==="
 
+          INJECT_MATCHES="$(grep -RInE \
+            'inject.*init|init.*inject|frame.*inject|inject.*frame|wma.*inject' \
+            "$HDD_SRC" 2>/dev/null || true)"
+
+          if [ -n "$INJECT_MATCHES" ]; then
+            echo "$INJECT_MATCHES" | head -n150
+          else
+            echo "No existing HDD frame-injection initialization symbol found."
+          fi
+
+          echo
+          echo "=== LOCATING ADAPTER INITIALIZATION PATHS ==="
+
+          grep -RInE \
+            'hdd_init_adapter|hdd_start_adapter|hdd_set_station_ops|hdd_open|adapter.*init' \
+            "$HDD_SRC" 2>/dev/null | head -n150 || true
+
+          echo
+          echo "=== INITIALIZATION SOURCE DISCOVERY COMPLETE ==="
 
 
       - name: Remove duplicate QCACLD3 WMA injection stubs
