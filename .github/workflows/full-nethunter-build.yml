@@ -8194,6 +8194,91 @@ jobs:
 
 
 
+      - name: Inspect policy manager mutex ownership
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src"
+
+          echo "============================================================"
+          echo " policy_mgr_get_connection_count()"
+          echo "============================================================"
+
+          awk '
+          /policy_mgr_get_connection_count[[:space:]]*\(/ {
+              start = NR
+              depth = 0
+              found = 1
+          }
+          found {
+              print NR ":" $0
+              opens = gsub(/\{/, "{")
+              closes = gsub(/\}/, "}")
+              depth += opens - closes
+              if (start && NR > start && depth <= 0) {
+                  found = 0
+                  print ""
+              }
+          }
+          ' "$PM/wlan_policy_mgr_core.c"
+
+          echo
+          echo "============================================================"
+          echo " policy_mgr_store_and_del_conn_info_by_vdev_id()"
+          echo "============================================================"
+
+          awk '
+          /policy_mgr_store_and_del_conn_info_by_vdev_id[[:space:]]*\(/ {
+              start = NR
+              depth = 0
+              found = 1
+          }
+          found {
+              print NR ":" $0
+              opens = gsub(/\{/, "{")
+              closes = gsub(/\}/, "}")
+              depth += opens - closes
+              if (start && NR > start && depth <= 0) {
+                  found = 0
+                  print ""
+              }
+          }
+          ' "$PM/wlan_policy_mgr_core.c"
+
+          echo
+          echo "============================================================"
+          echo " ALL qdf_conc_list_lock REFERENCES"
+          echo "============================================================"
+
+          grep -RIn \
+            --include='*.c' \
+            --include='*.h' \
+            'qdf_conc_list_lock' \
+            "$PM" || true
+
+          echo
+          echo "============================================================"
+          echo " CONNECTION-LIST HELPER CALLS"
+          echo "============================================================"
+
+          grep -RIn \
+            --include='*.c' \
+            -E 'policy_mgr_(store_and_del_conn_info|restore_deleted_conn_info|get_connection_count)' \
+            "$PM" || true
+
+          echo
+          echo "============================================================"
+          echo " MUTEX INSPECTION COMPLETE"
+          echo "============================================================"
+
+
+
+
+
+
+
       - name: Diagnose policy manager connection-count mutex
         working-directory: kernel
         shell: bash
