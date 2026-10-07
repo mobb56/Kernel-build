@@ -7862,91 +7862,246 @@ jobs:
 
 
 
-      - name: Inspect exact policy-manager VDEV registration path
+      - name: Restore native policy-manager VDEV callbacks
         working-directory: kernel
         shell: bash
         run: |
           set -euo pipefail
 
-          PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_init_deinit.c"
+          ACTUAL="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_init_deinit.c"
+          REF="../nethunter-reference/drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_init_deinit.c"
 
-          test -f "$PM"
+          test -f "$ACTUAL"
+          test -f "$REF"
 
           echo "============================================================"
-          echo " EXACT POLICY-MANAGER VDEV REGISTRATION PATH"
+          echo " RESTORE NATIVE POLICY-MANAGER VDEV CALLBACKS"
           echo "============================================================"
+
+          echo
+          echo "=== CLEAN REFERENCE CALLBACKS ==="
 
           awk '
-          function reset() {
-            active=0
-            seen_open=0
+          function start(name) {
+            active=1
+            target=name
+            opened=0
             depth=0
-            name=""
+            print "===== " name " ====="
           }
 
-          /^[[:space:]]*static[[:space:]]+/ &&
-          /policy_mgr_vdev_obj_create_cb[[:space:]]*\(/ {
-            reset()
-            active=1
-            name="CREATE"
-            print "===== CREATE CALLBACK ====="
+          /^[[:space:]]*static[[:space:]]+QDF_STATUS[[:space:]]+policy_mgr_vdev_obj_create_cb[[:space:]]*\(/ {
+            start("CREATE")
           }
 
-          /^[[:space:]]*static[[:space:]]+/ &&
-          /policy_mgr_vdev_obj_destroy_cb[[:space:]]*\(/ {
-            reset()
-            active=1
-            name="DESTROY"
-            print "===== DESTROY CALLBACK ====="
+          /^[[:space:]]*static[[:space:]]+void[[:space:]]+policy_mgr_vdev_obj_destroy_cb[[:space:]]*\(/ {
+            start("DESTROY")
           }
 
-          /^[[:space:]]*static[[:space:]]+/ &&
-          /policy_mgr_vdev_obj_status_cb[[:space:]]*\(/ {
-            reset()
-            active=1
-            name="STATUS"
-            print "===== STATUS CALLBACK ====="
+          /^[[:space:]]*static[[:space:]]+void[[:space:]]+policy_mgr_vdev_obj_status_cb[[:space:]]*\(/ {
+            start("STATUS")
           }
 
           active {
             print
 
-            line=$0
-            opens=gsub(/\{/, "{", line)
-            closes=gsub(/\}/, "}", line)
+            x=$0
+            o=gsub(/\{/, "{", x)
+            c=gsub(/\}/, "}", x)
 
-            if (opens > 0)
-              seen_open=1
+            if (o)
+              opened=1
 
-            if (seen_open)
-              depth += opens - closes
+            if (opened)
+              depth += o-c
 
-            if (seen_open && depth <= 0) {
-              print "===== END " name " ====="
-              reset()
+            if (opened && depth <= 0) {
+              print "===== END " target " ====="
+              active=0
             }
 
             next
           }
-          ' "$PM"
+          ' "$REF"
 
           echo
-          echo "=== POLICY-MANAGER LIST OPERATIONS ==="
+          echo "=== VALIDATE REFERENCE IMPLEMENTATIONS ==="
 
-          grep -n -E \
-            'policy_mgr_(update_conc_list|store_and_del_conn_info_by_vdev_id)|pm_conc_connection_list' \
-            "$PM" || true
+          for pattern in \
+            'policy_mgr_vdev_obj_create_cb' \
+            'policy_mgr_vdev_obj_destroy_cb' \
+            'policy_mgr_vdev_obj_status_cb'
+          do
+            if ! grep -Eq \
+              "^[[:space:]]*static[[:space:]]+.*${pattern}[[:space:]]*\\(" \
+              "$REF"; then
+              echo "ERROR: clean reference callback missing: ${pattern}"
+              exit 1
+            fi
+          done
+
+          echo "PASS: all three clean reference callbacks exist."
 
           echo
-          echo "=== CALLBACK REGISTRATION ==="
+          echo "=== RESTORE CALLBACK BODIES WITH AWK ==="
 
-          grep -RIn -E \
-            'policy_mgr_vdev_obj_(create|destroy|status)_cb' \
-            drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr \
-            2>/dev/null || true
+          awk '
+          function capture(name, sig_re) {
+            active=0
+            started=0
+            depth=0
+            n=0
+            target=name
+            signature=sig_re
+          }
+
+          $0 ~ signature {
+            capture(target, signature)
+          }
+
+          {
+            if (!active)
+              print
+          }
+          ' /dev/null >/dev/null
+
+          # Extract each clean callback into temporary files.
+          awk '
+          function begin(name) {
+            active=1
+            opened=0
+            depth=0
+            target=name
+            buffer=""
+          }
+
+          /^[[:space:]]*static[[:space:]]+QDF_STATUS[[:space:]]+policy_mgr_vdev_obj_create_cb[[:space:]]*\(/ {
+            begin("CREATE")
+          }
+
+          /^[[:space:]]*static[[:space:]]+void[[:space:]]+policy_mgr_vdev_obj_destroy_cb[[:space:]]*\(/ {
+            begin("DESTROY")
+          }
+
+          /^[[:space:]]*static[[:space:]]+void[[:space:]]+policy_mgr_vdev_obj_status_cb[[:space:]]*\(/ {
+            begin("STATUS")
+          }
+
+          active {
+            buffer = buffer $0 "\n"
+
+            x=$0
+            o=gsub(/\{/, "{", x)
+            c=gsub(/\}/, "}", x)
+
+            if (o)
+              opened=1
+
+            if (opened)
+              depth += o-c
+
+            if (opened && depth <= 0) {
+              print buffer > ("../vdev-" target ".txt")
+              close("../vdev-" target ".txt")
+              active=0
+            }
+
+            next
+          }
+          ' "$REF"
+
+          for f in \
+            ../vdev-CREATE.txt \
+            ../vdev-DESTROY.txt \
+            ../vdev-STATUS.txt
+          do
+            test -s "$f"
+          done
+
+          echo "PASS: clean callback bodies extracted."
 
           echo
-          echo "=== VDEV REGISTRATION PATH INSPECTION COMPLETE ==="
+          echo "=== REPLACE EXISTING CALLBACK DEFINITIONS ==="
+
+          awk '
+          function skip_callback() {
+            active=1
+            opened=0
+            depth=0
+          }
+
+          /^[[:space:]]*static[[:space:]]+QDF_STATUS[[:space:]]+policy_mgr_vdev_obj_create_cb[[:space:]]*\(/ {
+            print_file("../vdev-CREATE.txt")
+            skip_callback()
+            next
+          }
+
+          /^[[:space:]]*static[[:space:]]+void[[:space:]]+policy_mgr_vdev_obj_destroy_cb[[:space:]]*\(/ {
+            print_file("../vdev-DESTROY.txt")
+            skip_callback()
+            next
+          }
+
+          /^[[:space:]]*static[[:space:]]+void[[:space:]]+policy_mgr_vdev_obj_status_cb[[:space:]]*\(/ {
+            print_file("../vdev-STATUS.txt")
+            skip_callback()
+            next
+          }
+
+          active {
+            x=$0
+            o=gsub(/\{/, "{", x)
+            c=gsub(/\}/, "}", x)
+
+            if (o)
+              opened=1
+
+            if (opened)
+              depth += o-c
+
+            if (opened && depth <= 0)
+              active=0
+
+            next
+          }
+
+          { print }
+
+          function print_file(file, line) {
+            while ((getline line < file) > 0)
+              print line
+            close(file)
+          }
+          ' "$ACTUAL" > "$ACTUAL.tmp"
+
+          mv "$ACTUAL.tmp" "$ACTUAL"
+
+          rm -f \
+            ../vdev-CREATE.txt \
+            ../vdev-DESTROY.txt \
+            ../vdev-STATUS.txt
+
+          echo
+          echo "=== VERIFY RESTORED CALLBACKS ==="
+
+          grep -n -A30 \
+            'static QDF_STATUS policy_mgr_vdev_obj_create_cb' \
+            "$ACTUAL"
+
+          echo
+          grep -n -A25 \
+            'static void policy_mgr_vdev_obj_destroy_cb' \
+            "$ACTUAL"
+
+          echo
+          grep -n -A25 \
+            'static void policy_mgr_vdev_obj_status_cb' \
+            "$ACTUAL"
+
+          echo
+          echo "PASS: native policy-manager VDEV callback implementations restored."
+          echo "No policy_mgr_update_connection_info() bypass was added."
+          echo "No fake VDEV success was added."
 
       
                          
