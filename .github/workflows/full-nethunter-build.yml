@@ -7868,104 +7868,34 @@ jobs:
         run: |
           set -euo pipefail
 
-          ACTUAL="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_init_deinit.c"
-          REF="../nethunter-reference/drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_init_deinit.c"
+          PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_init_deinit.c"
+          CLEAN="${GITHUB_WORKSPACE}/clean-policy-manager.c"
 
-          test -f "$ACTUAL"
-          test -f "$REF"
+          test -f "$PM"
 
           echo "============================================================"
           echo " RESTORE NATIVE POLICY-MANAGER VDEV CALLBACKS"
           echo "============================================================"
 
           echo
-          echo "=== CLEAN REFERENCE CALLBACKS ==="
+          echo "=== EXTRACT EXACT PINNED-SOURCE VERSION ==="
 
-          awk '
-          function start(name) {
-            active=1
-            target=name
-            opened=0
-            depth=0
-            print "===== " name " ====="
-          }
+          git show "HEAD:${PM}" > "$CLEAN"
 
-          /^[[:space:]]*static[[:space:]]+QDF_STATUS[[:space:]]+policy_mgr_vdev_obj_create_cb[[:space:]]*\(/ {
-            start("CREATE")
-          }
+          test -s "$CLEAN"
 
-          /^[[:space:]]*static[[:space:]]+void[[:space:]]+policy_mgr_vdev_obj_destroy_cb[[:space:]]*\(/ {
-            start("DESTROY")
-          }
-
-          /^[[:space:]]*static[[:space:]]+void[[:space:]]+policy_mgr_vdev_obj_status_cb[[:space:]]*\(/ {
-            start("STATUS")
-          }
-
-          active {
-            print
-
-            x=$0
-            o=gsub(/\{/, "{", x)
-            c=gsub(/\}/, "}", x)
-
-            if (o)
-              opened=1
-
-            if (opened)
-              depth += o-c
-
-            if (opened && depth <= 0) {
-              print "===== END " target " ====="
-              active=0
-            }
-
-            next
-          }
-          ' "$REF"
+          echo "Pinned source:"
+          git rev-parse HEAD
+          echo "Clean source extracted successfully."
 
           echo
-          echo "=== VALIDATE REFERENCE IMPLEMENTATIONS ==="
+          echo "=== EXTRACT CLEAN CALLBACKS WITH AWK ==="
 
-          for pattern in \
-            'policy_mgr_vdev_obj_create_cb' \
-            'policy_mgr_vdev_obj_destroy_cb' \
-            'policy_mgr_vdev_obj_status_cb'
-          do
-            if ! grep -Eq \
-              "^[[:space:]]*static[[:space:]]+.*${pattern}[[:space:]]*\\(" \
-              "$REF"; then
-              echo "ERROR: clean reference callback missing: ${pattern}"
-              exit 1
-            fi
-          done
+          rm -f \
+            "${GITHUB_WORKSPACE}/vdev-create.clean" \
+            "${GITHUB_WORKSPACE}/vdev-destroy.clean" \
+            "${GITHUB_WORKSPACE}/vdev-status.clean"
 
-          echo "PASS: all three clean reference callbacks exist."
-
-          echo
-          echo "=== RESTORE CALLBACK BODIES WITH AWK ==="
-
-          awk '
-          function capture(name, sig_re) {
-            active=0
-            started=0
-            depth=0
-            n=0
-            target=name
-            signature=sig_re
-          }
-
-          $0 ~ signature {
-            capture(target, signature)
-          }
-
-          {
-            if (!active)
-              print
-          }
-          ' /dev/null >/dev/null
-
-          # Extract each clean callback into temporary files.
           awk '
           function begin(name) {
             active=1
@@ -7975,89 +7905,112 @@ jobs:
             buffer=""
           }
 
-          /^[[:space:]]*static[[:space:]]+QDF_STATUS[[:space:]]+policy_mgr_vdev_obj_create_cb[[:space:]]*\(/ {
-            begin("CREATE")
+          /^[[:space:]]*static[[:space:]]+.*policy_mgr_vdev_obj_create_cb[[:space:]]*\(/ {
+            begin("create")
           }
 
-          /^[[:space:]]*static[[:space:]]+void[[:space:]]+policy_mgr_vdev_obj_destroy_cb[[:space:]]*\(/ {
-            begin("DESTROY")
+          /^[[:space:]]*static[[:space:]]+.*policy_mgr_vdev_obj_destroy_cb[[:space:]]*\(/ {
+            begin("destroy")
           }
 
-          /^[[:space:]]*static[[:space:]]+void[[:space:]]+policy_mgr_vdev_obj_status_cb[[:space:]]*\(/ {
-            begin("STATUS")
+          /^[[:space:]]*static[[:space:]]+.*policy_mgr_vdev_obj_status_cb[[:space:]]*\(/ {
+            begin("status")
           }
 
           active {
             buffer = buffer $0 "\n"
 
             x=$0
-            o=gsub(/\{/, "{", x)
-            c=gsub(/\}/, "}", x)
+            opens=gsub(/\{/, "{", x)
+            closes=gsub(/\}/, "}", x)
 
-            if (o)
+            if (opens)
               opened=1
 
             if (opened)
-              depth += o-c
+              depth += opens - closes
 
             if (opened && depth <= 0) {
-              print buffer > ("../vdev-" target ".txt")
-              close("../vdev-" target ".txt")
+              file="../vdev-" target ".clean"
+              printf "%s", buffer > file
+              close(file)
               active=0
+              buffer=""
+              target=""
+              opened=0
+              depth=0
             }
 
             next
           }
-          ' "$REF"
+          ' "$CLEAN"
 
           for f in \
-            ../vdev-CREATE.txt \
-            ../vdev-DESTROY.txt \
-            ../vdev-STATUS.txt
+            "${GITHUB_WORKSPACE}/vdev-create.clean" \
+            "${GITHUB_WORKSPACE}/vdev-destroy.clean" \
+            "${GITHUB_WORKSPACE}/vdev-status.clean"
           do
             test -s "$f"
           done
 
-          echo "PASS: clean callback bodies extracted."
+          echo "PASS: all three callbacks extracted from pinned source."
 
           echo
-          echo "=== REPLACE EXISTING CALLBACK DEFINITIONS ==="
+          echo "=== CLEAN CALLBACKS ==="
 
-          awk '
-          function skip_callback() {
+          cat "${GITHUB_WORKSPACE}/vdev-create.clean"
+          echo
+          cat "${GITHUB_WORKSPACE}/vdev-destroy.clean"
+          echo
+          cat "${GITHUB_WORKSPACE}/vdev-status.clean"
+
+          echo
+          echo "=== RESTORE CALLBACKS WITH AWK ==="
+
+          awk \
+            -v create_file="${GITHUB_WORKSPACE}/vdev-create.clean" \
+            -v destroy_file="${GITHUB_WORKSPACE}/vdev-destroy.clean" \
+            -v status_file="${GITHUB_WORKSPACE}/vdev-status.clean" '
+          function emit(file, line) {
+            while ((getline line < file) > 0)
+              print line
+            close(file)
+          }
+
+          function skip_start() {
             active=1
             opened=0
             depth=0
           }
 
-          /^[[:space:]]*static[[:space:]]+QDF_STATUS[[:space:]]+policy_mgr_vdev_obj_create_cb[[:space:]]*\(/ {
-            print_file("../vdev-CREATE.txt")
-            skip_callback()
+          /^[[:space:]]*static[[:space:]]+.*policy_mgr_vdev_obj_create_cb[[:space:]]*\(/ {
+            emit(create_file)
+            skip_start()
             next
           }
 
-          /^[[:space:]]*static[[:space:]]+void[[:space:]]+policy_mgr_vdev_obj_destroy_cb[[:space:]]*\(/ {
-            print_file("../vdev-DESTROY.txt")
-            skip_callback()
+          /^[[:space:]]*static[[:space:]]+.*policy_mgr_vdev_obj_destroy_cb[[:space:]]*\(/ {
+            emit(destroy_file)
+            skip_start()
             next
           }
 
-          /^[[:space:]]*static[[:space:]]+void[[:space:]]+policy_mgr_vdev_obj_status_cb[[:space:]]*\(/ {
-            print_file("../vdev-STATUS.txt")
-            skip_callback()
+          /^[[:space:]]*static[[:space:]]+.*policy_mgr_vdev_obj_status_cb[[:space:]]*\(/ {
+            emit(status_file)
+            skip_start()
             next
           }
 
           active {
             x=$0
-            o=gsub(/\{/, "{", x)
-            c=gsub(/\}/, "}", x)
+            opens=gsub(/\{/, "{", x)
+            closes=gsub(/\}/, "}", x)
 
-            if (o)
+            if (opens)
               opened=1
 
             if (opened)
-              depth += o-c
+              depth += opens - closes
 
             if (opened && depth <= 0)
               active=0
@@ -8065,43 +8018,53 @@ jobs:
             next
           }
 
-          { print }
-
-          function print_file(file, line) {
-            while ((getline line < file) > 0)
-              print line
-            close(file)
+          {
+            print
           }
-          ' "$ACTUAL" > "$ACTUAL.tmp"
+          ' "$PM" > "${PM}.tmp"
 
-          mv "$ACTUAL.tmp" "$ACTUAL"
+          mv "${PM}.tmp" "$PM"
+
+          echo
+          echo "=== VERIFY FINAL CALLBACKS ==="
+
+          grep -n -A35 \
+            '^[[:space:]]*static[[:space:]]\+.*policy_mgr_vdev_obj_create_cb' \
+            "$PM"
+
+          echo
+          grep -n -A35 \
+            '^[[:space:]]*static[[:space:]]\+.*policy_mgr_vdev_obj_destroy_cb' \
+            "$PM"
+
+          echo
+          grep -n -A35 \
+            '^[[:space:]]*static[[:space:]]\+.*policy_mgr_vdev_obj_status_cb' \
+            "$PM"
+
+          echo
+          echo "=== CALLBACK COUNT CHECK ==="
+
+          test "$(grep -Ec \
+            '^[[:space:]]*static[[:space:]]+.*policy_mgr_vdev_obj_create_cb[[:space:]]*\(' \
+            "$PM")" -eq 1
+
+          test "$(grep -Ec \
+            '^[[:space:]]*static[[:space:]]+.*policy_mgr_vdev_obj_destroy_cb[[:space:]]*\(' \
+            "$PM")" -eq 1
+
+          test "$(grep -Ec \
+            '^[[:space:]]*static[[:space:]]+.*policy_mgr_vdev_obj_status_cb[[:space:]]*\(' \
+            "$PM")" -eq 1
 
           rm -f \
-            ../vdev-CREATE.txt \
-            ../vdev-DESTROY.txt \
-            ../vdev-STATUS.txt
+            "$CLEAN" \
+            "${GITHUB_WORKSPACE}/vdev-create.clean" \
+            "${GITHUB_WORKSPACE}/vdev-destroy.clean" \
+            "${GITHUB_WORKSPACE}/vdev-status.clean"
 
           echo
-          echo "=== VERIFY RESTORED CALLBACKS ==="
-
-          grep -n -A30 \
-            'static QDF_STATUS policy_mgr_vdev_obj_create_cb' \
-            "$ACTUAL"
-
-          echo
-          grep -n -A25 \
-            'static void policy_mgr_vdev_obj_destroy_cb' \
-            "$ACTUAL"
-
-          echo
-          grep -n -A25 \
-            'static void policy_mgr_vdev_obj_status_cb' \
-            "$ACTUAL"
-
-          echo
-          echo "PASS: native policy-manager VDEV callback implementations restored."
-          echo "No policy_mgr_update_connection_info() bypass was added."
-          echo "No fake VDEV success was added."
+          echo "PASS: native policy-manager VDEV callbacks restored from pinned source."
 
       
                          
