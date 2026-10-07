@@ -8191,6 +8191,70 @@ jobs:
 
 
 
+
+
+      - name: Inspect policy manager connection-count lock path
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PM_DIR="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src"
+
+          echo
+          echo "============================================================"
+          echo " INSPECT policy_mgr_get_connection_count()"
+          echo "============================================================"
+
+          echo
+          echo "=== FUNCTION LOCATION ==="
+
+          grep -R -n -B8 -A80 \
+            'policy_mgr_get_connection_count[[:space:]]*(' \
+            "$PM_DIR" \
+            --include='*.c' \
+            --include='*.h' \
+            || true
+
+          echo
+          echo "=== ALL MUTEX REFERENCES IN POLICY MANAGER ==="
+
+          grep -R -n -E \
+            'qdf_mutex_(acquire|release)|qdf_conc_list_lock' \
+            "$PM_DIR" \
+            --include='*.c' \
+            --include='*.h' \
+            | head -300 \
+            || true
+
+          echo
+          echo "=== CONNECTION COUNT CALLERS ==="
+
+          grep -R -n -B12 -A20 \
+            'policy_mgr_get_connection_count[[:space:]]*(' \
+            drivers/staging/qcacld-3.0 \
+            --include='*.c' \
+            | head -300 \
+            || true
+
+          echo
+          echo "=== SPECIFIC DESTROY PATH ==="
+
+          grep -R -n -B20 -A30 \
+            'hdd_vdev_destroy[[:space:]]*(' \
+            drivers/staging/qcacld-3.0 \
+            --include='*.c' \
+            | head -300 \
+            || true
+
+          echo
+          echo "============================================================"
+          echo " POLICY MANAGER LOCK INSPECTION COMPLETE"
+          echo "============================================================"
+
+
+
+
       - name: Verify patched policy manager source before build
         working-directory: kernel
         shell: bash
