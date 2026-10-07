@@ -534,59 +534,61 @@ jobs:
 
             awk '
             BEGIN {
-              in_create = 0
+              candidate = 0
               brace = 0
               patched = 0
             }
 
-            !in_create &&
-            /policy_mgr_vdev_obj_create_cb[[:space:]]*\(/ {
-              in_create = 1
-              print
-              next
-            }
-
-            in_create &&
-            /\{/ {
-              print
-
-              print ""
-              print "\t/* NETHUNTER_VDEV_CREATE_DEBUG */"
-              print "\tpolicy_mgr_debug(\"NETHUNTER: policy_mgr_vdev_obj_create_cb entered\");"
-
-              patched = 1
-
+            {
               line = $0
-              opens = gsub(/\{/, "{", line)
-              closes = gsub(/\}/, "}", line)
-              brace += opens - closes
 
-              next
-            }
-
-            in_create {
-              print
-
-              line = $0
-              opens = gsub(/\{/, "{", line)
-              closes = gsub(/\}/, "}", line)
-              brace += opens - closes
-
-              if (brace <= 0) {
-                in_create = 0
-                brace = 0
+              if (!candidate && line ~ /policy_mgr_vdev_obj_create_cb[[:space:]]*\(/) {
+                candidate = 1
               }
 
-              next
-            }
+              if (candidate) {
 
-            {
+                # A prototype/reference is not the function body.
+                # Cancel if the candidate terminates with a semicolon.
+                if (line ~ /;/ && line !~ /\{/) {
+                  candidate = 0
+                  print
+                  next
+                }
+
+                # Actual function body begins here.
+                if (line ~ /\{/) {
+                  print
+
+                  print ""
+                  print "\t/* NETHUNTER_VDEV_CREATE_DEBUG */"
+                  print "\tpolicy_mgr_debug(\"NETHUNTER: policy_mgr_vdev_obj_create_cb entered\");"
+
+                  patched = 1
+
+                  tmp = line
+                  opens = gsub(/\{/, "{", tmp)
+                  closes = gsub(/\}/, "}", tmp)
+                  brace = opens - closes
+
+                  if (brace <= 0) {
+                    candidate = 0
+                    brace = 0
+                  }
+
+                  next
+                }
+
+                print
+                next
+              }
+
               print
             }
 
             END {
               if (!patched) {
-                print "ERROR: policy_mgr_vdev_obj_create_cb() not patched" > "/dev/stderr"
+                print "ERROR: actual policy_mgr_vdev_obj_create_cb() definition not found" > "/dev/stderr"
                 exit 1
               }
             }
@@ -595,6 +597,11 @@ jobs:
             mv "$PM.tmp" "$PM"
           fi
 
+          test "$(grep -Fc 'NETHUNTER_VDEV_CREATE_DEBUG' "$PM")" -eq 1
+
+          echo "PASS: actual policy_mgr_vdev_obj_create_cb() patched."
+
+          
           echo
           echo "=== ADD VDEV STATUS DIAGNOSTICS ==="
 
@@ -602,59 +609,58 @@ jobs:
 
             awk '
             BEGIN {
-              in_status = 0
+              candidate = 0
               brace = 0
               patched = 0
             }
 
-            !in_status &&
-            /policy_mgr_vdev_obj_status_cb[[:space:]]*\(/ {
-              in_status = 1
-              print
-              next
-            }
-
-            in_status &&
-            /\{/ {
-              print
-
-              print ""
-              print "\t/* NETHUNTER_VDEV_STATUS_DEBUG */"
-              print "\tpolicy_mgr_debug(\"NETHUNTER: policy_mgr_vdev_obj_status_cb entered\");"
-
-              patched = 1
-
+            {
               line = $0
-              opens = gsub(/\{/, "{", line)
-              closes = gsub(/\}/, "}", line)
-              brace += opens - closes
 
-              next
-            }
-
-            in_status {
-              print
-
-              line = $0
-              opens = gsub(/\{/, "{", line)
-              closes = gsub(/\}/, "}", line)
-              brace += opens - closes
-
-              if (brace <= 0) {
-                in_status = 0
-                brace = 0
+              if (!candidate && line ~ /policy_mgr_vdev_obj_status_cb[[:space:]]*\(/) {
+                candidate = 1
               }
 
-              next
-            }
+              if (candidate) {
 
-            {
+                if (line ~ /;/ && line !~ /\{/) {
+                  candidate = 0
+                  print
+                  next
+                }
+
+                if (line ~ /\{/) {
+                  print
+
+                  print ""
+                  print "\t/* NETHUNTER_VDEV_STATUS_DEBUG */"
+                  print "\tpolicy_mgr_debug(\"NETHUNTER: policy_mgr_vdev_obj_status_cb entered\");"
+
+                  patched = 1
+
+                  tmp = line
+                  opens = gsub(/\{/, "{", tmp)
+                  closes = gsub(/\}/, "}", tmp)
+                  brace = opens - closes
+
+                  if (brace <= 0) {
+                    candidate = 0
+                    brace = 0
+                  }
+
+                  next
+                }
+
+                print
+                next
+              }
+
               print
             }
 
             END {
               if (!patched) {
-                print "ERROR: policy_mgr_vdev_obj_status_cb() not patched" > "/dev/stderr"
+                print "ERROR: actual policy_mgr_vdev_obj_status_cb() definition not found" > "/dev/stderr"
                 exit 1
               }
             }
@@ -662,6 +668,10 @@ jobs:
 
             mv "$PM.tmp" "$PM"
           fi
+
+          test "$(grep -Fc 'NETHUNTER_VDEV_STATUS_DEBUG' "$PM")" -eq 1
+
+          echo "PASS: actual policy_mgr_vdev_obj_status_cb() patched."
 
           echo
           echo "=== TRACE MISSING VDEV BEFORE FAILURE ==="
