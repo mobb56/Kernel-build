@@ -8261,6 +8261,52 @@ jobs:
             -E 'pm_conc_connection_list\[.*\]\.(vdev_id|in_use)[[:space:]]*=' \
             drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr \
             --include='*.c' || true
+
+
+
+
+
+
+      - name: Trace policy-manager VDEV MAC map population
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -u
+
+          ROOT="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr"
+
+          echo "=== STRUCT DEFINITION / DECLARATIONS ==="
+          grep -R -n -B8 -A20 \
+            "struct policy_mgr_vdev_mac_map" \
+            "$ROOT" --include='*.c' --include='*.h' || true
+
+          echo
+          echo "=== ALL vdev_mac_map ASSIGNMENTS ==="
+          grep -R -n -B8 -A12 \
+            "vdev_mac_map" \
+            "$ROOT" --include='*.c' --include='*.h' || true
+
+          echo
+          echo "=== ALL vdev_mac_id / vdev_id MAP ASSIGNMENTS ==="
+          grep -R -n -B8 -A12 -E \
+            'vdev_mac_map.*vdev_id|vdev_mac_map.*mac_id|\.vdev_id[[:space:]]*=.*vdev|\.mac_id[[:space:]]*=' \
+            "$ROOT" --include='*.c' --include='*.h' || true
+
+          echo
+          echo "=== MONITOR MODE REFERENCES IN POLICY MANAGER ==="
+          grep -R -n -B8 -A15 -E \
+            'MONITOR|monitor|WLAN_HDD_SOFTAP|QDF_MONITOR' \
+            "$ROOT" --include='*.c' --include='*.h' \
+            | head -300 || true
+
+          echo
+          echo "=== update_hw_mode_conn_info CALLS ==="
+          grep -R -n -B12 -A18 \
+            "policy_mgr_update_hw_mode_conn_info(" \
+            "$ROOT" --include='*.c' --include='*.h' || true
+
+          echo
+          echo "=== TRACE COMPLETE ==="
       
                          
       - name: Build kernel
