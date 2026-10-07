@@ -8357,6 +8357,37 @@ jobs:
 
           echo
           echo "=== TRACE COMPLETE ==="
+
+
+
+
+
+
+
+      - name: Locate exact connection-list writer
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_core.c"
+
+          echo "=== EXACT WRITER ==="
+          nl -ba "$PM" | sed -n '570,615p'
+
+          echo
+          echo "=== FUNCTIONS AROUND WRITER ==="
+          awk '
+          /^[[:space:]]*[A-Za-z_][A-Za-z0-9_[:space:]\*]*[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(/ {
+              print NR ": " $0
+          }
+          ' "$PM" | awk '$1 >= 540 && $1 <= 650'
+
+          echo
+          echo "=== ALL CONNECTION-LIST WRITES ==="
+          grep -n -E \
+            'pm_conc_connection_list\[conn_index\]\.(mode|freq|bw|mac|chain_mask|original_nss|vdev_id|in_use|ch_flagext)' \
+            "$PM"
       
                          
       - name: Build kernel
