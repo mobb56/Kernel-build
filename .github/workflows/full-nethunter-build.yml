@@ -8184,35 +8184,47 @@ jobs:
           echo "============================================================"
 
 
-      
-      - name: Inspect exact policy-manager connection-list writers
+      - name: Trace policy-manager connection-list writer callers
         working-directory: kernel
         shell: bash
         run: |
-          set -euo pipefail
+          set -u
 
           PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_core.c"
+          ROOT="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr"
 
-          echo "=== CORE LIST WRITER AROUND 598 ==="
-          sed -n '560,625p' "$PM"
-
-          echo
-          echo "=== CORE LIST WRITER AROUND 820 ==="
-          sed -n '810,860p' "$PM"
+          echo "=== policy_mgr_update_conn_list DEFINITION ==="
+          grep -n -B15 -A35 \
+            "policy_mgr_update_conn_list" "$PM" || true
 
           echo
-          echo "=== CORE UPDATE AROUND 950 ==="
-          sed -n '940,985p' "$PM"
+          echo "=== ALL CALLERS OF policy_mgr_update_conn_list ==="
+          grep -R -n -B8 -A12 \
+            "policy_mgr_update_conn_list" "$ROOT" \
+            --include='*.c' --include='*.h' || true
 
           echo
-          echo "=== FUNCTION NAMES TOUCHING THE LIST ==="
+          echo "=== ALL CALLERS OF policy_mgr_update_hw_mode_conn_info ==="
+          grep -R -n -B8 -A15 \
+            "policy_mgr_update_hw_mode_conn_info" "$ROOT" \
+            --include='*.c' --include='*.h' || true
 
-          grep -n -B5 -A5 \
-            -E 'pm_conc_connection_list\[conn_index\].*(vdev_id|in_use)|qdf_mem_copy.*pm_conc_connection_list' \
-          
-            "$PM" || true
+          echo
+          echo "=== ALL DIRECT vdev_id / in_use WRITES ==="
+          grep -R -n \
+            -E 'pm_conc_connection_list\[.*\]\.(vdev_id|in_use)[[:space:]]*=' \
+            "$ROOT" --include='*.c' || true
 
+          echo
+          echo "=== REFERENCES TO VDEV 0 / MONITOR MODE ==="
+          grep -R -n -E \
+            'vdev_id|MONITOR|monitor' \
+            "$ROOT" --include='*.c' \
+            | grep -E 'vdev_id|MONITOR|monitor' \
+            | head -200 || true
 
+          echo
+          echo "=== TRACE COMPLETE ==="
 
 
 
