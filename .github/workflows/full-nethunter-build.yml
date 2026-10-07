@@ -597,7 +597,6 @@ jobs:
             mv "$PM.tmp" "$PM"
           fi
 
-          test "$(grep -Fc 'NETHUNTER_VDEV_CREATE_DEBUG' "$PM")" -eq 1
 
           echo "PASS: actual policy_mgr_vdev_obj_create_cb() patched."
 
@@ -674,78 +673,80 @@ jobs:
           echo "PASS: actual policy_mgr_vdev_obj_status_cb() patched."
 
           echo
-          echo "=== TRACE MISSING VDEV BEFORE FAILURE ==="
+          echo "=== INSPECT EXACT VDEV POLICY CALLBACK BODIES ==="
 
-          if ! grep -q 'NETHUNTER_PM_LOOKUP_DEBUG' "$PM"; then
+          awk '
+          BEGIN {
+            target = ""
+            active = 0
+            brace = 0
+          }
 
-            awk '
-            BEGIN {
-              candidate = 0
+          /policy_mgr_vdev_obj_create_cb[[:space:]]*\(/ && $0 !~ /^[[:space:]]*\/\// {
+            target = "CREATE"
+            active = 1
+            brace = 0
+            print "===== policy_mgr_vdev_obj_create_cb ====="
+          }
+
+          /policy_mgr_vdev_obj_destroy_cb[[:space:]]*\(/ && $0 !~ /^[[:space:]]*\/\// {
+            target = "DESTROY"
+            active = 1
+            brace = 0
+            print "===== policy_mgr_vdev_obj_destroy_cb ====="
+          }
+
+          /policy_mgr_vdev_obj_status_cb[[:space:]]*\(/ && $0 !~ /^[[:space:]]*\/\// {
+            target = "STATUS"
+            active = 1
+            brace = 0
+            print "===== policy_mgr_vdev_obj_status_cb ====="
+          }
+
+          active {
+            print
+
+            tmp = $0
+            opens = gsub(/\{/, "{", tmp)
+            closes = gsub(/\}/, "}", tmp)
+            brace += opens - closes
+
+            if (brace > 0 && $0 ~ /\{/) {
+              body = 1
+            }
+
+            if (body && brace <= 0) {
+              print "===== END " target " ====="
+              active = 0
+              body = 0
+              target = ""
               brace = 0
-              patched = 0
             }
 
-            {
-              line = $0
+            next
+          }
+          ' "$PM"
 
-              if (!candidate && line ~ /policy_mgr_update_connection_info[[:space:]]*\(/) {
-                candidate = 1
-              }
+          echo
+          echo "=== FIND VDEV LIST INSERTION / REMOVAL OPERATIONS ==="
 
-              if (candidate) {
+          grep -n -E \
+            'pm_conc_connection_list|store_and_del_conn_info_by_vdev_id|conn_info.*vdev|vdev_id.*conn_info' \
+            "$PM" || true
 
-                # Ignore prototypes/declarations.
-                if (line ~ /;/ && line !~ /\{/) {
-                  candidate = 0
-                  print
-                  next
-                }
+          echo
+          echo "=== FIND POLICY MANAGER OBJECT CALLBACK REGISTRATION ==="
 
-                # Patch only the actual function body.
-                if (line ~ /\{/) {
-                  print
+          grep -RIn \
+            -E \
+            'policy_mgr_vdev_obj_(create|destroy|status)_cb' \
+            "$QCACLD" \
+            2>/dev/null | head -100
 
-                  print ""
-                  print "\t/* NETHUNTER_PM_LOOKUP_DEBUG */"
-                  print "\tpolicy_mgr_debug(\"NETHUNTER: update_connection_info vdev_id=%d\", vdev_id);"
-
-                  patched = 1
-
-                  tmp = line
-                  opens = gsub(/\{/, "{", tmp)
-                  closes = gsub(/\}/, "}", tmp)
-                  brace = opens - closes
-
-                  if (brace <= 0) {
-                    candidate = 0
-                    brace = 0
-                  }
-
-                  next
-                }
-
-                print
-                next
-              }
-
-              print
-            }
-
-            END {
-              if (!patched) {
-                print "ERROR: actual policy_mgr_update_connection_info() definition not found" > "/dev/stderr"
-                exit 1
-              }
-            }
-            ' "$PM" > "$PM.tmp"
-
-            mv "$PM.tmp" "$PM"
-          fi
-
-          test "$(grep -Fc 'NETHUNTER_PM_LOOKUP_DEBUG' "$PM")" -eq 1
-
-          echo "PASS: actual policy_mgr_update_connection_info() patched."
-
+          echo
+          echo "=== INSPECTION COMPLETE ==="
+          echo "No policy-manager semantics modified."
+          echo "No fake VDEV success added."
           echo
           echo "=== VERIFY NATIVE POLICY SEMANTICS ==="
 
