@@ -484,20 +484,14 @@ jobs:
 
             awk '
             {
-              if (
-                $0 ~ /hdd_stop_adapter\(hdd_ctx, adapter\)/ ||
-                $0 ~ /hdd_deinit_adapter\(hdd_ctx, adapter, true\)/ ||
-                $0 ~ /memset\(&adapter->session/ ||
-                $0 ~ /adapter->device_mode[[:space:]]*=[[:space:]]*QDF_MONITOR_MODE/
-              )
-                next
-
+              if ($0 ~ /hdd_stop_adapter\(hdd_ctx, adapter\)/ || $0 ~ /hdd_deinit_adapter\(hdd_ctx, adapter, true\)/ || $0 ~ /memset\(&adapter->session/ || $0 ~ /adapter->device_mode[[:space:]]*=[[:space:]]*QDF_MONITOR_MODE/) next
               print
             }
             ' "$CFG" > "$CFG.tmp"
 
             mv "$CFG.tmp" "$CFG"
           fi
+
 
           echo
           echo "=== VERIFY NATIVE MONITOR PATH ==="
