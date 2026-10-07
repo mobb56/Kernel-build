@@ -680,59 +680,60 @@ jobs:
 
             awk '
             BEGIN {
-              in_func = 0
+              candidate = 0
               brace = 0
               patched = 0
             }
 
-            !in_func &&
-            /policy_mgr_update_connection_info[[:space:]]*\(/ {
-              in_func = 1
-              print
-              next
-            }
-
-            in_func &&
-            /\{/ {
-              print
-
-              print ""
-              print "\t/* NETHUNTER_PM_LOOKUP_DEBUG */"
-              print "\tpolicy_mgr_debug(\"NETHUNTER: update_connection_info vdev_id=%d\", vdev_id);"
-
-              patched = 1
-
+            {
               line = $0
-              opens = gsub(/\{/, "{", line)
-              closes = gsub(/\}/, "}", line)
-              brace += opens - closes
 
-              next
-            }
-
-            in_func {
-              print
-
-              line = $0
-              opens = gsub(/\{/, "{", line)
-              closes = gsub(/\}/, "}", line)
-              brace += opens - closes
-
-              if (brace <= 0) {
-                in_func = 0
-                brace = 0
+              if (!candidate && line ~ /policy_mgr_update_connection_info[[:space:]]*\(/) {
+                candidate = 1
               }
 
-              next
-            }
+              if (candidate) {
 
-            {
+                # Ignore prototypes/declarations.
+                if (line ~ /;/ && line !~ /\{/) {
+                  candidate = 0
+                  print
+                  next
+                }
+
+                # Patch only the actual function body.
+                if (line ~ /\{/) {
+                  print
+
+                  print ""
+                  print "\t/* NETHUNTER_PM_LOOKUP_DEBUG */"
+                  print "\tpolicy_mgr_debug(\"NETHUNTER: update_connection_info vdev_id=%d\", vdev_id);"
+
+                  patched = 1
+
+                  tmp = line
+                  opens = gsub(/\{/, "{", tmp)
+                  closes = gsub(/\}/, "}", tmp)
+                  brace = opens - closes
+
+                  if (brace <= 0) {
+                    candidate = 0
+                    brace = 0
+                  }
+
+                  next
+                }
+
+                print
+                next
+              }
+
               print
             }
 
             END {
               if (!patched) {
-                print "ERROR: policy_mgr_update_connection_info() not patched" > "/dev/stderr"
+                print "ERROR: actual policy_mgr_update_connection_info() definition not found" > "/dev/stderr"
                 exit 1
               }
             }
@@ -740,6 +741,10 @@ jobs:
 
             mv "$PM.tmp" "$PM"
           fi
+
+          test "$(grep -Fc 'NETHUNTER_PM_LOOKUP_DEBUG' "$PM")" -eq 1
+
+          echo "PASS: actual policy_mgr_update_connection_info() patched."
 
           echo
           echo "=== VERIFY NATIVE POLICY SEMANTICS ==="
