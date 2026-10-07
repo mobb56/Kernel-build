@@ -8423,6 +8423,42 @@ jobs:
             'policy_mgr_update_conn_list|MONITOR_MODE|monitor.*vdev|vdev_id' \
             drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src \
             | head -300 || true
+
+
+
+
+      - name: Locate every policy-manager connection-list caller
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== ALL REFERENCES ==="
+
+          grep -R -n -E \
+            'policy_mgr_update_conn_list[[:space:]]*\(' \
+            drivers/staging/qcacld-3.0 \
+            --include='*.c' \
+            --include='*.h' \
+            || true
+
+          echo
+          echo "=== CALLERS ONLY (exclude definition/prototype) ==="
+
+          grep -R -n -B8 -A12 -E \
+            'policy_mgr_update_conn_list[[:space:]]*\(' \
+            drivers/staging/qcacld-3.0 \
+            --include='*.c' \
+            | grep -v \
+              'void policy_mgr_update_conn_list' \
+            || true
+
+          echo
+          echo "=== WRITER ==="
+
+          sed -n '565,620p' \
+            drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_core.c
+            
       
                          
       - name: Build kernel
