@@ -8307,6 +8307,56 @@ jobs:
 
           echo
           echo "=== TRACE COMPLETE ==="
+
+
+
+
+
+
+
+
+
+
+      - name: Trace nan VDEV ID source
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -u
+
+          ROOT="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr"
+
+          echo "=== NAN VDEV MAP CALLER ==="
+          sed -n '4240,4310p' \
+            drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_get_set_utils.c
+
+          echo
+          echo "=== nan_vdev_id DECLARATIONS ==="
+          grep -R -n -B8 -A12 \
+            -E 'nan_vdev_id[[:space:];,)]' \
+            "$ROOT" --include='*.c' --include='*.h' || true
+
+          echo
+          echo "=== nan_vdev_id ASSIGNMENTS ==="
+          grep -R -n -B8 -A12 \
+            -E 'nan_vdev_id[[:space:]]*=' \
+            "$ROOT" --include='*.c' --include='*.h' || true
+
+          echo
+          echo "=== FUNCTIONS USING nan_vdev_id ==="
+          grep -R -n -B10 -A20 \
+            "nan_vdev_id" \
+            "$ROOT" --include='*.c' --include='*.h' || true
+
+          echo
+          echo "=== MONITOR VDEV CREATION REFERENCES ==="
+          grep -R -n -B10 -A20 \
+            -E 'monitor.*vdev|vdev.*monitor|MONITOR_MODE' \
+            drivers/staging/qcacld-3.0 \
+            --include='*.c' --include='*.h' \
+            | head -300 || true
+
+          echo
+          echo "=== TRACE COMPLETE ==="
       
                          
       - name: Build kernel
