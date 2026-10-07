@@ -8209,7 +8209,46 @@ jobs:
 
           grep -n -B5 -A5 \
             -E 'pm_conc_connection_list\[conn_index\].*(vdev_id|in_use)|qdf_mem_copy.*pm_conc_connection_list' \
+          
             "$PM" || true
+
+
+
+
+
+      - name: Trace policy-manager connection-list writer callers
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_core.c"
+
+          echo "=== policy_mgr_update_conn_list DEFINITION ==="
+          grep -n -B12 -A35 \
+            "void policy_mgr_update_conn_list" \
+            "$PM" || true
+
+          echo
+          echo "=== ALL CALLERS OF policy_mgr_update_conn_list ==="
+          grep -R -n -B8 -A12 \
+            "policy_mgr_update_conn_list(" \
+            drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr \
+            --include='*.c' --include='*.h' || true
+
+          echo
+          echo "=== ALL REFERENCES TO update_hw_mode_conn_info ==="
+          grep -R -n -B8 -A15 \
+            "policy_mgr_update_hw_mode_conn_info(" \
+            drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr \
+            --include='*.c' --include='*.h' || true
+
+          echo
+          echo "=== ALL vdev_id/in_use WRITES IN POLICY MANAGER ==="
+          grep -R -n \
+            -E 'pm_conc_connection_list\[.*\]\.(vdev_id|in_use)[[:space:]]*=' \
+            drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr \
+            --include='*.c' || true
       
                          
       - name: Build kernel
