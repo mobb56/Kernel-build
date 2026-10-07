@@ -8193,6 +8193,77 @@ jobs:
 
 
 
+
+      - name: Diagnose policy manager connection-count mutex
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ROOT="drivers/staging/qcacld-3.0"
+
+          echo "============================================================"
+          echo " policy_mgr_get_connection_count()"
+          echo "============================================================"
+
+          grep -RIn \
+            --include='*.c' \
+            --include='*.h' \
+            'policy_mgr_get_connection_count' \
+            "$ROOT" > /tmp/pm_count_refs.txt || true
+
+          cat /tmp/pm_count_refs.txt
+
+          echo
+          echo "============================================================"
+          echo " SOURCE CONTEXT"
+          echo "============================================================"
+
+          while IFS=: read -r file line rest; do
+            [ -f "$file" ] || continue
+
+            echo
+            echo "----- $file:$line -----"
+
+            start=$((line - 35))
+            [ "$start" -lt 1 ] && start=1
+            end=$((line + 55))
+
+            sed -n "${start},${end}p" "$file"
+          done < /tmp/pm_count_refs.txt
+
+          echo
+          echo "============================================================"
+          echo " qdf_conc_list_lock REFERENCES"
+          echo "============================================================"
+
+          grep -RIn \
+            --include='*.c' \
+            --include='*.h' \
+            'qdf_conc_list_lock' \
+            "$ROOT" || true
+
+          echo
+          echo "============================================================"
+          echo " CONNECTION LIST MUTEX CONTEXT"
+          echo "============================================================"
+
+          grep -RIn \
+            --include='*.c' \
+            -B12 -A18 \
+            'qdf_mutex_acquire.*qdf_conc_list_lock\|qdf_mutex_release.*qdf_conc_list_lock' \
+            "$ROOT" || true
+
+          echo
+          echo "============================================================"
+          echo " DIAGNOSTIC COMPLETE"
+          echo "============================================================"
+
+
+
+
+
+
       - name: Locate exact policy manager connection-count implementation
         working-directory: kernel
         shell: bash
