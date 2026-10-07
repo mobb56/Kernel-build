@@ -7859,6 +7859,95 @@ jobs:
              kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c \
             2>/dev/null || true  
 
+
+
+
+      - name: Inspect exact policy-manager VDEV registration path
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_init_deinit.c"
+
+          test -f "$PM"
+
+          echo "============================================================"
+          echo " EXACT POLICY-MANAGER VDEV REGISTRATION PATH"
+          echo "============================================================"
+
+          awk '
+          function reset() {
+            active=0
+            seen_open=0
+            depth=0
+            name=""
+          }
+
+          /^[[:space:]]*static[[:space:]]+/ &&
+          /policy_mgr_vdev_obj_create_cb[[:space:]]*\(/ {
+            reset()
+            active=1
+            name="CREATE"
+            print "===== CREATE CALLBACK ====="
+          }
+
+          /^[[:space:]]*static[[:space:]]+/ &&
+          /policy_mgr_vdev_obj_destroy_cb[[:space:]]*\(/ {
+            reset()
+            active=1
+            name="DESTROY"
+            print "===== DESTROY CALLBACK ====="
+          }
+
+          /^[[:space:]]*static[[:space:]]+/ &&
+          /policy_mgr_vdev_obj_status_cb[[:space:]]*\(/ {
+            reset()
+            active=1
+            name="STATUS"
+            print "===== STATUS CALLBACK ====="
+          }
+
+          active {
+            print
+
+            line=$0
+            opens=gsub(/\{/, "{", line)
+            closes=gsub(/\}/, "}", line)
+
+            if (opens > 0)
+              seen_open=1
+
+            if (seen_open)
+              depth += opens - closes
+
+            if (seen_open && depth <= 0) {
+              print "===== END " name " ====="
+              reset()
+            }
+
+            next
+          }
+          ' "$PM"
+
+          echo
+          echo "=== POLICY-MANAGER LIST OPERATIONS ==="
+
+          grep -n -E \
+            'policy_mgr_(update_conc_list|store_and_del_conn_info_by_vdev_id)|pm_conc_connection_list' \
+            "$PM" || true
+
+          echo
+          echo "=== CALLBACK REGISTRATION ==="
+
+          grep -RIn -E \
+            'policy_mgr_vdev_obj_(create|destroy|status)_cb' \
+            drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr \
+            2>/dev/null || true
+
+          echo
+          echo "=== VDEV REGISTRATION PATH INSPECTION COMPLETE ==="
+
       
                          
       - name: Build kernel
