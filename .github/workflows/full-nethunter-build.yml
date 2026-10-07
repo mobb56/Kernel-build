@@ -8066,6 +8066,123 @@ jobs:
           echo
           echo "PASS: native policy-manager VDEV callbacks restored from pinned source."
 
+
+
+
+
+
+      - name: Trace policy-manager VDEV connection-list path
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          QCACLD="drivers/staging/qcacld-3.0"
+
+          test -d "$QCACLD"
+
+          echo "============================================================"
+          echo " POLICY-MANAGER VDEV CONNECTION-LIST TRACE"
+          echo "============================================================"
+
+          echo
+          echo "=== 1. pm_conc_connection_list DEFINITIONS / USES ==="
+
+          grep -RIn \
+            --include='*.c' \
+            --include='*.h' \
+            -E \
+            'pm_conc_connection_list' \
+            "$QCACLD" \
+            2>/dev/null || true
+
+          echo
+          echo "=== 2. CONNECTION-LIST UPDATE FUNCTIONS ==="
+
+          grep -RIn \
+            --include='*.c' \
+            --include='*.h' \
+            -E \
+            'policy_mgr_update_conc_list|policy_mgr_store_and_del_conn_info_by_vdev_id|store_and_del_conn_info' \
+            "$QCACLD" \
+            2>/dev/null || true
+
+          echo
+          echo "=== 3. ALL VDEV-ID CONNECTION OPERATIONS ==="
+
+          grep -RIn \
+            --include='*.c' \
+            --include='*.h' \
+            -E \
+            'vdev_id.*conn_info|conn_info.*vdev_id|vdev_id.*pm_conc|pm_conc.*vdev_id' \
+            "$QCACLD" \
+            2>/dev/null || true
+
+          echo
+          echo "=== 4. POLICY-MANAGER VDEV CALLBACKS ==="
+
+          grep -RIn \
+            --include='*.c' \
+            -E \
+            'policy_mgr_vdev_obj_(create|destroy|status)_cb' \
+            "$QCACLD" \
+            2>/dev/null || true
+
+          echo
+          echo "=== 5. VDEV OBJECT MANAGER REGISTRATION ==="
+
+          grep -RIn \
+            --include='*.c' \
+            --include='*.h' \
+            -E \
+            'wlan_objmgr_(register|unregister).*vdev|register_vdev|vdev_obj_(create|destroy|status)' \
+            "$QCACLD" \
+            2>/dev/null || true
+
+          echo
+          echo "=== 6. policy_mgr_update_connection_info() ==="
+
+          grep -RIn \
+            --include='*.c' \
+            -B20 -A45 \
+            'policy_mgr_update_connection_info[[:space:]]*(' \
+            "$QCACLD" \
+            2>/dev/null || true
+
+          echo
+          echo "=== 7. policy_mgr_update_conc_list() ==="
+
+          grep -RIn \
+            --include='*.c' \
+            -B25 -A60 \
+            'policy_mgr_update_conc_list[[:space:]]*(' \
+            "$QCACLD" \
+            2>/dev/null || true
+
+          echo
+          echo "=== 8. store/delete VDEV CONNECTION INFO ==="
+
+          grep -RIn \
+            --include='*.c' \
+            -B25 -A60 \
+            'policy_mgr_store_and_del_conn_info_by_vdev_id[[:space:]]*(' \
+            "$QCACLD" \
+            2>/dev/null || true
+
+          echo
+          echo "=== 9. ALL POLICY-MANAGER FILES ==="
+
+          find "$QCACLD/components/cmn_services/policy_mgr" \
+            -type f \
+            \( -name '*.c' -o -name '*.h' \) \
+            -print \
+            | sort
+
+          echo
+          echo "============================================================"
+          echo " POLICY-MANAGER TRACE COMPLETE"
+          echo "============================================================"
+
       
                          
       - name: Build kernel
