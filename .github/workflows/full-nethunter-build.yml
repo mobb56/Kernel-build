@@ -8183,6 +8183,33 @@ jobs:
           echo " POLICY-MANAGER TRACE COMPLETE"
           echo "============================================================"
 
+
+      
+      - name: Inspect exact policy-manager connection-list writers
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_core.c"
+
+          echo "=== CORE LIST WRITER AROUND 598 ==="
+          sed -n '560,625p' "$PM"
+
+          echo
+          echo "=== CORE LIST WRITER AROUND 820 ==="
+          sed -n '810,860p' "$PM"
+
+          echo
+          echo "=== CORE UPDATE AROUND 950 ==="
+          sed -n '940,985p' "$PM"
+
+          echo
+          echo "=== FUNCTION NAMES TOUCHING THE LIST ==="
+
+          grep -n -B5 -A5 \
+            -E 'pm_conc_connection_list\[conn_index\].*(vdev_id|in_use)|qdf_mem_copy.*pm_conc_connection_list' \
+            "$PM" || true
       
                          
       - name: Build kernel
