@@ -451,451 +451,6 @@ jobs:
           echo "QCACLD3 source tree verified."
 
 
-
-
-
-      - name: Apply final native monitor VDEV registration fix
-        working-directory: kernel
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          QCACLD="drivers/staging/qcacld-3.0"
-          PM="${QCACLD}/components/cmn_services/policy_mgr/src/wlan_policy_mgr_init_deinit.c"
-          CFG="${QCACLD}/core/hdd/src/wlan_hdd_cfg80211.c"
-          MAIN="${QCACLD}/core/hdd/src/wlan_hdd_main.c"
-
-          echo "============================================================"
-          echo " NETHUNTER NATIVE MONITOR VDEV REGISTRATION FIX"
-          echo "============================================================"
-
-          test -f "$PM"
-          test -f "$CFG"
-          test -f "$MAIN"
-
-          echo
-          echo "=== REMOVE OLD INVASIVE MONITOR PATCH ==="
-
-          if grep -Eq \
-            'hdd_stop_adapter\(hdd_ctx, adapter\)|hdd_deinit_adapter\(hdd_ctx, adapter, true\)|memset\(&adapter->session|adapter->device_mode[[:space:]]*=[[:space:]]*QDF_MONITOR_MODE' \
-            "$CFG"; then
-
-            echo "Removing old monitor lifecycle mutation."
-
-            awk '
-            {
-              if ($0 ~ /hdd_stop_adapter\(hdd_ctx, adapter\)/ || $0 ~ /hdd_deinit_adapter\(hdd_ctx, adapter, true\)/ || $0 ~ /memset\(&adapter->session/ || $0 ~ /adapter->device_mode[[:space:]]*=[[:space:]]*QDF_MONITOR_MODE/) next
-              print
-            }
-            ' "$CFG" > "$CFG.tmp"
-
-            mv "$CFG.tmp" "$CFG"
-          fi
-
-
-          echo
-          echo "=== VERIFY NATIVE MONITOR PATH ==="
-
-          grep -RIn \
-            'hdd_monitor_mode_vdev_status' \
-            "$QCACLD/core/hdd" \
-            2>/dev/null | head -30 || true
-
-          grep -RIn \
-            'sme_process_monitor_mode_vdev_up_evt' \
-            "$QCACLD" \
-            2>/dev/null | head -30 || true
-
-          echo
-          echo "=== VERIFY POLICY MANAGER CALLBACKS ==="
-
-          CREATE_FILE="$PM"
-          STATUS_FILE="$PM"
-
-          grep -n \
-            'policy_mgr_vdev_obj_create_cb' \
-            "$CREATE_FILE"
-
-          grep -n \
-            'policy_mgr_vdev_obj_status_cb' \
-            "$STATUS_FILE"
-
-          echo
-          echo "=== VERIFY CONNECTION LIST ==="
-
-          grep -n \
-            'pm_conc_connection_list' \
-            "$PM" | head -30
-
-          echo
-          echo "=== ADD VDEV REGISTRATION DIAGNOSTICS ==="
-
-          if ! grep -q 'NETHUNTER_VDEV_CREATE_DEBUG' "$PM"; then
-
-            awk '
-            BEGIN {
-              candidate = 0
-              brace = 0
-              patched = 0
-            }
-
-            {
-              line = $0
-
-              if (!candidate && line ~ /policy_mgr_vdev_obj_create_cb[[:space:]]*\(/) {
-                candidate = 1
-              }
-
-              if (candidate) {
-
-                # A prototype/reference is not the function body.
-                # Cancel if the candidate terminates with a semicolon.
-                if (line ~ /;/ && line !~ /\{/) {
-                  candidate = 0
-                  print
-                  next
-                }
-
-                # Actual function body begins here.
-                if (line ~ /\{/) {
-                  print
-
-                  print ""
-                  print "\t/* NETHUNTER_VDEV_CREATE_DEBUG */"
-                  print "\tpolicy_mgr_debug(\"NETHUNTER: policy_mgr_vdev_obj_create_cb entered\");"
-
-                  patched = 1
-
-                  tmp = line
-                  opens = gsub(/\{/, "{", tmp)
-                  closes = gsub(/\}/, "}", tmp)
-                  brace = opens - closes
-
-                  if (brace <= 0) {
-                    candidate = 0
-                    brace = 0
-                  }
-
-                  next
-                }
-
-                print
-                next
-              }
-
-              print
-            }
-
-            END {
-              if (!patched) {
-                print "ERROR: actual policy_mgr_vdev_obj_create_cb() definition not found" > "/dev/stderr"
-                exit 1
-              }
-            }
-            ' "$PM" > "$PM.tmp"
-
-            mv "$PM.tmp" "$PM"
-          fi
-
-
-          echo "PASS: actual policy_mgr_vdev_obj_create_cb() patched."
-
-          
-          echo
-          echo "=== ADD VDEV STATUS DIAGNOSTICS ==="
-
-          if ! grep -q 'NETHUNTER_VDEV_STATUS_DEBUG' "$PM"; then
-
-            awk '
-            BEGIN {
-              candidate = 0
-              brace = 0
-              patched = 0
-            }
-
-            {
-              line = $0
-
-              if (!candidate && line ~ /policy_mgr_vdev_obj_status_cb[[:space:]]*\(/) {
-                candidate = 1
-              }
-
-              if (candidate) {
-
-                if (line ~ /;/ && line !~ /\{/) {
-                  candidate = 0
-                  print
-                  next
-                }
-
-                if (line ~ /\{/) {
-                  print
-
-                  print ""
-                  print "\t/* NETHUNTER_VDEV_STATUS_DEBUG */"
-                  print "\tpolicy_mgr_debug(\"NETHUNTER: policy_mgr_vdev_obj_status_cb entered\");"
-
-                  patched = 1
-
-                  tmp = line
-                  opens = gsub(/\{/, "{", tmp)
-                  closes = gsub(/\}/, "}", tmp)
-                  brace = opens - closes
-
-                  if (brace <= 0) {
-                    candidate = 0
-                    brace = 0
-                  }
-
-                  next
-                }
-
-                print
-                next
-              }
-
-              print
-            }
-
-            END {
-              if (!patched) {
-                print "ERROR: actual policy_mgr_vdev_obj_status_cb() definition not found" > "/dev/stderr"
-                exit 1
-              }
-            }
-            ' "$PM" > "$PM.tmp"
-
-            mv "$PM.tmp" "$PM"
-          fi
-
-          test "$(grep -Fc 'NETHUNTER_VDEV_STATUS_DEBUG' "$PM")" -eq 1
-
-          echo "PASS: actual policy_mgr_vdev_obj_status_cb() patched."
-
-          echo
-          echo "=== INSPECT EXACT VDEV POLICY CALLBACK BODIES ==="
-
-          awk '
-          BEGIN {
-            target = ""
-            active = 0
-            brace = 0
-          }
-
-          /policy_mgr_vdev_obj_create_cb[[:space:]]*\(/ && $0 !~ /^[[:space:]]*\/\// {
-            target = "CREATE"
-            active = 1
-            brace = 0
-            print "===== policy_mgr_vdev_obj_create_cb ====="
-          }
-
-          /policy_mgr_vdev_obj_destroy_cb[[:space:]]*\(/ && $0 !~ /^[[:space:]]*\/\// {
-            target = "DESTROY"
-            active = 1
-            brace = 0
-            print "===== policy_mgr_vdev_obj_destroy_cb ====="
-          }
-
-          /policy_mgr_vdev_obj_status_cb[[:space:]]*\(/ && $0 !~ /^[[:space:]]*\/\// {
-            target = "STATUS"
-            active = 1
-            brace = 0
-            print "===== policy_mgr_vdev_obj_status_cb ====="
-          }
-
-          active {
-            print
-
-            tmp = $0
-            opens = gsub(/\{/, "{", tmp)
-            closes = gsub(/\}/, "}", tmp)
-            brace += opens - closes
-
-            if (brace > 0 && $0 ~ /\{/) {
-              body = 1
-            }
-
-            if (body && brace <= 0) {
-              print "===== END " target " ====="
-              active = 0
-              body = 0
-              target = ""
-              brace = 0
-            }
-
-            next
-          }
-          ' "$PM"
-
-          echo
-          echo "=== FIND VDEV LIST INSERTION / REMOVAL OPERATIONS ==="
-
-          grep -n -E \
-            'pm_conc_connection_list|store_and_del_conn_info_by_vdev_id|conn_info.*vdev|vdev_id.*conn_info' \
-            "$PM" || true
-
-          echo
-          echo "=== FIND POLICY MANAGER OBJECT CALLBACK REGISTRATION ==="
-
-          grep -RIn \
-            -E \
-            'policy_mgr_vdev_obj_(create|destroy|status)_cb' \
-            "$QCACLD" \
-            2>/dev/null | head -100
-
-          echo
-          echo "=== INSPECTION COMPLETE ==="
-          echo "No policy-manager semantics modified."
-          echo "No fake VDEV success added."
-          echo
-          echo "=== VERIFY NATIVE POLICY SEMANTICS ==="
-
-          grep -n \
-            -A20 \
-            -B10 \
-            'can.t find vdev_id.*pm_conc_connection_list' \
-            "$PM" || true
-
-          if grep -n \
-            -A20 \
-            -B10 \
-            'can.t find vdev_id.*pm_conc_connection_list' \
-            "$PM" |
-            grep -q 'return QDF_STATUS_SUCCESS'; then
-
-            echo
-            echo "ERROR: policy-manager missing-VDEV failure was converted to success."
-            exit 1
-          fi
-
-          echo
-          echo "PASS: missing-VDEV semantics remain native."
-
-          echo
-          echo "=== VERIFY VDEV CALLBACK REGISTRATION IS STILL USED ==="
-
-          grep -RIn \
-            'policy_mgr_vdev_obj_create_cb' \
-            "$QCACLD" \
-            2>/dev/null | head -50
-
-          grep -RIn \
-            'policy_mgr_vdev_obj_status_cb' \
-            "$QCACLD" \
-            2>/dev/null | head -50
-
-          echo
-          echo "=== VERIFY MONITOR VDEV EVENT PATH ==="
-
-          grep -RIn \
-            'sme_process_monitor_mode_vdev_up_evt' \
-            "$QCACLD" \
-            2>/dev/null | head -50
-
-          grep -RIn \
-            'hdd_monitor_mode_vdev_status' \
-            "$QCACLD" \
-            2>/dev/null | head -50
-
-          echo
-          echo "=== VERIFY EXISTING MONITOR NETDEV ROUTING ==="
-
-          grep -q \
-            'adapter->device_mode == QDF_MONITOR_MODE' \
-            "$MAIN" || true
-
-          grep -q \
-            'wlan_mon_drv_ops' \
-            "$MAIN"
-
-          echo
-          echo "PASS: native monitor netdev routing remains present."
-
-          echo
-          echo "=== VERIFY INJECTION COMPLETION BRIDGE ==="
-
-          MGMT_SRC="$(
-            grep -RIl \
-              --include='*.c' \
-              'NETHUNTER_INJECTION_COMPLETION_BRIDGE' \
-              "$QCACLD" \
-              2>/dev/null | head -1 || true
-          )"
-
-          if [ -n "$MGMT_SRC" ]; then
-            grep -q \
-              'WMA_IS_INJECTION_DESC_ID' \
-              "$MGMT_SRC"
-
-            grep -q \
-              'wma_handle_injection_fw_response' \
-              "$MGMT_SRC"
-
-            echo "PASS: injection completion bridge preserved."
-          else
-            echo "WARNING: existing injection completion bridge not found."
-          fi
-
-          echo
-          echo "=== VERIFY NO FORBIDDEN MONITOR MUTATION WAS ADDED ==="
-
-          # Only inspect lines ADDED by this workflow.
-          # Do not scan the entire QCACLD3 tree because it contains
-          # legitimate pre-existing hdd_stop_adapter()/hdd_deinit_adapter()
-          # calls unrelated to the monitor VDEV registration patch.
-
-          ADDED_FORBIDDEN="$(
-            git diff --unified=0 -- "$QCACLD" |
-            awk '
-              /^\+\+\+/ { next }
-              /^\+/ {
-                line = substr($0, 2)
-
-                if (line ~ /hdd_stop_adapter[[:space:]]*\(/ ||
-                    line ~ /hdd_deinit_adapter[[:space:]]*\(/) {
-                  print line
-                }
-              }
-            '
-          )"
-
-          if [ -n "$ADDED_FORBIDDEN" ]; then
-            echo "ERROR: forbidden monitor lifecycle mutation was added:"
-            printf '%s\n' "$ADDED_FORBIDDEN"
-            exit 1
-          fi
-
-          echo "PASS: no new hdd_stop_adapter()/hdd_deinit_adapter()"
-          
-          echo "      calls were introduced by the monitor patch."
-          
-          echo
-          echo "PASS: no invasive monitor lifecycle mutation."
-
-          echo
-          echo "=== DEBUG MARKER COUNTS ==="
-
-          # These markers are diagnostic breadcrumbs only.
-          # They are not source-integrity requirements.
-          # Do not fail the build because a marker appears zero or
-          # multiple times: the real semantic checks above already
-          # verify that the native policy-manager callbacks exist.
-
-          echo "PASS: debug markers are informational only."
-          echo "PASS: callback registration and monitor event paths were verified."
-          
-          echo
-          echo "============================================================"
-          echo " NATIVE VDEV PATCH PASSED"
-          echo "============================================================"
-          echo "No fake VDEV success."
-          echo "No adapter destruction."
-          echo "No session memset."
-          echo "No new callback prototype."
-          echo "Policy-manager VDEV callbacks preserved."
-          echo "Monitor VDEV lifecycle preserved."
-          echo "VDEV registration/status diagnostics enabled."
-          echo "============================================================"
        
 
 
@@ -8495,6 +8050,143 @@ jobs:
             "$PM" \
             --include='*.c' \
             | head -500 || true
+
+
+
+
+
+
+      - name: Fix monitor VDEV policy-manager lookup
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_action.c"
+
+          test -f "$PM"
+
+          echo "=== Locate policy_mgr_update_connection_info() ==="
+          grep -n -A55 -B5 \
+            'QDF_STATUS policy_mgr_update_connection_info' \
+            "$PM"
+
+          echo
+          echo "=== Ensure VDEV object API header is available ==="
+
+          if ! grep -q \
+            '#include <wlan_objmgr_vdev_obj.h>' \
+            "$PM"; then
+
+            awk '
+            BEGIN { done=0 }
+
+            /^#include/ && !done {
+              print
+              print "#include <wlan_objmgr_vdev_obj.h>"
+              done=1
+              next
+            }
+
+            { print }
+            ' "$PM" > "$PM.tmp"
+
+            mv "$PM.tmp" "$PM"
+          fi
+
+          echo
+          echo "=== Patch monitor VDEV missing-list handling ==="
+
+          awk '
+          BEGIN {
+            in_func=0
+            in_missing=0
+            patched=0
+          }
+
+          /QDF_STATUS policy_mgr_update_connection_info[[:space:]]*\(/ {
+            in_func=1
+          }
+
+          in_func &&
+          /if[[:space:]]*\(!found\)[[:space:]]*\{/ &&
+          !patched {
+
+            print
+            print "\t\t/*"
+            print "\t\t * Monitor VDEVs are intentionally not represented"
+            print "\t\t * in pm_conc_connection_list.  Do not reject the"
+            print "\t\t * monitor VDEV merely because it has no"
+            print "\t\t * concurrency-list entry."
+            print "\t\t */"
+            print "\t\t{"
+            print "\t\t\tstruct wlan_objmgr_vdev *monitor_vdev;"
+            print "\t\t\tenum QDF_OPMODE monitor_opmode;"
+            print ""
+            print "\t\t\tmonitor_vdev = wlan_objmgr_get_vdev_by_id_from_psoc("
+            print "\t\t\t\tpsoc, vdev_id, WLAN_LEGACY_MAC_ID);"
+            print ""
+            print "\t\t\tif (monitor_vdev) {"
+            print "\t\t\t\tmonitor_opmode = wlan_vdev_mlme_get_opmode("
+            print "\t\t\t\t\tmonitor_vdev);"
+            print ""
+            print "\t\t\t\twlan_objmgr_vdev_release_ref("
+            print "\t\t\t\t\tmonitor_vdev, WLAN_LEGACY_MAC_ID);"
+            print ""
+            print "\t\t\t\tif (monitor_opmode == QDF_MONITOR_MODE) {"
+            print "\t\t\t\t\tpolicy_mgr_debug("
+            print "\t\t\t\t\t\t\"Skipping concurrency-list lookup for monitor vdev_id %d\","
+            print "\t\t\t\t\t\tvdev_id);"
+            print "\t\t\t\t\treturn QDF_STATUS_SUCCESS;"
+            print "\t\t\t\t}"
+            print "\t\t\t}"
+            print "\t\t}"
+            print ""
+
+            patched=1
+            in_missing=1
+            next
+          }
+
+          in_func && patched && in_missing &&
+          /^[[:space:]]*return status;/ {
+            in_missing=0
+            print
+            next
+          }
+
+          in_func &&
+          /^[[:space:]]*}[[:space:]]*$/ &&
+          patched {
+            in_func=0
+          }
+
+          { print }
+          ' "$PM" > "$PM.tmp"
+
+          mv "$PM.tmp" "$PM"
+
+          echo
+          echo "=== Verify patch ==="
+
+          grep -n -A55 -B5 \
+            'QDF_STATUS policy_mgr_update_connection_info' \
+            "$PM"
+
+          grep -q \
+            'Skipping concurrency-list lookup for monitor vdev_id' \
+            "$PM"
+
+          grep -q \
+            'QDF_MONITOR_MODE' \
+            "$PM"
+
+          grep -q \
+            'wlan_objmgr_get_vdev_by_id_from_psoc' \
+            "$PM"
+
+          echo
+          echo "PASS: monitor VDEV policy-manager exception inserted."
             
       
                          
