@@ -8458,6 +8458,43 @@ jobs:
 
           sed -n '565,620p' \
             drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_core.c
+
+
+
+
+
+      - name: Trace indirect connection-list update path
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src"
+
+          echo "=== ALL update_conn_list SYMBOL REFERENCES ==="
+          grep -R -n -E \
+            'update_conn_list|update_conn|store_and_del_conn_info|update_connection_info' \
+            "$PM" \
+            --include='*.c' \
+            --include='*.h' \
+            | head -500 || true
+
+          echo
+          echo "=== FUNCTION DECLARATIONS ==="
+          grep -R -n -E \
+            'policy_mgr_update_conn_list|policy_mgr_update_connection_info|policy_mgr_store_and_del_conn_info_by_vdev_id' \
+            "$PM" \
+            --include='*.c' \
+            --include='*.h' \
+            || true
+
+          echo
+          echo "=== CONNECTION-LIST WRITE FUNCTIONS ==="
+          grep -R -n -B4 -A12 -E \
+            'pm_conc_connection_list\[[^]]+\]\.(vdev_id|in_use)[[:space:]]*=' \
+            "$PM" \
+            --include='*.c' \
+            | head -500 || true
             
       
                          
