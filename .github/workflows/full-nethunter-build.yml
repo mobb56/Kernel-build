@@ -8388,6 +8388,41 @@ jobs:
           grep -n -E \
             'pm_conc_connection_list\[conn_index\]\.(mode|freq|bw|mac|chain_mask|original_nss|vdev_id|in_use|ch_flagext)' \
             "$PM"
+
+
+
+
+      - name: Trace policy-manager connection-list callers
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_core.c"
+
+          echo "=== EXACT WRITER ==="
+          sed -n '565,620p' "$PM"
+
+          echo
+          echo "=== ALL CALLS TO policy_mgr_update_conn_list ==="
+          grep -R -n \
+            -E 'policy_mgr_update_conn_list[[:space:]]*\(' \
+            drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr \
+            || true
+
+          echo
+          echo "=== FUNCTION DECLARATION ==="
+          grep -R -n -B5 -A15 \
+            'policy_mgr_update_conn_list[[:space:]]*(' \
+            drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src \
+            || true
+
+          echo
+          echo "=== VDEV-ID / MONITOR CALLER REFERENCES ==="
+          grep -R -n -E \
+            'policy_mgr_update_conn_list|MONITOR_MODE|monitor.*vdev|vdev_id' \
+            drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src \
+            | head -300 || true
       
                          
       - name: Build kernel
