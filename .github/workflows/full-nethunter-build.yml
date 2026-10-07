@@ -8187,7 +8187,56 @@ jobs:
 
           echo
           echo "PASS: monitor VDEV policy-manager exception inserted."
-            
+
+
+
+
+      - name: Verify patched policy manager source before build
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+           PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_action.c"
+
+          echo "=== POLICY MANAGER SOURCE ==="
+          test -f "$PM"
+
+           echo
+           echo "=== PATCH MARKERS ==="
+           grep -n -F \
+          'Skipping concurrency-list lookup for monitor vdev_id' \
+          "$PM" || true
+
+           grep -n -F \
+          'Monitor VDEVs are intentionally not represented' \
+          "$PM" || true
+
+           echo
+           echo "=== ORIGINAL ERROR ==="
+           grep -n -F \
+           "can't find vdev_id %d in pm_conc_connection_list" \
+           "$PM" || true
+
+          echo
+          echo "=== FUNCTION ==="
+            grep -n -A100 -B10 \
+          'QDF_STATUS policy_mgr_update_connection_info' \
+          "$PM"
+
+          echo
+          echo "=== ALL COPIES OF policy_mgr_update_connection_info ==="
+          grep -RIn \
+           --include='*.c' \
+          'QDF_STATUS policy_mgr_update_connection_info' \
+          drivers/staging/qcacld-3.0
+
+          echo
+          echo "=== SOURCE HASH ==="
+           sha256sum "$PM"
+
+           echo
+           echo "=== PRE-BUILD POLICY SOURCE CHECK COMPLETE ==="
       
                          
       - name: Build kernel
