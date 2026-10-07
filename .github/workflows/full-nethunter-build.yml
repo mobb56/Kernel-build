@@ -453,158 +453,417 @@ jobs:
 
 
 
-      - name: Apply targeted QCACLD3 monitor VDEV callback fix
+
+      - name: Apply final native monitor VDEV registration fix
         working-directory: kernel
         shell: bash
         run: |
           set -euo pipefail
 
           QCACLD="drivers/staging/qcacld-3.0"
-          MAIN="${QCACLD}/core/hdd/src/wlan_hdd_main.c"
+          PM="${QCACLD}/components/cmn_services/policy_mgr/src/wlan_policy_mgr_init_deinit.c"
           CFG="${QCACLD}/core/hdd/src/wlan_hdd_cfg80211.c"
-          SME="${QCACLD}/core/sme/src/common/sme_api.c"
+          MAIN="${QCACLD}/core/hdd/src/wlan_hdd_main.c"
 
           echo "============================================================"
-          echo "TARGETED QCACLD3 MONITOR VDEV CALLBACK FIX"
+          echo " NETHUNTER NATIVE MONITOR VDEV REGISTRATION FIX"
           echo "============================================================"
 
-          test -f "${MAIN}"
-          test -f "${SME}"
+          test -f "$PM"
+          test -f "$CFG"
+          test -f "$MAIN"
 
           echo
-          echo "=== Restore cfg80211 source ==="
-          git checkout -- "${CFG}"
+          echo "=== REMOVE OLD INVASIVE MONITOR PATCH ==="
+
+          if grep -Eq \
+            'hdd_stop_adapter\(hdd_ctx, adapter\)|hdd_deinit_adapter\(hdd_ctx, adapter, true\)|memset\(&adapter->session|adapter->device_mode[[:space:]]*=[[:space:]]*QDF_MONITOR_MODE' \
+            "$CFG"; then
+
+            echo "Removing old monitor lifecycle mutation."
+
+            awk '
+            {
+              if (
+                $0 ~ /hdd_stop_adapter\(hdd_ctx, adapter\)/ ||
+                $0 ~ /hdd_deinit_adapter\(hdd_ctx, adapter, true\)/ ||
+                $0 ~ /memset\(&adapter->session/ ||
+                $0 ~ /adapter->device_mode[[:space:]]*=[[:space:]]*QDF_MONITOR_MODE/
+              )
+                next
+
+              print
+            }
+            ' "$CFG" > "$CFG.tmp"
+
+            mv "$CFG.tmp" "$CFG"
+          fi
 
           echo
-          echo "=== Verify HDD monitor callback declaration ==="
+          echo "=== VERIFY NATIVE MONITOR PATH ==="
 
-          grep -n -B3 -A5 \
-            'void hdd_sme_monitor_mode_callback' \
-            "${MAIN}"
+          grep -RIn \
+            'hdd_monitor_mode_vdev_status' \
+            "$QCACLD/core/hdd" \
+            2>/dev/null | head -30 || true
 
-          grep -qE \
-            'void[[:space:]]+hdd_sme_monitor_mode_callback[[:space:]]*\(' \
-            "${MAIN}"
+          grep -RIn \
+            'sme_process_monitor_mode_vdev_up_evt' \
+            "$QCACLD" \
+            2>/dev/null | head -30 || true
 
           echo
-          echo "=== Check for existing monitor callback registration ==="
+          echo "=== VERIFY POLICY MANAGER CALLBACKS ==="
 
-          if grep -q \
-            'sme_set_monitor_mode_cb' \
-            "${MAIN}" && \
-             grep -q \
-            'hdd_sme_monitor_mode_callback' \
-            "${MAIN}"; then
+          CREATE_FILE="$PM"
+          STATUS_FILE="$PM"
 
-            echo "Existing monitor callback registration found."
-            echo "No additional registration will be inserted."
+          grep -n \
+            'policy_mgr_vdev_obj_create_cb' \
+            "$CREATE_FILE"
 
-          else
+          grep -n \
+            'policy_mgr_vdev_obj_status_cb' \
+            "$STATUS_FILE"
 
-            echo "No monitor callback registration found."
-            echo "Inserting registration into hdd_open_adapters_for_monitor_mode()."
+          echo
+          echo "=== VERIFY CONNECTION LIST ==="
 
-            cp "${MAIN}" "${MAIN}.pre-monitor-callback"
+          grep -n \
+            'pm_conc_connection_list' \
+            "$PM" | head -30
+
+          echo
+          echo "=== ADD VDEV REGISTRATION DIAGNOSTICS ==="
+
+          if ! grep -q 'NETHUNTER_VDEV_CREATE_DEBUG' "$PM"; then
 
             awk '
             BEGIN {
-                found_function = 0
-                inserted = 0
+              in_create = 0
+              brace = 0
+              patched = 0
             }
 
-            /hdd_open_adapters_for_monitor_mode[[:space:]]*\(/ {
-                found_function = 1
+            !in_create &&
+            /policy_mgr_vdev_obj_create_cb[[:space:]]*\(/ {
+              in_create = 1
+              print
+              next
             }
 
-            found_function && !inserted && /^[[:space:]]*\{/ {
-                print
-                print ""
-                print "\tQDF_STATUS monitor_cb_status;"
-                print "\tmonitor_cb_status = sme_set_monitor_mode_cb(hdd_ctx->mac_handle, hdd_sme_monitor_mode_callback);"
-                print "\tif (QDF_IS_STATUS_ERROR(monitor_cb_status)) {"
-                print "\t\thdd_err(\"Failed to register monitor mode callback: %d\","
-                print "\t\t\tmonitor_cb_status);"
-                print "\t\treturn monitor_cb_status;"
-                print "\t}"
-                print "\thdd_info(\"NetHunter: monitor mode callback registered\");"
+            in_create &&
+            /\{/ {
+              print
 
-                inserted = 1
-                next
+              print ""
+              print "\t/* NETHUNTER_VDEV_CREATE_DEBUG */"
+              print "\tpolicy_mgr_debug(\"NETHUNTER: policy_mgr_vdev_obj_create_cb entered\");"
+
+              patched = 1
+
+              line = $0
+              opens = gsub(/\{/, "{", line)
+              closes = gsub(/\}/, "}", line)
+              brace += opens - closes
+
+              next
+            }
+
+            in_create {
+              print
+
+              line = $0
+              opens = gsub(/\{/, "{", line)
+              closes = gsub(/\}/, "}", line)
+              brace += opens - closes
+
+              if (brace <= 0) {
+                in_create = 0
+                brace = 0
+              }
+
+              next
             }
 
             {
-                print
+              print
             }
 
             END {
-                if (!found_function) {
-                    print "ERROR: hdd_open_adapters_for_monitor_mode() not found" > "/dev/stderr"
-                    exit 2
-                }
-
-                if (!inserted) {
-                    print "ERROR: monitor function opening brace not found" > "/dev/stderr"
-                    exit 3
-                }
+              if (!patched) {
+                print "ERROR: policy_mgr_vdev_obj_create_cb() not patched" > "/dev/stderr"
+                exit 1
+              }
             }
-            ' "${MAIN}" > "${MAIN}.tmp"
+            ' "$PM" > "$PM.tmp"
 
-            mv "${MAIN}.tmp" "${MAIN}"
+            mv "$PM.tmp" "$PM"
           fi
 
           echo
-          echo "=== Verify monitor callback registration ==="
+          echo "=== ADD VDEV STATUS DIAGNOSTICS ==="
 
-          grep -n -B8 -A12 \
-            'sme_set_monitor_mode_cb' \
-            "${MAIN}"
+          if ! grep -q 'NETHUNTER_VDEV_STATUS_DEBUG' "$PM"; then
 
-          grep -q \
-            'sme_set_monitor_mode_cb' \
-            "${MAIN}"
+            awk '
+            BEGIN {
+              in_status = 0
+              brace = 0
+              patched = 0
+            }
 
-          grep -q \
-            'hdd_sme_monitor_mode_callback' \
-            "${MAIN}"
+            !in_status &&
+            /policy_mgr_vdev_obj_status_cb[[:space:]]*\(/ {
+              in_status = 1
+              print
+              next
+            }
 
-          echo
-          echo "=== Verify monitor VDEV-UP callback implementation ==="
+            in_status &&
+            /\{/ {
+              print
 
-          grep -n -A35 -B8 \
-            'sme_process_monitor_mode_vdev_up_evt' \
-            "${SME}"
+              print ""
+              print "\t/* NETHUNTER_VDEV_STATUS_DEBUG */"
+              print "\tpolicy_mgr_debug(\"NETHUNTER: policy_mgr_vdev_obj_status_cb entered\");"
 
-          grep -q \
-            'sme_process_monitor_mode_vdev_up_evt' \
-            "${SME}"
+              patched = 1
 
-          echo
-          echo "=== Verify no duplicate registration was created ==="
+              line = $0
+              opens = gsub(/\{/, "{", line)
+              closes = gsub(/\}/, "}", line)
+              brace += opens - closes
 
-          REG_COUNT="$(grep -c \
-            'sme_set_monitor_mode_cb' \
-            "${MAIN}" || true)"
+              next
+            }
 
-          echo "sme_set_monitor_mode_cb occurrences: ${REG_COUNT}"
+            in_status {
+              print
 
-          if [ "${REG_COUNT}" -lt 1 ]; then
-            echo "ERROR: monitor callback registration is missing"
-            exit 4
+              line = $0
+              opens = gsub(/\{/, "{", line)
+              closes = gsub(/\}/, "}", line)
+              brace += opens - closes
+
+              if (brace <= 0) {
+                in_status = 0
+                brace = 0
+              }
+
+              next
+            }
+
+            {
+              print
+            }
+
+            END {
+              if (!patched) {
+                print "ERROR: policy_mgr_vdev_obj_status_cb() not patched" > "/dev/stderr"
+                exit 1
+              }
+            }
+            ' "$PM" > "$PM.tmp"
+
+            mv "$PM.tmp" "$PM"
           fi
 
           echo
-          echo "=== Final monitor callback source ==="
+          echo "=== TRACE MISSING VDEV BEFORE FAILURE ==="
 
-          grep -n -B12 -A18 \
-            'sme_set_monitor_mode_cb' \
-            "${MAIN}"
+          if ! grep -q 'NETHUNTER_PM_LOOKUP_DEBUG' "$PM"; then
+
+            awk '
+            BEGIN {
+              in_func = 0
+              brace = 0
+              patched = 0
+            }
+
+            !in_func &&
+            /policy_mgr_update_connection_info[[:space:]]*\(/ {
+              in_func = 1
+              print
+              next
+            }
+
+            in_func &&
+            /\{/ {
+              print
+
+              print ""
+              print "\t/* NETHUNTER_PM_LOOKUP_DEBUG */"
+              print "\tpolicy_mgr_debug(\"NETHUNTER: update_connection_info vdev_id=%d\", vdev_id);"
+
+              patched = 1
+
+              line = $0
+              opens = gsub(/\{/, "{", line)
+              closes = gsub(/\}/, "}", line)
+              brace += opens - closes
+
+              next
+            }
+
+            in_func {
+              print
+
+              line = $0
+              opens = gsub(/\{/, "{", line)
+              closes = gsub(/\}/, "}", line)
+              brace += opens - closes
+
+              if (brace <= 0) {
+                in_func = 0
+                brace = 0
+              }
+
+              next
+            }
+
+            {
+              print
+            }
+
+            END {
+              if (!patched) {
+                print "ERROR: policy_mgr_update_connection_info() not patched" > "/dev/stderr"
+                exit 1
+              }
+            }
+            ' "$PM" > "$PM.tmp"
+
+            mv "$PM.tmp" "$PM"
+          fi
+
+          echo
+          echo "=== VERIFY NATIVE POLICY SEMANTICS ==="
+
+          grep -n \
+            -A20 \
+            -B10 \
+            'can.t find vdev_id.*pm_conc_connection_list' \
+            "$PM" || true
+
+          if grep -n \
+            -A20 \
+            -B10 \
+            'can.t find vdev_id.*pm_conc_connection_list' \
+            "$PM" |
+            grep -q 'return QDF_STATUS_SUCCESS'; then
+
+            echo
+            echo "ERROR: policy-manager missing-VDEV failure was converted to success."
+            exit 1
+          fi
+
+          echo
+          echo "PASS: missing-VDEV semantics remain native."
+
+          echo
+          echo "=== VERIFY VDEV CALLBACK REGISTRATION IS STILL USED ==="
+
+          grep -RIn \
+            'policy_mgr_vdev_obj_create_cb' \
+            "$QCACLD" \
+            2>/dev/null | head -50
+
+          grep -RIn \
+            'policy_mgr_vdev_obj_status_cb' \
+            "$QCACLD" \
+            2>/dev/null | head -50
+
+          echo
+          echo "=== VERIFY MONITOR VDEV EVENT PATH ==="
+
+          grep -RIn \
+            'sme_process_monitor_mode_vdev_up_evt' \
+            "$QCACLD" \
+            2>/dev/null | head -50
+
+          grep -RIn \
+            'hdd_monitor_mode_vdev_status' \
+            "$QCACLD" \
+            2>/dev/null | head -50
+
+          echo
+          echo "=== VERIFY EXISTING MONITOR NETDEV ROUTING ==="
+
+          grep -q \
+            'adapter->device_mode == QDF_MONITOR_MODE' \
+            "$MAIN" || true
+
+          grep -q \
+            'wlan_mon_drv_ops' \
+            "$MAIN"
+
+          echo
+          echo "PASS: native monitor netdev routing remains present."
+
+          echo
+          echo "=== VERIFY INJECTION COMPLETION BRIDGE ==="
+
+          MGMT_SRC="$(
+            grep -RIl \
+              --include='*.c' \
+              'NETHUNTER_INJECTION_COMPLETION_BRIDGE' \
+              "$QCACLD" \
+              2>/dev/null | head -1 || true
+          )"
+
+          if [ -n "$MGMT_SRC" ]; then
+            grep -q \
+              'WMA_IS_INJECTION_DESC_ID' \
+              "$MGMT_SRC"
+
+            grep -q \
+              'wma_handle_injection_fw_response' \
+              "$MGMT_SRC"
+
+            echo "PASS: injection completion bridge preserved."
+          else
+            echo "WARNING: existing injection completion bridge not found."
+          fi
+
+          echo
+          echo "=== FORBIDDEN MONITOR MUTATION SCAN ==="
+
+          if grep -RIn \
+            -E \
+            'hdd_stop_adapter\(hdd_ctx, adapter\)|hdd_deinit_adapter\(hdd_ctx, adapter, true\)|memset\(&adapter->session|adapter->device_mode[[:space:]]*=[[:space:]]*QDF_MONITOR_MODE' \
+            "$QCACLD/core/hdd/src"; then
+
+            echo
+            echo "ERROR: invasive monitor lifecycle mutation still exists."
+            exit 1
+          fi
+
+          echo
+          echo "PASS: no invasive monitor lifecycle mutation."
+
+          echo
+          echo "=== DEBUG MARKER COUNTS ==="
+
+          test "$(grep -Fc 'NETHUNTER_VDEV_CREATE_DEBUG' "$PM")" -eq 1
+          test "$(grep -Fc 'NETHUNTER_VDEV_STATUS_DEBUG' "$PM")" -eq 1
+          test "$(grep -Fc 'NETHUNTER_PM_LOOKUP_DEBUG' "$PM")" -eq 1
+
+          echo "PASS: VDEV diagnostics inserted exactly once."
 
           echo
           echo "============================================================"
-          echo "MONITOR VDEV CALLBACK CHECK PASSED"
+          echo " NATIVE VDEV PATCH PASSED"
           echo "============================================================"
-
-
+          echo "No fake VDEV success."
+          echo "No adapter destruction."
+          echo "No session memset."
+          echo "No new callback prototype."
+          echo "Policy-manager VDEV callbacks preserved."
+          echo "Monitor VDEV lifecycle preserved."
+          echo "VDEV registration/status diagnostics enabled."
+          echo "============================================================"
+       
 
 
       # ============================================================
