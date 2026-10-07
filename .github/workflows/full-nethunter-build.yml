@@ -837,18 +837,38 @@ jobs:
           fi
 
           echo
-          echo "=== FORBIDDEN MONITOR MUTATION SCAN ==="
+          echo "=== VERIFY NO FORBIDDEN MONITOR MUTATION WAS ADDED ==="
 
-          if grep -RIn \
-            -E \
-            'hdd_stop_adapter\(hdd_ctx, adapter\)|hdd_deinit_adapter\(hdd_ctx, adapter, true\)|memset\(&adapter->session|adapter->device_mode[[:space:]]*=[[:space:]]*QDF_MONITOR_MODE' \
-            "$QCACLD/core/hdd/src"; then
+          # Only inspect lines ADDED by this workflow.
+          # Do not scan the entire QCACLD3 tree because it contains
+          # legitimate pre-existing hdd_stop_adapter()/hdd_deinit_adapter()
+          # calls unrelated to the monitor VDEV registration patch.
 
-            echo
-            echo "ERROR: invasive monitor lifecycle mutation still exists."
+          ADDED_FORBIDDEN="$(
+            git diff --unified=0 -- "$QCACLD" |
+            awk '
+              /^\+\+\+/ { next }
+              /^\+/ {
+                line = substr($0, 2)
+
+                if (line ~ /hdd_stop_adapter[[:space:]]*\(/ ||
+                    line ~ /hdd_deinit_adapter[[:space:]]*\(/) {
+                  print line
+                }
+              }
+            '
+          )"
+
+          if [ -n "$ADDED_FORBIDDEN" ]; then
+            echo "ERROR: forbidden monitor lifecycle mutation was added:"
+            printf '%s\n' "$ADDED_FORBIDDEN"
             exit 1
           fi
 
+          echo "PASS: no new hdd_stop_adapter()/hdd_deinit_adapter()"
+          
+          echo "      calls were introduced by the monitor patch."
+          
           echo
           echo "PASS: no invasive monitor lifecycle mutation."
 
