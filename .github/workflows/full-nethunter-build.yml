@@ -8194,7 +8194,7 @@ jobs:
 
 
 
-      - name: Inspect policy manager mutex ownership
+      - name: Locate exact policy manager lock functions
         working-directory: kernel
         shell: bash
         run: |
@@ -8203,76 +8203,37 @@ jobs:
           PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src"
 
           echo "============================================================"
-          echo " policy_mgr_get_connection_count()"
+          echo " EXACT DEFINITIONS"
           echo "============================================================"
 
-          awk '
-          /policy_mgr_get_connection_count[[:space:]]*\(/ {
-              start = NR
-              depth = 0
-              found = 1
-          }
-          found {
-              print NR ":" $0
-              opens = gsub(/\{/, "{")
-              closes = gsub(/\}/, "}")
-              depth += opens - closes
-              if (start && NR > start && depth <= 0) {
-                  found = 0
-                  print ""
-              }
-          }
-          ' "$PM/wlan_policy_mgr_core.c"
+          grep -n -B 3 -A 45 \
+            -E '^[[:space:]]*(static[[:space:]]+)?(bool|uint32_t|int|QDF_STATUS|void)[[:space:]]+policy_mgr_get_connection_count[[:space:]]*\(' \
+            "$PM"/*.c || true
 
           echo
           echo "============================================================"
-          echo " policy_mgr_store_and_del_conn_info_by_vdev_id()"
+          echo " qdf_conc_list_lock AROUND get_connection_count"
           echo "============================================================"
 
-          awk '
-          /policy_mgr_store_and_del_conn_info_by_vdev_id[[:space:]]*\(/ {
-              start = NR
-              depth = 0
-              found = 1
-          }
-          found {
-              print NR ":" $0
-              opens = gsub(/\{/, "{")
-              closes = gsub(/\}/, "}")
-              depth += opens - closes
-              if (start && NR > start && depth <= 0) {
-                  found = 0
-                  print ""
-              }
-          }
-          ' "$PM/wlan_policy_mgr_core.c"
-
-          echo
-          echo "============================================================"
-          echo " ALL qdf_conc_list_lock REFERENCES"
-          echo "============================================================"
-
-          grep -RIn \
+          grep -RIn -B 8 -A 12 \
             --include='*.c' \
-            --include='*.h' \
-            'qdf_conc_list_lock' \
+            'policy_mgr_get_connection_count' \
             "$PM" || true
 
           echo
           echo "============================================================"
-          echo " CONNECTION-LIST HELPER CALLS"
+          echo " qdf_conc_list_lock ACQUIRE/RELEASE PAIRS"
           echo "============================================================"
 
-          grep -RIn \
+          grep -RIn -B 4 -A 4 \
             --include='*.c' \
-            -E 'policy_mgr_(store_and_del_conn_info|restore_deleted_conn_info|get_connection_count)' \
+            -E 'qdf_mutex_(acquire|release)\(&pm_ctx->qdf_conc_list_lock\)' \
             "$PM" || true
 
           echo
           echo "============================================================"
-          echo " MUTEX INSPECTION COMPLETE"
+          echo " LOCK FUNCTION INSPECTION COMPLETE"
           echo "============================================================"
-
 
 
 
