@@ -8205,112 +8205,152 @@ jobs:
 
           test -f "$PM"
 
+          echo "=== LOCATING PCL SAP LOCK PATH ==="
+
           python3 - "$PM" <<'PY'
           from pathlib import Path
+          import re
           import sys
 
           path = Path(sys.argv[1])
           text = path.read_text()
 
-          acquire = "qdf_mutex_acquire(&pm_ctx->qdf_conc_list_lock);"
-          store = """policy_mgr_store_and_del_conn_info_by_vdev_id(psoc, sap_vdev_id,
-                                      &info, &num_cxn_del);"""
-          restore_marker = "/* Restore the connection entry */"
+          # Find the function containing the SAP PCL path.
+          m = re.search(
+              r'(?ms)^.*?policy_mgr_store_and_del_conn_info_by_vdev_id'
+              r'.*?\n\}',
+              text
+          )
 
-          # ------------------------------------------------------------
-          # 1. Locate the exact SAP/VDEV PCL critical section.
-          # ------------------------------------------------------------
-          target = acquire + "\n" + store
-
-          if text.count(target) != 1:
+          if not m:
               raise SystemExit(
-                  "ERROR: Expected exactly one SAP PCL lock/store sequence; "
-                  f"found {text.count(target)}"
+                  "ERROR: Could not locate "
+                  "policy_mgr_store_and_del_conn_info_by_vdev_id() caller"
               )
 
-          # ------------------------------------------------------------
-          # 2. Release the connection-list mutex BEFORE policy_mgr_get_pcl().
-          # ------------------------------------------------------------
-          replacement = (
-              acquire + "\n"
-              + store + "\n"
-              + "\tqdf_mutex_release(&pm_ctx->qdf_conc_list_lock);"
+          start = m.start()
+          end = m.end()
+          func = text[start:end]
+
+          print("=== MATCHED FUNCTION REGION ===")
+          print(func)
+
+          # We need the lock acquisition before the vdev-id deletion.
+          lock_re = re.compile(
+              r'(?P<lock>'
+              r'(?P<indent>[ \t]*)'
+              r'qdf_mutex_acquire\(&pm_ctx->qdf_conc_list_lock\);'
+              r')'
           )
 
-          text = text.replace(target, replacement, 1)
-
-          # ------------------------------------------------------------
-          # 3. Reacquire it immediately before restoring the saved entry.
-          # ------------------------------------------------------------
-          marker = (
-              "\t/* Restore the connection entry */"
+          store_re = re.compile(
+              r'(?P<store>'
+              r'[ \t]*policy_mgr_store_and_del_conn_info_by_vdev_id'
+              r'\s*\('
+              r'.*?'
+              r'\);'
+              r')',
+              re.S
           )
 
-          if text.count(marker) != 1:
+          lock = lock_re.search(func)
+
+          if not lock:
               raise SystemExit(
-                  "ERROR: Expected exactly one PCL restore marker; "
-                  f"found {text.count(marker)}"
+                  "ERROR: qdf_conc_list_lock acquire not found "
+                  "in matched PCL function"
               )
 
-          text = text.replace(
-              marker,
-              "\tqdf_mutex_acquire(&pm_ctx->qdf_conc_list_lock);\n" + marker,
-              1
+          # Only consider the first connection-list store/delete after
+          # the lock. This avoids touching unrelated PCL locks.
+          store = store_re.search(func, lock.end())
+
+          if not store:
+              raise SystemExit(
+                  "ERROR: policy_mgr_store_and_del_conn_info_by_vdev_id() "
+                  "not found after PCL lock"
+              )
+
+          # Make sure there isn't already a release between them.
+          between = func[lock.end():store.start()]
+
+          if "qdf_mutex_release(&pm_ctx->qdf_conc_list_lock)" in between:
+              raise SystemExit(
+                  "ERROR: PCL lock already released before store/delete; "
+                  "refusing duplicate patch"
+              )
+
+          # Insert release immediately after the store/delete call.
+          store_end = store.end()
+
+          func = (
+              func[:store_end]
+              + "\n"
+              + lock.group("lock").split("qdf_mutex_acquire")[0]
+              + "qdf_mutex_release(&pm_ctx->qdf_conc_list_lock);"
+              + func[store_end:]
           )
+
+          # Find the restore call inside the same function.
+          restore_re = re.compile(
+              r'(?P<restore>'
+              r'[ \t]*policy_mgr_restore_deleted_conn_info'
+              r'\s*\('
+              r'.*?'
+              r'\);'
+              r')',
+              re.S
+          )
+
+          restore = restore_re.search(func)
+
+          if not restore:
+              raise SystemExit(
+                  "ERROR: policy_mgr_restore_deleted_conn_info() "
+                  "not found in PCL function"
+              )
+
+          # Don't add a second acquire if one already exists immediately
+          # before the restore operation.
+          before_restore = func[:restore.start()]
+
+          last_300 = before_restore[-300:]
+
+          if "qdf_mutex_acquire(&pm_ctx->qdf_conc_list_lock)" not in last_300:
+              indent = lock.group("indent")
+
+              func = (
+                  func[:restore.start()]
+                  + indent
+                  + "qdf_mutex_acquire(&pm_ctx->qdf_conc_list_lock);\n"
+                  + func[restore.start():]
+              )
+
+          # Replace the original function region.
+          text = text[:start] + func + text[end:]
 
           path.write_text(text)
 
-          # ------------------------------------------------------------
-          # 4. Verify the resulting lock sequence.
-          # ------------------------------------------------------------
-          final = path.read_text()
-
-          expected_release_before_pcl = (
-              "qdf_mutex_release(&pm_ctx->qdf_conc_list_lock);"
-          )
-
-          if expected_release_before_pcl not in final:
-              raise SystemExit(
-                  "ERROR: PCL lock release was not inserted."
-              )
-
-          expected_restore_lock = (
-              "qdf_mutex_acquire(&pm_ctx->qdf_conc_list_lock);\n"
-              "\t/* Restore the connection entry */"
-          )
-
-          if expected_restore_lock not in final:
-              raise SystemExit(
-                  "ERROR: PCL restore lock was not inserted."
-              )
-
-          print("PASS: policy-manager PCL lock boundary fixed.")
+          print()
+          print("PASS: PCL lock boundary patched.")
           PY
 
           echo
-          echo "=== VERIFY PATCHED PCL SECTION ==="
+          echo "=== VERIFY RESULT ==="
 
-          grep -n -B5 -A25 \
-            -F "policy_mgr_store_and_del_conn_info_by_vdev_id(psoc, sap_vdev_id" \
+          grep -n -B8 -A30 \
+            'policy_mgr_store_and_del_conn_info_by_vdev_id' \
             "$PM"
 
           echo
-          echo "=== VERIFY NO LOCK IS HELD ACROSS policy_mgr_get_pcl() ==="
+          echo "=== VERIFY RESTORE PATH ==="
 
-          awk '
-          /policy_mgr_store_and_del_conn_info_by_vdev_id\(psoc, sap_vdev_id/ {
-              show=1
-          }
+          grep -n -B8 -A20 \
+            'policy_mgr_restore_deleted_conn_info' \
+            "$PM"
 
-          show {
-              print
-          }
-
-          show && /\/\* Restore the connection entry \*\// {
-              exit
-          }
-          ' "$PM"
-
+          echo
+          echo "PASS: policy-manager PCL patch completed."
 
 
 
