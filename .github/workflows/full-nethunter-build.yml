@@ -8194,6 +8194,129 @@ jobs:
 
 
 
+
+      - name: Fix policy-manager PCL lock boundary
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_pcl.c"
+
+          test -f "$PM"
+
+          python3 - "$PM" <<'PY'
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          text = path.read_text()
+
+          acquire = "qdf_mutex_acquire(&pm_ctx->qdf_conc_list_lock);"
+          store = """policy_mgr_store_and_del_conn_info_by_vdev_id(psoc, sap_vdev_id,
+                                      &info, &num_cxn_del);"""
+          restore_marker = "/* Restore the connection entry */"
+
+          # ------------------------------------------------------------
+          # 1. Locate the exact SAP/VDEV PCL critical section.
+          # ------------------------------------------------------------
+          target = acquire + "\n" + store
+
+          if text.count(target) != 1:
+              raise SystemExit(
+                  "ERROR: Expected exactly one SAP PCL lock/store sequence; "
+                  f"found {text.count(target)}"
+              )
+
+          # ------------------------------------------------------------
+          # 2. Release the connection-list mutex BEFORE policy_mgr_get_pcl().
+          # ------------------------------------------------------------
+          replacement = (
+              acquire + "\n"
+              + store + "\n"
+              + "\tqdf_mutex_release(&pm_ctx->qdf_conc_list_lock);"
+          )
+
+          text = text.replace(target, replacement, 1)
+
+          # ------------------------------------------------------------
+          # 3. Reacquire it immediately before restoring the saved entry.
+          # ------------------------------------------------------------
+          marker = (
+              "\t/* Restore the connection entry */"
+          )
+
+          if text.count(marker) != 1:
+              raise SystemExit(
+                  "ERROR: Expected exactly one PCL restore marker; "
+                  f"found {text.count(marker)}"
+              )
+
+          text = text.replace(
+              marker,
+              "\tqdf_mutex_acquire(&pm_ctx->qdf_conc_list_lock);\n" + marker,
+              1
+          )
+
+          path.write_text(text)
+
+          # ------------------------------------------------------------
+          # 4. Verify the resulting lock sequence.
+          # ------------------------------------------------------------
+          final = path.read_text()
+
+          expected_release_before_pcl = (
+              "qdf_mutex_release(&pm_ctx->qdf_conc_list_lock);"
+          )
+
+          if expected_release_before_pcl not in final:
+              raise SystemExit(
+                  "ERROR: PCL lock release was not inserted."
+              )
+
+          expected_restore_lock = (
+              "qdf_mutex_acquire(&pm_ctx->qdf_conc_list_lock);\n"
+              "\t/* Restore the connection entry */"
+          )
+
+          if expected_restore_lock not in final:
+              raise SystemExit(
+                  "ERROR: PCL restore lock was not inserted."
+              )
+
+          print("PASS: policy-manager PCL lock boundary fixed.")
+          PY
+
+          echo
+          echo "=== VERIFY PATCHED PCL SECTION ==="
+
+          grep -n -B5 -A25 \
+            -F "policy_mgr_store_and_del_conn_info_by_vdev_id(psoc, sap_vdev_id" \
+            "$PM"
+
+          echo
+          echo "=== VERIFY NO LOCK IS HELD ACROSS policy_mgr_get_pcl() ==="
+
+          awk '
+          /policy_mgr_store_and_del_conn_info_by_vdev_id\(psoc, sap_vdev_id/ {
+              show=1
+          }
+
+          show {
+              print
+          }
+
+          show && /\/\* Restore the connection entry \*\// {
+              exit
+          }
+          ' "$PM"
+
+
+
+
+
+
+
       - name: Locate exact policy manager lock functions
         working-directory: kernel
         shell: bash
