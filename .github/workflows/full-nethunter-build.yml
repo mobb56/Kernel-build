@@ -675,6 +675,97 @@ jobs:
           echo "The collected contexts are now available in the Actions log."
 
 
+
+
+          echo
+          echo "=== SME MONITOR VDEV-UP EVENT DISPATCH ==="
+
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            -B20 \
+            -A40 \
+            'sme_process_monitor_mode_vdev_up_evt' \
+            "${QCACLD}" \
+            2>/dev/null \
+            > "${AUDIT}/sme-monitor-up-dispatch.txt" || true
+
+          cat "${AUDIT}/sme-monitor-up-dispatch.txt" || true
+
+          echo
+          echo "=== ALL SME MONITOR CALLBACK REGISTRATION ==="
+
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            -B15 \
+            -A25 \
+            'sme_set_monitor_mode_cb|monitor_mode_cb' \
+            "${QCACLD}" \
+            2>/dev/null \
+            > "${AUDIT}/sme-monitor-callback-registration.txt" || true
+
+          cat "${AUDIT}/sme-monitor-callback-registration.txt" || true
+
+          echo
+          echo "=== HDD MONITOR CALLBACK IMPLEMENTATION ==="
+
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            -B25 \
+            -A45 \
+            'hdd_sme_monitor_mode_callback|qdf_monitor_mode_vdev_up_event|monitor_mode_vdev_up_in_progress' \
+            "${QCACLD}" \
+            2>/dev/null \
+            > "${AUDIT}/hdd-monitor-callback.txt" || true
+
+          cat "${AUDIT}/hdd-monitor-callback.txt" || true
+
+          echo
+          echo "=== SME PROCESS-MESSAGE REFERENCES ==="
+
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            -B15 \
+            -A30 \
+            'sme_process_msg|SME_MSG|monitor_mode_vdev_up' \
+            "${QCACLD}" \
+            2>/dev/null \
+            > "${AUDIT}/sme-message-dispatch.txt" || true
+
+          cat "${AUDIT}/sme-message-dispatch.txt" || true
+
+          echo
+          echo "=== WMI MONITOR/VDEV-UP EVENT REGISTRATION ==="
+
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            -B20 \
+            -A35 \
+            'wmi_unified_register_event_handler|register_event_handler|MONITOR.*VDEV|VDEV.*UP|VDEV_START' \
+            "${QCACLD}" \
+            2>/dev/null \
+            > "${AUDIT}/wmi-monitor-vdev-event-registration.txt" || true
+
+          cat "${AUDIT}/wmi-monitor-vdev-event-registration.txt" || true
+
+          echo
+          echo "=== ALL REFERENCES TO MONITOR VDEV-UP EVENT ==="
+
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            'monitor_mode_vdev_up|monitor.*vdev.*up|vdev.*up.*monitor' \
+            "${QCACLD}" \
+            2>/dev/null \
+            > "${AUDIT}/all-monitor-vdev-up-references.txt" || true
+
+          cat "${AUDIT}/all-monitor-vdev-up-references.txt" || true
+
+
           
       # ============================================================
       # 10. CLONE NETHUNTER REFERENCE
