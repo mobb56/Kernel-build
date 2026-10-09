@@ -766,6 +766,179 @@ jobs:
           cat "${AUDIT}/all-monitor-vdev-up-references.txt" || true
 
 
+
+
+
+      # ============================================================
+      # 9B. TRACE SME MONITOR VDEV-UP EVENT PRODUCER
+      # ============================================================
+
+      - name: Trace monitor VDEV-up event producer
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -u
+
+          QCACLD="drivers/staging/qcacld-3.0"
+          AUDIT="../artifacts/source-audit"
+
+          mkdir -p "$AUDIT"
+
+          echo "============================================================"
+          echo "SME MONITOR VDEV-UP EVENT PRODUCER AUDIT"
+          echo "============================================================"
+
+          echo
+          echo "=== 1. SME EVENT SYMBOL ==="
+
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            -B20 \
+            -A30 \
+            'eWNI_SME_MONITOR_MODE_VDEV_UP' \
+            "$QCACLD" \
+            2>/dev/null \
+            > "$AUDIT/sme-monitor-event-symbol.txt" || true
+
+          cat "$AUDIT/sme-monitor-event-symbol.txt" || true
+
+
+          echo
+          echo "=== 2. SME EVENT HANDLER ==="
+
+          grep -RniE \
+            --include='*.c' \
+            -B30 \
+            -A50 \
+            'sme_process_monitor_mode_vdev_up_evt' \
+            "$QCACLD" \
+            2>/dev/null \
+            > "$AUDIT/sme-monitor-event-handler.txt" || true
+
+          cat "$AUDIT/sme-monitor-event-handler.txt" || true
+
+
+          echo
+          echo "=== 3. SME MESSAGE POSTING / PRODUCER ==="
+
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            -B30 \
+            -A50 \
+            'eWNI_SME_MONITOR_MODE_VDEV_UP|sme_post_pe_message|post.*MONITOR_MODE|MONITOR_MODE.*post' \
+            "$QCACLD" \
+            2>/dev/null \
+            > "$AUDIT/sme-monitor-event-producer.txt" || true
+
+          cat "$AUDIT/sme-monitor-event-producer.txt" || true
+
+
+          echo
+          echo "=== 4. SME DISPATCHER ==="
+
+          grep -RniE \
+            --include='*.c' \
+            -B35 \
+            -A45 \
+            'eWNI_SME_MONITOR_MODE_VDEV_UP|sme_process_msg|sme_mc_process_handler' \
+            "$QCACLD/core/sme" \
+            "$QCACLD/components" \
+            2>/dev/null \
+            > "$AUDIT/sme-monitor-dispatch.txt" || true
+
+          cat "$AUDIT/sme-monitor-dispatch.txt" || true
+
+
+          echo
+          echo "=== 5. MONITOR CALLBACK REGISTRATION ==="
+
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            -B25 \
+            -A35 \
+            'sme_set_monitor_mode_cb|monitor_mode_cb' \
+            "$QCACLD" \
+            2>/dev/null \
+            > "$AUDIT/sme-monitor-callback-registration.txt" || true
+
+          cat "$AUDIT/sme-monitor-callback-registration.txt" || true
+
+
+          echo
+          echo "=== 6. WMI VDEV-START RESPONSE SYMBOLS ==="
+
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            -B20 \
+            -A40 \
+            'WMI_VDEV_START_RESP_EVENTID|VDEV_START_RESP|vdev_start_resp|vdev_start_response' \
+            "$QCACLD" \
+            2>/dev/null \
+            > "$AUDIT/wmi-vdev-start-response.txt" || true
+
+          cat "$AUDIT/wmi-vdev-start-response.txt" || true
+
+
+          echo
+          echo "=== 7. WMI EVENT REGISTRATION ==="
+
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            -B15 \
+            -A25 \
+            'wmi_unified_register_event_handler|register_event_handler|VDEV_START' \
+            "$QCACLD" \
+            2>/dev/null \
+            > "$AUDIT/wmi-event-registration.txt" || true
+
+          cat "$AUDIT/wmi-event-registration.txt" || true
+
+
+          echo
+          echo "=== 8. ALL MONITOR VDEV-UP REFERENCES ==="
+
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            'MONITOR_MODE_VDEV_UP|monitor_mode_vdev_up|monitor.*vdev.*up|vdev.*up.*monitor' \
+            "$QCACLD" \
+            2>/dev/null \
+            > "$AUDIT/all-monitor-vdev-up.txt" || true
+
+          cat "$AUDIT/all-monitor-vdev-up.txt" || true
+
+
+          echo
+          echo "=== 9. VDEV START COMMAND + RESPONSE PATH ==="
+
+          grep -RniE \
+            --include='*.c' \
+            -B25 \
+            -A60 \
+            'send_vdev_start_cmd_tlv|vdev_start.*cmd|vdev_start.*resp|vdev_start.*event' \
+            "$QCACLD" \
+            2>/dev/null \
+            > "$AUDIT/vdev-start-full-path.txt" || true
+
+          cat "$AUDIT/vdev-start-full-path.txt" || true
+
+
+          echo
+          echo "============================================================"
+          echo "SME MONITOR VDEV-UP EVENT PRODUCER AUDIT COMPLETE"
+          echo "============================================================"
+
+          echo
+          echo "No source modification was performed."
+          echo "No kernel build was performed."
+          echo "The complete event-producer trace is available in the Actions log."
+
+
           
       # ============================================================
       # 10. CLONE NETHUNTER REFERENCE
