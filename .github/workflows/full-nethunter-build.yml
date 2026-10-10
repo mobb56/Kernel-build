@@ -8918,11 +8918,27 @@ jobs:
                    status);
               '''
 
-          text = (
-              text[:match.end()]
-              + insertion
-              + text[match.end():]
+                 tail = text[match.end():]
+
+                decl = re.search(
+              r'\bstruct\s+scheduler_msg\s+message\s*=\s*\{\s*0\s*\}\s*;',
+            tail
           )
+
+            if not decl:
+            raise SystemExit(
+             "ERROR: scheduler_msg declaration not found; "
+            "refusing to modify source."
+          )
+
+             insert_at = match.end() + decl.end()
+
+                text = (
+               text[:insert_at]
+               + "\n"
+               + insertion
+               + text[insert_at:]
+           )
 
           path.write_text(text)
 
