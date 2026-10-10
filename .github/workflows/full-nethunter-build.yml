@@ -9338,6 +9338,98 @@ jobs:
           echo "No source modification was performed."
           echo "No kernel build was performed."
 
+
+
+
+      - name: Audit monitor START_RESP state-machine dispatch
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          QCACLD="drivers/staging/qcacld-3.0"
+
+          echo "============================================================"
+          echo "MONITOR START_RESP STATE-MACHINE DISPATCH AUDIT"
+          echo "============================================================"
+
+          echo
+          echo "=== 1. START_RESP HANDLERS ==="
+
+          grep -RIn \
+            --include='*.c' \
+            --include='*.h' \
+            -B12 -A35 \
+            'WLAN_VDEV_SM_EV_START_RESP|WLAN_VDEV_SM_EV_RESTART_RESP' \
+            "$QCACLD" 2>/dev/null |
+            head -120 || true
+
+          echo
+          echo "=== 2. MONITOR MLME START CALLBACKS ==="
+
+          grep -RIn \
+            --include='*.c' \
+            --include='*.h' \
+            -B15 -A45 \
+            'mon_mlme_start_continue|mon_mlme_vdev_start_restart_send|mon_mlme_vdev_up_send' \
+            "$QCACLD" 2>/dev/null |
+            head -160 || true
+
+          echo
+          echo "=== 3. MONITOR VDEV SM EVENT DELIVERY ==="
+
+          grep -RIn \
+            --include='*.c' \
+            -B20 -A45 \
+            'wlan_vdev_mlme_sm_deliver_evt' \
+            "$QCACLD" 2>/dev/null |
+            grep -E \
+              'wlan_vdev_mlme_sm_deliver_evt|WLAN_VDEV_SM_EV_START_RESP|WLAN_VDEV_SM_EV_RESTART_RESP|WLAN_VDEV_SM_EV_START_SUCCESS|QDF_MONITOR_MODE|WMI_VDEV_TYPE_MONITOR|mon_mlme' |
+            head -120 || true
+
+          echo
+          echo "=== 4. MONITOR START CONTINUE CALLERS ==="
+
+          grep -RIn \
+            --include='*.c' \
+            --include='*.h' \
+            -B20 -A35 \
+            'mon_mlme_start_continue' \
+            "$QCACLD" 2>/dev/null |
+            head -120 || true
+
+          echo
+          echo "=== 5. MONITOR VDEV-UP SEND CALLERS ==="
+
+          grep -RIn \
+            --include='*.c' \
+            --include='*.h' \
+            -B20 -A35 \
+            'mon_mlme_vdev_up_send' \
+            "$QCACLD" 2>/dev/null |
+            head -120 || true
+
+          echo
+          echo "=== 6. MONITOR DEVICE-MODE CHECKS ==="
+
+          grep -RIn \
+            --include='*.c' \
+            -B8 -A15 \
+            'QDF_MONITOR_MODE|WMI_VDEV_TYPE_MONITOR' \
+            "$QCACLD/components/mlme" \
+            "$QCACLD/core/wma" \
+            "$QCACLD/core/sme" \
+            2>/dev/null |
+            head -160 || true
+
+          echo
+          echo "============================================================"
+          echo "MONITOR START_RESP STATE-MACHINE AUDIT COMPLETE"
+          echo "============================================================"
+
+          echo "No source modification was performed."
+          echo "No kernel build was performed."
+
       
                          
       - name: Build kernel
