@@ -8850,34 +8850,27 @@ jobs:
       #
       # This does NOT change the monitor state machine.
       # ============================================================
-
       - name: Patch monitor VDEV completion diagnostics
-        working-directory: kernel
+        working-directory: kernel1
         shell: bash
         run: |
           set -euo pipefail
 
-          LIM_SRC="drivers/staging/qcacld-3.0/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
-
-          test -f "${LIM_SRC}"
-
-          echo "============================================================"
+          echo "==============================================="
           echo "PATCH MONITOR VDEV COMPLETION DIAGNOSTICS"
-          echo "============================================================"
+          echo "==============================================="
 
-          echo
-          echo "=== LOCATING FUNCTION ==="
-
-          grep -n \
-            'lim_handle_mon_switch_channel_rsp' \
-            "${LIM_SRC}"
-
-          python3 - "${LIM_SRC}" <<'PY'
-          from pathlib import Path
+          python3 - <<'PY'
           import re
-          import sys
+          from pathlib import Path
 
-          path = Path(sys.argv[1])
+          path = Path("${LIM_SRC}")
+
+          if not path.exists():
+              raise SystemExit(
+                  f"ERROR: LIM source file not found: {path}"
+              )
+
           text = path.read_text()
 
           marker = "MONITOR_START_RSP_DIAGNOSTIC"
@@ -8886,13 +8879,13 @@ jobs:
               print("Diagnostic patch already present.")
               raise SystemExit(0)
 
+          print("=== LOCATING FUNCTION ===")
+
           pattern = re.compile(
-              r'('
-              r'(?:static\s+)?(?:void|QDF_STATUS)\s+'
-              r'lim_handle_mon_switch_channel_rsp\s*'
-              r'\([^)]*\)\s*'
-              r'\{'
-              r')',
+              r'static\s+void\s+lim_handle_mon_switch_channel_rsp\s*'
+              r'\(\s*struct\s+pe_session\s*\*\s*session\s*,\s*'
+              r'QDF_STATUS\s+status\s*\)\s*'
+              r'\{',
               re.S
           )
 
@@ -8905,40 +8898,40 @@ jobs:
               )
 
           insertion = r'''
-               /*
-                * MONITOR_START_RSP_DIAGNOSTIC
-                *
-                * Record the LIM-side state without changing
-                * the existing monitor state machine.
-                */
-                  pe_err("MONITOR_START_RSP_DIAGNOSTIC: "
-                  "vdev_id=%d bss_type=%d status=%d",
-                   session ? session->vdev_id : -1,
-                   session ? session->bssType : -1,
-                   status);
-              '''
+              /*
+               * MONITOR_START_RSP_DIAGNOSTIC
+               *
+               * Record the LIM-side state without changing
+               * the existing monitor state machine.
+               */
+              pe_err("MONITOR_START_RSP_DIAGNOSTIC: "
+                     "vdev_id=%d bss_type=%d status=%d",
+                     session ? session->vdev_id : -1,
+                     session ? session->bssType : -1,
+                     status);
+          '''
 
-                 tail = text[match.end():]
+          tail = text[match.end():]
 
-                decl = re.search(
+          decl = re.search(
               r'\bstruct\s+scheduler_msg\s+message\s*=\s*\{\s*0\s*\}\s*;',
-            tail
+              tail
           )
 
-            if not decl:
-            raise SystemExit(
-             "ERROR: scheduler_msg declaration not found; "
-            "refusing to modify source."
+          if not decl:
+              raise SystemExit(
+                  "ERROR: scheduler_msg declaration not found; "
+                  "refusing to modify source."
+              )
+
+          insert_at = match.end() + decl.end()
+
+          text = (
+              text[:insert_at]
+              + "\n"
+              + insertion
+              + text[insert_at:]
           )
-
-             insert_at = match.end() + decl.end()
-
-                text = (
-               text[:insert_at]
-               + "\n"
-               + insertion
-               + text[insert_at:]
-           )
 
           path.write_text(text)
 
@@ -8951,18 +8944,19 @@ jobs:
           grep -n \
             -A18 \
             -B5 \
-            'MONITOR_START_RSP_DIAGNOSTIC' \
+            "MONITOR_START_RSP_DIAGNOSTIC" \
             "${LIM_SRC}"
 
           echo
           echo "=== VERIFY FUNCTION STILL EXISTS ==="
 
           grep -n \
-            'lim_handle_mon_switch_channel_rsp' \
+            "lim_handle_mon_switch_channel_rsp" \
             "${LIM_SRC}"
 
           echo
           echo "MONITOR VDEV COMPLETION DIAGNOSTIC PATCH: PASS"
+
       
                          
       - name: Build kernel
