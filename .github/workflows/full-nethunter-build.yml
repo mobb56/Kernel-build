@@ -1155,32 +1155,45 @@ jobs:
 
 
 
+    
+          - name: Locate wma_vdev_start_resp_handler implementation
+            working-directory: kernel
+            shell: bash
+            run: |
+               set -euo pipefail
 
+             QCACLD="drivers/staging/qcacld-3.0"
 
-      - name: Audit actual wma_vdev_start_resp_handler implementation
-        working-directory: kernel
-        shell: bash
-        run: |
-         set -euo pipefail
+             echo "============================================================"
+             echo "LOCATE WMA VDEV START RESPONSE HANDLER"
+             echo "============================================================"
 
-         SRC="drivers/staging/qcacld-3.0/core/wma/src/wma_api.c"
+             echo
+             echo "=== FILES CONTAINING HANDLER ==="
 
-         echo "============================================================"
-         echo "ACTUAL WMA VDEV START RESPONSE HANDLER"
-         echo "============================================================"
+             grep -RIl \
+              --include='*.c' \
+              --include='*.h' \
+              'wma_vdev_start_resp_handler' \
+              "$QCACLD" 2>/dev/null |
+              head -20 || true
 
-         echo
-         echo "=== IMPLEMENTATION AROUND LINE 749 ==="
+             echo
+             echo "=== DEFINITIONS ==="
 
-         nl -ba "$SRC" | sed -n '720,830p'
+             grep -RniE \
+              --include='*.c' \
+              'wma_vdev_start_resp_handler[[:space:]]*\(' \
+              "$QCACLD" 2>/dev/null |
+              head -20 || true
 
-         echo
-         echo "============================================================"
-         echo "AUDIT COMPLETE"
-         echo "============================================================"
+             echo
+             echo "============================================================"
+             echo "LOCATE AUDIT COMPLETE"
+             echo "============================================================"
 
-         echo "No source modification was performed."
-         echo "No kernel build was performed."
+             echo "No source modification was performed."
+             echo "No kernel build was performed."
         
           
       # ============================================================
