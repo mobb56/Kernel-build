@@ -1110,6 +1110,43 @@ jobs:
 
 
 
+      - name: Audit actual wma_vdev_start_resp_handler body
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          WMA_SRC="drivers/staging/qcacld-3.0/core/wma/src/wma_dev_if.c"
+
+          echo "=============================================="
+          echo "ACTUAL WMA VDEV START RESPONSE HANDLER"
+          echo "=============================================="
+
+          test -f "$WMA_SRC"
+ 
+          START_LINE="$(grep -n 'QDF_STATUS[[:space:]]\+wma_vdev_start_resp_handler[[:space:]]*(' "$WMA_SRC" | head -1 | cut -d: -f1)"
+
+          test -n "$START_LINE"
+
+          END_LINE=$((START_LINE + 100))
+
+           echo "Source: $WMA_SRC"
+          echo "Handler starts at line: $START_LINE"
+          echo
+          sed -n "${START_LINE},${END_LINE}p" "$WMA_SRC"
+
+          echo
+          echo "=============================================="
+          echo "WMA HANDLER AUDIT COMPLETE"
+          echo "=============================================="
+          echo "No source modification was performed."
+          echo "No kernel build was performed."
+
+
+
+
+
+
 
 
 
