@@ -1153,54 +1153,26 @@ jobs:
 
 
 
-      - name: Audit wma_vdev_start_resp_handler body
+
+
+
+
+      - name: Audit actual wma_vdev_start_resp_handler implementation
         working-directory: kernel
         shell: bash
         run: |
          set -euo pipefail
 
-         QCACLD="drivers/staging/qcacld-3.0"
+         SRC="drivers/staging/qcacld-3.0/core/wma/src/wma_api.c"
 
          echo "============================================================"
-         echo "WMA VDEV START RESPONSE HANDLER"
+         echo "ACTUAL WMA VDEV START RESPONSE HANDLER"
          echo "============================================================"
 
          echo
-         echo "=== DEFINITIONS / REFERENCES ==="
+         echo "=== IMPLEMENTATION AROUND LINE 749 ==="
 
-         grep -RniE \
-          --include='*.c' \
-          --include='*.h' \
-          'wma_vdev_start_resp_handler[[:space:]]*\(' \
-          "$QCACLD" 2>/dev/null |
-          head -20 || true
-
-         echo
-         echo "=== HANDLER CONTEXT ==="
-
-         HIT="$(grep -RIl \
-          --include='*.c' \
-          'wma_vdev_start_resp_handler[[:space:]]*\(' \
-          "$QCACLD" 2>/dev/null | head -1 || true)"
-
-         if [ -z "$HIT" ]; then
-         echo "ERROR: handler source file not found"
-         exit 0
-         fi
-
-         echo "Source: $HIT"
-
-         LINE="$(grep -nE \
-          'wma_vdev_start_resp_handler[[:space:]]*\(' \
-          "$HIT" | head -1 | cut -d: -f1)"
-
-         echo "First match: line $LINE"
-
-         START=$((LINE - 10))
-         [ "$START" -lt 1 ] && START=1
-         END=$((LINE + 100))
-
-         nl -ba "$HIT" | sed -n "${START},${END}p"
+         nl -ba "$SRC" | sed -n '720,830p'
 
          echo
          echo "============================================================"
@@ -1209,6 +1181,7 @@ jobs:
 
          echo "No source modification was performed."
          echo "No kernel build was performed."
+        
           
       # ============================================================
       # 10. CLONE NETHUNTER REFERENCE
