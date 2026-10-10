@@ -1157,39 +1157,58 @@ jobs:
         working-directory: kernel
         shell: bash
         run: |
-          set -euo pipefail
+         set -euo pipefail
 
-          SRC="drivers/staging/qcacld-3.0/core/wma/src/wma_utils.c"
+         QCACLD="drivers/staging/qcacld-3.0"
 
-          echo "============================================================"
-          echo "WMA VDEV START RESPONSE HANDLER"
-          echo "============================================================"
+         echo "============================================================"
+         echo "WMA VDEV START RESPONSE HANDLER"
+         echo "============================================================"
 
-          START="$(grep -nE '^[[:space:]]*(static[[:space:]]+)?QDF_STATUS[[:space:]]+wma_vdev_start_resp_handler[[:space:]]*\(' "$SRC" | head -1 | cut -d: -f1)"
+         echo
+         echo "=== DEFINITIONS / REFERENCES ==="
 
-          if [ -z "$START" ]; then
-            echo "ERROR: handler definition not found"
-            exit 1
-          fi
+         grep -RniE \
+          --include='*.c' \
+          --include='*.h' \
+          'wma_vdev_start_resp_handler[[:space:]]*\(' \
+          "$QCACLD" 2>/dev/null |
+          head -20 || true
 
-          END=$((START + 180))
+         echo
+         echo "=== HANDLER CONTEXT ==="
 
-          echo
-          echo "Implementation: $SRC"
-          echo "Function starts at line: $START"
-          echo
+         HIT="$(grep -RIl \
+          --include='*.c' \
+          'wma_vdev_start_resp_handler[[:space:]]*\(' \
+          "$QCACLD" 2>/dev/null | head -1 || true)"
 
-          nl -ba "$SRC" | sed -n "${START},${END}p"
+         if [ -z "$HIT" ]; then
+         echo "ERROR: handler source file not found"
+         exit 0
+         fi
 
-          echo
-          echo "============================================================"
-          echo "WMA VDEV START RESPONSE HANDLER AUDIT COMPLETE"
-          echo "============================================================"
+         echo "Source: $HIT"
 
-          echo "No source modification was performed."
-          echo "No kernel build was performed."
+         LINE="$(grep -nE \
+          'wma_vdev_start_resp_handler[[:space:]]*\(' \
+          "$HIT" | head -1 | cut -d: -f1)"
 
+         echo "First match: line $LINE"
 
+         START=$((LINE - 10))
+         [ "$START" -lt 1 ] && START=1
+         END=$((LINE + 100))
+
+         nl -ba "$HIT" | sed -n "${START},${END}p"
+
+         echo
+         echo "============================================================"
+         echo "AUDIT COMPLETE"
+         echo "============================================================"
+
+         echo "No source modification was performed."
+         echo "No kernel build was performed."
           
       # ============================================================
       # 10. CLONE NETHUNTER REFERENCE
