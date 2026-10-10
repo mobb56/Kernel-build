@@ -1255,6 +1255,106 @@ jobs:
 
 
 
+      - name: Final audit WMA VDEV start response routing
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          QCACLD="drivers/staging/qcacld-3.0"
+
+          echo "============================================================"
+          echo "FINAL WMA VDEV START RESPONSE ROUTING AUDIT"
+          echo "============================================================"
+
+          WMA_SRC="$(
+            grep -RIl \
+              --include='*.c' \
+              -E '^[[:space:]]*(QDF_STATUS|void)[[:space:]]+wma_vdev_start_resp_handler[[:space:]]*\(' \
+              "$QCACLD" 2>/dev/null \
+              | head -1 || true
+          )"
+
+          test -n "$WMA_SRC"
+
+          START_LINE="$(
+            grep -n \
+              -E '^[[:space:]]*(QDF_STATUS|void)[[:space:]]+wma_vdev_start_resp_handler[[:space:]]*\(' \
+              "$WMA_SRC" \
+              | head -1 \
+              | cut -d: -f1
+          )"
+
+          echo
+          echo "WMA handler source:"
+          echo "$WMA_SRC"
+          echo "WMA handler line:"
+          echo "$START_LINE"
+
+          echo
+          echo "=== WMA HANDLER BODY ==="
+
+          END_LINE=$((START_LINE + 180))
+
+          sed -n "${START_LINE},${END_LINE}p" "$WMA_SRC"
+
+          echo
+          echo "=== MONITOR RESPONSE ROUTING REFERENCES ==="
+
+          sed -n "${START_LINE},${END_LINE}p" "$WMA_SRC" |
+            grep -nE \
+              'wma_handle_channel_switch_resp|LIM_SWITCH_CHANNEL_MONITOR|monitor|MONITOR|channel_switch|switch_channel' \
+              || true
+
+          echo
+          echo "=== CHANNEL-SWITCH HANDLER LOCATION ==="
+
+          CHANNEL_SRC="$(
+            grep -RIl \
+              --include='*.c' \
+              -E 'wma_handle_channel_switch_resp[[:space:]]*\(' \
+              "$QCACLD" 2>/dev/null \
+              | head -1 || true
+          )"
+
+          if [ -n "$CHANNEL_SRC" ]; then
+            CHANNEL_LINE="$(
+              grep -n \
+                -E 'wma_handle_channel_switch_resp[[:space:]]*\(' \
+                "$CHANNEL_SRC" \
+                | head -1 \
+                | cut -d: -f1
+            )"
+
+            echo "Channel-switch source:"
+            echo "$CHANNEL_SRC"
+            echo "Channel-switch line:"
+            echo "$CHANNEL_LINE"
+
+            echo
+            echo "=== CHANNEL-SWITCH HANDLER MONITOR REFERENCES ==="
+
+            CHANNEL_END=$((CHANNEL_LINE + 100))
+
+            sed -n "${CHANNEL_LINE},${CHANNEL_END}p" "$CHANNEL_SRC" |
+              grep -nE \
+                'LIM_SWITCH_CHANNEL_MONITOR|monitor|MONITOR|lim_process_switch_channel_rsp|lim_handle_mon_switch_channel_rsp|START_SUCCESS|START_REQ_FAIL' \
+                || true
+          else
+            echo "No wma_handle_channel_switch_resp implementation found."
+          fi
+
+          echo
+          echo "============================================================"
+          echo "FINAL WMA ROUTING AUDIT COMPLETE"
+          echo "============================================================"
+
+          echo "No source modification was performed."
+          echo "No kernel build was performed."
+
+
+
+
 
     
       - name: Locate wma_vdev_start_resp_handler implementation
