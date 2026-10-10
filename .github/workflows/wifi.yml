@@ -411,6 +411,34 @@ jobs:
               "$SRC/core/sme/src/common/sme_api.c" || true
           } | tee -a "$OUT"
 
+
+
+
+      - name: Capture LIM monitor completion logic
+        shell: bash
+        run: |
+          set -eu
+          SRC="drivers/staging/qcacld-3.0"
+          OUT="wifi-vdev-investigation.txt"
+
+          {
+            echo
+            echo "===== LIM SWITCH CHANNEL RESPONSE ====="
+            sed -n '2860,2960p' \
+              "$SRC/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
+
+            echo
+            echo "===== MONITOR VDEV START SEND ====="
+            sed -n '8585,8665p' \
+              "$SRC/core/mac/src/pe/lim/lim_utils.c"
+
+            echo
+            echo "===== MONITOR CALLBACK REGISTRATION SITES ====="
+            grep -Rn -E \
+              'sme_set_monitor_mode_cb|hdd_sme_monitor_mode_callback' \
+              "$SRC/core/hdd" "$SRC/core/sme" || true
+          } | tee -a "$OUT"
+
       - name: Upload WiFi investigation
         uses: actions/upload-artifact@v4
         with:
