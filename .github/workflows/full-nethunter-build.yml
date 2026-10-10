@@ -1030,6 +1030,55 @@ jobs:
           echo "No kernel build was performed."
 
 
+
+
+      - name: Audit csr_get_vdev_type_nss callers
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          QCACLD="drivers/staging/qcacld-3.0"
+
+          echo "============================================================"
+          echo "CSR VDEV TYPE / NSS CALLER AUDIT"
+          echo "============================================================"
+
+          echo
+          echo "=== CALL SITES ==="
+
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            'csr_get_vdev_type_nss[[:space:]]*\(' \
+            "$QCACLD" 2>/dev/null |
+            grep -vE \
+              'csr_api_roam\.c:[0-9]+:.*(void[[:space:]]+)?csr_get_vdev_type_nss' |
+            head -30 || true
+
+          echo
+          echo "=== MONITOR-RELATED CALLERS ==="
+
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            -B3 \
+            -A5 \
+            'csr_get_vdev_type_nss[[:space:]]*\(' \
+            "$QCACLD" 2>/dev/null |
+            grep -E \
+              'QDF_MONITOR_MODE|csr_get_vdev_type_nss|monitor|MONITOR' |
+            head -40 || true
+
+          echo
+          echo "============================================================"
+          echo "CALLER AUDIT COMPLETE"
+          echo "============================================================"
+
+          echo "No source modification was performed."
+          echo "No kernel build was performed."
+
+
           
       # ============================================================
       # 10. CLONE NETHUNTER REFERENCE
