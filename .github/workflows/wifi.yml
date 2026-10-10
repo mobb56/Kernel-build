@@ -228,26 +228,35 @@ jobs:
 
 
 
-      - name: Inspect monitor VDEV startup implementation
+
+      - name: Dump exact monitor MLME path
         shell: bash
         run: |
           set -eu
           SRC="drivers/staging/qcacld-3.0"
 
-          echo "===== MONITOR VDEV START ====="
-          sed -n '8590,8660p' \
-            "$SRC/core/mac/src/pe/lim/lim_utils.c"
+          echo "===== MONITOR MLME OPS ====="
+          sed -n '1110,1160p' \
+            "$SRC/components/mlme/core/src/wlan_mlme_vdev_mgr_interface.c"
 
-          echo "===== MONITOR START CONTINUATION ====="
-          sed -n '4605,4645p' \
-            "$SRC/core/wma/src/wma_utils.c"
+          echo "===== MONITOR OPS REGISTRATION ====="
+          sed -n '1418,1440p' \
+            "$SRC/components/mlme/core/src/wlan_mlme_vdev_mgr_interface.c"
+
+          echo "===== MONITOR START SEND ====="
+          git grep -n -B 10 -A 45 \
+            "mon_mlme_vdev_start_restart_send" -- "$SRC"
+
+          echo "===== MONITOR START CONTINUE ====="
+          git grep -n -B 10 -A 45 \
+            "mon_mlme_start_continue" -- "$SRC"
 
           echo "===== MONITOR VDEV UP SEND ====="
-          sed -n '4630,4685p' \
-            "$SRC/core/wma/src/wma_utils.c"
+          git grep -n -B 10 -A 35 \
+            "mon_mlme_vdev_up_send" -- "$SRC"
 
-          echo "===== MONITOR COMPLETION EVENT ====="
-          sed -n '2840,2900p' \
+          echo "===== LIM COMPLETION ====="
+          sed -n '2850,2890p' \
             "$SRC/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
 
       - name: Create investigation summary
