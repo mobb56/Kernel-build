@@ -8821,6 +8821,135 @@ jobs:
 
            echo
            echo "=== PRE-BUILD POLICY SOURCE CHECK COMPLETE ==="
+
+
+
+      # ============================================================
+      # PATCH MONITOR VDEV START COMPLETION DIAGNOSTICS
+      #
+      # The runtime failure is:
+      #
+      #   monitor vdev up event time out
+      #
+      # Source tracing shows the completion path:
+      #
+      #   VDEV START response
+      #        -> LIM monitor switch response
+      #        -> START_SUCCESS
+      #        -> eWNI_SME_MONITOR_MODE_VDEV_UP
+      #        -> SME
+      #        -> HDD qdf_event_set()
+      #
+      # Instrument the exact LIM function so the next kernel tells us
+      # whether:
+      #
+      #   1. the response is an error,
+      #   2. the monitor VDEV type is wrong,
+      #   3. START_SUCCESS delivery fails, or
+      #   4. the SME event is not posted successfully.
+      #
+      # This does NOT change the monitor state machine.
+      # ============================================================
+
+      - name: Patch monitor VDEV completion diagnostics
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          LIM_SRC="drivers/staging/qcacld-3.0/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
+
+          test -f "${LIM_SRC}"
+
+          echo "============================================================"
+          echo "PATCH MONITOR VDEV COMPLETION DIAGNOSTICS"
+          echo "============================================================"
+
+          echo
+          echo "=== LOCATING FUNCTION ==="
+
+          grep -n \
+            'lim_handle_mon_switch_channel_rsp' \
+            "${LIM_SRC}"
+
+          python3 - "${LIM_SRC}" <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          path = Path(sys.argv[1])
+          text = path.read_text()
+
+          marker = "MONITOR_START_RSP_DIAGNOSTIC"
+
+          if marker in text:
+              print("Diagnostic patch already present.")
+              raise SystemExit(0)
+
+          pattern = re.compile(
+              r'('
+              r'(?:static\s+)?(?:void|QDF_STATUS)\s+'
+              r'lim_handle_mon_switch_channel_rsp\s*'
+              r'\([^)]*\)\s*'
+              r'\{'
+              r')',
+              re.S
+          )
+
+          match = pattern.search(text)
+
+          if not match:
+              raise SystemExit(
+                  "ERROR: lim_handle_mon_switch_channel_rsp() "
+                  "was not found. Refusing to modify source."
+              )
+
+          insertion = r'''
+              /*
+               * MONITOR_START_RSP_DIAGNOSTIC
+               *
+               * Runtime monitor-mode failure currently occurs while
+               * HDD waits for the monitor VDEV-UP event.
+               *
+               * Record the exact LIM-side state without changing
+               * the existing monitor state machine.
+               */
+              lim_info("MONITOR_START_RSP_DIAGNOSTIC: "
+                       "vdev_id=%d bss_type=%d status=%d",
+                       session ? session->vdev_id : -1,
+                       session ? session->bssType : -1,
+                       status);
+          '''
+
+          text = (
+              text[:match.end()]
+              + insertion
+              + text[match.end():]
+          )
+
+          path.write_text(text)
+
+          print("Diagnostic entry logging inserted.")
+          PY
+
+          echo
+          echo "=== VERIFY DIAGNOSTIC PATCH ==="
+
+          grep -n \
+            -A18 \
+            -B5 \
+            'MONITOR_START_RSP_DIAGNOSTIC' \
+            "${LIM_SRC}"
+
+          echo
+          echo "=== VERIFY FUNCTION STILL EXISTS ==="
+
+          grep -n \
+            'lim_handle_mon_switch_channel_rsp' \
+            "${LIM_SRC}"
+
+          echo
+          echo "MONITOR VDEV COMPLETION DIAGNOSTIC PATCH: PASS"
       
                          
       - name: Build kernel
