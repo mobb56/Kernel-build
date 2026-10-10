@@ -1151,6 +1151,45 @@ jobs:
           echo "No kernel build was performed."
 
 
+
+
+      - name: Audit wma_vdev_start_resp_handler body
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SRC="drivers/staging/qcacld-3.0/core/wma/src/wma_utils.c"
+
+          echo "============================================================"
+          echo "WMA VDEV START RESPONSE HANDLER"
+          echo "============================================================"
+
+          START="$(grep -nE '^[[:space:]]*(static[[:space:]]+)?QDF_STATUS[[:space:]]+wma_vdev_start_resp_handler[[:space:]]*\(' "$SRC" | head -1 | cut -d: -f1)"
+
+          if [ -z "$START" ]; then
+            echo "ERROR: handler definition not found"
+            exit 1
+          fi
+
+          END=$((START + 180))
+
+          echo
+          echo "Implementation: $SRC"
+          echo "Function starts at line: $START"
+          echo
+
+          nl -ba "$SRC" | sed -n "${START},${END}p"
+
+          echo
+          echo "============================================================"
+          echo "WMA VDEV START RESPONSE HANDLER AUDIT COMPLETE"
+          echo "============================================================"
+
+          echo "No source modification was performed."
+          echo "No kernel build was performed."
+
+
           
       # ============================================================
       # 10. CLONE NETHUNTER REFERENCE
