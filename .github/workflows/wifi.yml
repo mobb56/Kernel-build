@@ -339,6 +339,33 @@ jobs:
               head -n 100
           } > wifi-investigation-summary.txt
 
+
+
+
+      - name: Capture exact WMA response handler
+        shell: bash
+        run: |
+          set -eu
+          SRC="drivers/staging/qcacld-3.0"
+          OUT="wifi-vdev-investigation.txt"
+
+          {
+            echo
+            echo "===== WMA VDEV START RESPONSE HANDLER ====="
+            sed -n '1194,1345p' \
+              "$SRC/core/wma/src/wma_dev_if.c"
+
+            echo
+            echo "===== MLME RESPONSE CALLBACK ====="
+            sed -n '1288,1315p' \
+              "$SRC/components/mlme/core/src/wlan_mlme_vdev_mgr_interface.c"
+
+            echo
+            echo "===== MONITOR CALLBACK REGISTRATION ====="
+            sed -n '1418,1438p' \
+              "$SRC/components/mlme/core/src/wlan_mlme_vdev_mgr_interface.c"
+          } | tee -a "$OUT"
+
       - name: Upload WiFi investigation
         uses: actions/upload-artifact@v4
         with:
