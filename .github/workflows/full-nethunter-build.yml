@@ -3,7 +3,7 @@ name: Moto G9 Power cebu NetHunter
 on:
   workflow_dispatch:
     inputs:
-      build_kernel:
+      build_kernel: 
         description: "Run the kernel compilation after all static audits pass"
         required: true
         default: false
@@ -941,6 +941,126 @@ jobs:
           echo "No source modification was performed."
           echo "No kernel build was performed."
           echo "The complete event-producer trace is available in the Actions log."
+
+
+
+      # ============================================================
+      # 9C. AUDIT CSR VDEV TYPE / NSS LOOKUP
+      #
+      # Runtime evidence:
+      #
+      #   SME csr_get_vdev_type_nss: Unknown device mode
+      #
+      # Determine exactly which QDF_OPMODE values the function accepts
+      # and whether QDF_MONITOR_MODE is handled.
+      # ============================================================
+
+      - name: Audit csr_get_vdev_type_nss monitor device mode
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          QCACLD="drivers/staging/qcacld-3.0"
+          AUDIT="../artifacts/source-audit"
+
+          mkdir -p "$AUDIT"
+
+          echo "============================================================"
+          echo "CSR VDEV TYPE / NSS LOOKUP AUDIT"
+          echo "============================================================"
+
+          echo
+          echo "=== LOCATING csr_get_vdev_type_nss ==="
+
+          mapfile -t CSR_FILES < <(
+            grep -RIl \
+              --include='*.c' \
+              --include='*.h' \
+              'csr_get_vdev_type_nss' \
+              "$QCACLD" 2>/dev/null || true
+          )
+
+          if [ "${#CSR_FILES[@]}" -eq 0 ]; then
+            echo "ERROR: csr_get_vdev_type_nss was not found."
+            exit 1
+          fi
+
+          printf '%s\n' "${CSR_FILES[@]}"
+
+          echo
+          echo "=== FUNCTION / CALL SITES ==="
+
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            -B15 \
+            -A80 \
+            'csr_get_vdev_type_nss' \
+            "$QCACLD" \
+            2>/dev/null \
+            > "$AUDIT/csr-vdev-type-nss.txt" || true
+
+          cat "$AUDIT/csr-vdev-type-nss.txt"
+
+          echo
+          echo "=== QDF DEVICE-MODE DEFINITIONS ==="
+
+          grep -RniE \
+            --include='*.h' \
+            --include='*.c' \
+            'QDF_MONITOR_MODE|enum QDF_OPMODE|QDF_STA_MODE|QDF_SAP_MODE|QDF_P2P' \
+            "$QCACLD" \
+            2>/dev/null \
+            > "$AUDIT/csr-device-mode-definitions.txt" || true
+
+          cat "$AUDIT/csr-device-mode-definitions.txt"
+
+          echo
+          echo "=== UNKNOWN DEVICE MODE LOGGING CONTEXT ==="
+
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            -B25 \
+            -A35 \
+            'Unknown device mode' \
+            "$QCACLD" \
+            2>/dev/null \
+            > "$AUDIT/csr-unknown-device-mode.txt" || true
+
+          cat "$AUDIT/csr-unknown-device-mode.txt"
+
+          echo
+          echo "=== MONITOR MODE REFERENCES IN CSR ==="
+
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            -B10 \
+            -A20 \
+            'QDF_MONITOR_MODE' \
+            "$QCACLD" \
+            2>/dev/null \
+            > "$AUDIT/csr-monitor-mode.txt" || true
+
+          cat "$AUDIT/csr-monitor-mode.txt"
+
+          echo
+          echo "=== CSR SOURCE CHECKSUMS ==="
+
+          sha256sum "${CSR_FILES[@]}" \
+            > "$AUDIT/csr-vdev-type-nss.sha256"
+
+          cat "$AUDIT/csr-vdev-type-nss.sha256"
+
+          echo
+          echo "============================================================"
+          echo "CSR VDEV TYPE / NSS AUDIT COMPLETE"
+          echo "============================================================"
+
+          echo "No source modification was performed."
+          echo "No kernel build was performed."
 
 
           
