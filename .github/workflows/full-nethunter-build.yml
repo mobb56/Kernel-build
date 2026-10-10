@@ -1219,7 +1219,37 @@ jobs:
 
 
 
+          - name: Audit vdevmgr start response handler
+          working-directory: kernel
+          shell: bash
+          run: |
+            set -euo pipefail
 
+           SRC="drivers/staging/qcacld-3.0/components/mlme/core/src/wlan_mlme_vdev_mgr_interface.c"
+
+           echo "=============================================="
+           echo "VDEVMGR START RESPONSE HANDLER"
+           echo "=============================================="
+
+           test -f "$SRC"
+
+           START_LINE="$(grep -n 'vdevmgr_vdev_start_rsp_handle(struct' "$SRC" | head -1 | cut -d: -f1)"
+           test -n "$START_LINE"
+
+           BEGIN=$((START_LINE - 5))
+           END=$((START_LINE + 45))
+
+           echo "Source: $SRC"
+           echo "Handler starts at line: $START_LINE"
+           echo
+           sed -n "${BEGIN},${END}p" "$SRC"
+
+           echo
+           echo "=============================================="
+           echo "VDEVMGR START RESPONSE AUDIT COMPLETE"
+           echo "=============================================="
+           echo "No source modification was performed."
+           echo "No kernel build was performed."
 
 
 
