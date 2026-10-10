@@ -389,29 +389,35 @@ jobs:
            echo "Correct cebu kernel source verified."
 
 
-      - name: Trace monitor VDEV-UP chain
+ 
+      - name: Locate actual monitor VDEV-UP implementation
+        shell: bash
         run: |
+          set +e
           SRC="drivers/staging/qcacld-3.0"
 
-           echo "=== 1. MONITOR VDEV-UP HANDLER ==="
-           git grep -n "sme_process_monitor_mode_vdev_up_evt" -- "$SRC" || true
+          echo "=== monitor VDEV-UP ==="
+          grep -Rns --include='*.c' --include='*.h' \
+          -E "monitor.*vdev.*up|vdev.*up.*monitor|monitor_mode_vdev_up" \
+          "$SRC" 2>/dev/null | head -n 80
 
           echo
-          echo "=== 2. MONITOR CALLBACK ==="
-           git grep -n -E "sme_set_monitor_mode_cb|hdd_sme_monitor_mode_callback" -- "$SRC" || true
+          echo "=== MLME VDEV-UP ==="
+          grep -Rns --include='*.c' --include='*.h' \
+           -E "sta_mlme_vdev_up_send|vdev_up_send|vdev_start_continue" \
+           "$SRC" 2>/dev/null | head -n 80
 
           echo
-          echo "=== 3. MLME VDEV-UP ==="
-           git grep -n "sta_mlme_vdev_up_send" -- "$SRC" || true
+          echo "=== VDEV START RESPONSE ==="
+            grep -Rns --include='*.c' --include='*.h' \
+          -E "VDEV_START_RESP|VDEV_START.*RESP|START_RESP_EVENT" \
+          "$SRC" 2>/dev/null | head -n 80
 
           echo
-          echo "=== 4. VDEV START RESPONSE ==="
-             git grep -n -E "WMI_VDEV_START_RESP_EVENTID|VDEV_START_RESP_EVENTID|VDEV_START_RESP" -- "$SRC" || true
-
-          echo
-          echo "=== 5. VDEV EVENT REGISTRATION ==="
-              git grep -n -E "wmi_unified_register_event_handler.*VDEV|wmi_unified_register_event_handler.*START|register_event_handler.*VDEV|register_event_handler.*START" -- "$SRC" || true
-      
+          echo "=== WMI EVENT REGISTRATION ==="
+            grep -Rns --include='*.c' --include='*.h' \
+            -E "register_event_handler.*(VDEV|START)|wmi_unified_register_event_handler.*(VDEV|START)" \
+           "$SRC" 2>/dev/null | head -n 80
 
       # ============================================================
       # 9. VERIFY QCACLD3 SOURCE TREE
