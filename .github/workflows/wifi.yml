@@ -226,6 +226,30 @@ jobs:
             "CONFIG_FEATURE_MONITOR_MODE_SUPPORT" \
             "$SRC/Kbuild" || true
 
+
+
+      - name: Inspect monitor VDEV startup implementation
+        shell: bash
+        run: |
+          set -eu
+          SRC="drivers/staging/qcacld-3.0"
+
+          echo "===== MONITOR VDEV START ====="
+          sed -n '8590,8660p' \
+            "$SRC/core/mac/src/pe/lim/lim_utils.c"
+
+          echo "===== MONITOR START CONTINUATION ====="
+          sed -n '4605,4645p' \
+            "$SRC/core/wma/src/wma_utils.c"
+
+          echo "===== MONITOR VDEV UP SEND ====="
+          sed -n '4630,4685p' \
+            "$SRC/core/wma/src/wma_utils.c"
+
+          echo "===== MONITOR COMPLETION EVENT ====="
+          sed -n '2840,2900p' \
+            "$SRC/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
+
       - name: Create investigation summary
         shell: bash
         run: |
