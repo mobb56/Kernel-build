@@ -1079,6 +1079,33 @@ jobs:
           echo "No kernel build was performed."
 
 
+
+      - name: Audit csr_get_vdev_type_nss caller context
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SRC="drivers/staging/qcacld-3.0/core/sme/src/csr/csr_api_roam.c"
+
+          echo "============================================================"
+          echo "CSR NSS CALLER CONTEXT"
+          echo "============================================================"
+
+          echo
+          echo "=== CALLER FUNCTION AROUND LINE 13611 ==="
+
+          nl -ba "$SRC" | sed -n '13550,13640p'
+
+          echo
+          echo "============================================================"
+          echo "CALLER CONTEXT COMPLETE"
+          echo "============================================================"
+
+          echo "No source modification was performed."
+          echo "No kernel build was performed."
+
+
           
       # ============================================================
       # 10. CLONE NETHUNTER REFERENCE
