@@ -1185,6 +1185,41 @@ jobs:
 
 
 
+      - name: Audit monitor VDEV start response callback dispatch
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+            QCACLD="drivers/staging/qcacld-3.0"
+
+           echo "=============================================="
+           echo "MONITOR VDEV START RESPONSE CALLBACK DISPATCH"
+           echo "=============================================="
+ 
+           echo
+           echo "=== EXT START RESPONSE CALLBACK REFERENCES ==="
+           grep -RIn --include='*.c' --include='*.h' \
+           'mlme_vdev_ext_start_rsp' "$QCACLD" 2>/dev/null | head -40 || true
+
+           
+           echo
+           echo "=== VDEV START RESPONSE EVENT REFERENCES ==="
+           grep -RIn --include='*.c' --include='*.h' \
+           -E 'START_RESP|START_SUCCESS|START_REQ_FAIL|EV_START' \
+           "$QCACLD/components/mlme" 2>/dev/null | grep -E 'monitor|MONITOR|start_rsp|START_SUCCESS|START_REQ_FAIL' | head -40 || true
+           
+          echo
+          echo "=============================================="
+          echo "CALLBACK DISPATCH AUDIT COMPLETE"
+          echo "=============================================="
+          echo "No source modification was performed."
+          echo "No kernel build was performed."
+
+
+
+
+
 
 
 
