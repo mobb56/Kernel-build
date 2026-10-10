@@ -366,6 +366,51 @@ jobs:
               "$SRC/components/mlme/core/src/wlan_mlme_vdev_mgr_interface.c"
           } | tee -a "$OUT"
 
+
+
+
+      - name: Capture monitor VDEV completion path
+        shell: bash
+        run: |
+          set -eu
+          SRC="drivers/staging/qcacld-3.0"
+          OUT="wifi-vdev-investigation.txt"
+
+          {
+            echo
+            echo "===== COMPLETE WMA START RESPONSE HANDLER ====="
+            sed -n '1194,1385p' \
+              "$SRC/core/wma/src/wma_dev_if.c"
+
+            echo
+            echo "===== MONITOR START CONTINUE AND UP SEND ====="
+            sed -n '4608,4665p' \
+              "$SRC/core/wma/src/wma_utils.c"
+
+            echo
+            echo "===== SME MONITOR UP CALLBACK ====="
+            sed -n '16425,16475p' \
+              "$SRC/core/sme/src/common/sme_api.c"
+
+            echo
+            echo "===== HDD MONITOR CALLBACK ====="
+            sed -n '18057,18110p' \
+              "$SRC/core/hdd/src/wlan_hdd_main.c"
+
+            echo
+            echo "===== CHANNEL SWITCH RESPONSE DEFINITIONS ====="
+            grep -Rn -E \
+              'wma_handle_channel_switch_resp|lim_process_switch_channel_rsp' \
+              "$SRC/core/wma" "$SRC/core/mac/src/pe/lim" || true
+
+            echo
+            echo "===== MONITOR UP EVENT PRODUCER AND HANDLER ====="
+            grep -Rn -E \
+              'eWNI_SME_MONITOR_MODE_VDEV_UP|sme_process_monitor_mode_vdev_up_evt' \
+              "$SRC/core/mac/src/pe/lim" \
+              "$SRC/core/sme/src/common/sme_api.c" || true
+          } | tee -a "$OUT"
+
       - name: Upload WiFi investigation
         uses: actions/upload-artifact@v4
         with:
