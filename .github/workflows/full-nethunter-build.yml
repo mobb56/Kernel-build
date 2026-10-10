@@ -1145,6 +1145,45 @@ jobs:
 
 
 
+      - name: Audit wma VDEV start response caller
+        working-directory: kernel
+        shell: bash
+        run: |
+         set -euo pipefail
+
+          SRC="drivers/staging/qcacld-3.0/components/mlme/core/src/wlan_mlme_vdev_mgr_interface.c"
+
+          echo "=============================================="
+          echo "WMA VDEV START RESPONSE CALLER"
+          echo "=============================================="
+
+         test -f "$SRC"
+
+         START_LINE="$(grep -n 'wma_vdev_start_resp_handler(vdev_mlme, rsp)' "$SRC" | head -1 | cut -d: -f1)"
+         test -n "$START_LINE"
+
+         BEGIN=$((START_LINE - 12))
+         END=$((START_LINE + 12))
+
+         echo "Source: $SRC"
+         echo "Handler call at line: $START_LINE"
+         echo
+         sed -n "${BEGIN},${END}p" "$SRC"
+
+         echo
+         echo "=== MONITOR CALLBACK REFERENCES ==="
+         grep -n -E 'mlme_vdev_start|MONITOR|monitor|vdev_start_resp' "$SRC" | head -30 || true
+
+         echo
+         echo "=============================================="
+         echo "CALLER AUDIT COMPLETE"
+         echo "=============================================="
+         echo "No source modification was performed."
+         echo "No kernel build was performed."
+
+
+
+
 
 
 
