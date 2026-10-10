@@ -1,0 +1,230 @@
+name: WiFi Monitor VDEV Investigation
+
+on:
+  workflow_dispatch:
+
+jobs:
+  investigate-wifi:
+    name: Investigate QCACLD3 Monitor Mode
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          repository: LineageOS/android_kernel_motorola_sm6225
+          ref: lineage-23.2
+          fetch-depth: 1
+
+      - name: Verify kernel source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "CEBU WIFI INVESTIGATION"
+          echo "=========================================="
+
+          echo "Kernel:"
+          make -s kernelversion || true
+
+          echo
+          echo "Commit:"
+          git rev-parse HEAD
+
+          echo
+          echo "Defconfig:"
+          test -f arch/arm64/configs/vendor/bengal-perf_defconfig
+          echo "OK"
+
+          echo
+          echo "QCACLD3:"
+          test -d drivers/staging/qcacld-3.0
+          echo "OK"
+
+      - name: Trace monitor VDEV-UP architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SRC="drivers/staging/qcacld-3.0"
+          OUT="$GITHUB_WORKSPACE/wifi-vdev-investigation.txt"
+
+          : > "$OUT"
+
+          log() {
+            echo "$@" | tee -a "$OUT"
+          }
+
+          trace_symbol() {
+            local SYMBOL="$1"
+
+            log ""
+            log "============================================================"
+            log "SYMBOL: $SYMBOL"
+            log "============================================================"
+
+            find "$SRC" -type f \
+              \( -name '*.c' -o -name '*.h' \) -print0 |
+            xargs -0 grep -nF "$SYMBOL" 2>/dev/null |
+            head -n 100 |
+            tee -a "$OUT" || true
+          }
+
+          log "============================================================"
+          log " QCACLD3 MONITOR/VDEV-UP INVESTIGATION"
+          log "============================================================"
+          log "Kernel commit: $(git rev-parse HEAD)"
+          log ""
+
+          # HDD monitor channel path
+          trace_symbol "__wlan_hdd_cfg80211_set_mon_ch"
+
+          # Monitor VDEV-UP SME event
+          trace_symbol "sme_process_monitor_mode_vdev_up_evt"
+
+          # HDD callback which should wake the waiting event
+          trace_symbol "hdd_sme_monitor_mode_callback"
+
+          # Callback registration
+          trace_symbol "sme_set_monitor_mode_cb"
+
+          # MLME VDEV-UP
+          trace_symbol "sta_mlme_vdev_up_send"
+
+          # MLME START continuation
+          trace_symbol "sta_mlme_vdev_start_continue"
+
+          # VDEV START response
+          trace_symbol "WMI_VDEV_START_RESP_EVENTID"
+
+          log ""
+          log "============================================================"
+          log "VDEV START / VDEV UP REFERENCES"
+          log "============================================================"
+
+          git grep -n -E \
+            'VDEV_START|VDEV_UP|vdev_start|vdev_up' \
+            -- "$SRC" |
+            head -n 300 |
+            tee -a "$OUT" || true
+
+          log ""
+          log "============================================================"
+          log "MONITOR MODE REFERENCES"
+          log "============================================================"
+
+          git grep -n -Ei \
+            'monitor_mode|monitor.*vdev|vdev.*monitor' \
+            -- "$SRC" |
+            head -n 300 |
+            tee -a "$OUT" || true
+
+          log ""
+          log "============================================================"
+          log "WMI EVENT REGISTRATION"
+          log "============================================================"
+
+          git grep -n \
+            'wmi_unified_register_event_handler' \
+            -- "$SRC" |
+            grep -Ei 'vdev|start|up|monitor' |
+            head -n 250 |
+            tee -a "$OUT" || true
+
+      - name: Inspect monitor event implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SRC="drivers/staging/qcacld-3.0"
+          OUT="$GITHUB_WORKSPACE/wifi-vdev-context.txt"
+
+          : > "$OUT"
+
+          {
+            echo "============================================================"
+            echo "TARGETED SOURCE CONTEXT"
+            echo "============================================================"
+
+            for symbol in \
+              "sme_process_monitor_mode_vdev_up_evt" \
+              "sta_mlme_vdev_up_send" \
+              "sta_mlme_vdev_start_continue" \
+              "hdd_sme_monitor_mode_callback" \
+              "__wlan_hdd_cfg80211_set_mon_ch"
+            do
+              echo
+              echo "############################################################"
+              echo "### $symbol"
+              echo "############################################################"
+
+              git grep -n -B 12 -A 20 "$symbol" -- "$SRC" || true
+            done
+          } | tee "$OUT"
+
+      - name: Inspect relevant event IDs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SRC="drivers/staging/qcacld-3.0"
+          OUT="$GITHUB_WORKSPACE/wifi-event-ids.txt"
+
+          {
+            echo "============================================================"
+            echo "VDEV EVENT IDS"
+            echo "============================================================"
+
+            git grep -n -E \
+              'WMI_.*VDEV.*(START|UP|STOP|DOWN).*EVENTID|VDEV_.*EVENTID' \
+              -- "$SRC" |
+              head -n 400 || true
+
+            echo
+            echo "============================================================"
+            echo "MONITOR EVENT DEFINITIONS"
+            echo "============================================================"
+
+            git grep -n -Ei \
+              'MONITOR.*EVENT|EVENT.*MONITOR|MONITOR_MODE.*EVENT' \
+              -- "$SRC" |
+              head -n 300 || true
+          } | tee "$OUT"
+
+      - name: Create investigation summary
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          {
+            echo "QCACLD3 Wi-Fi Monitor Investigation"
+            echo
+            echo "Repository:"
+            echo "LineageOS/android_kernel_motorola_sm6225"
+            echo
+            echo "Branch:"
+            echo "lineage-23.2"
+            echo
+            echo "Commit:"
+            git rev-parse HEAD
+            echo
+            echo "Important files:"
+            find drivers/staging/qcacld-3.0 \
+              -type f \
+              \( -name '*.c' -o -name '*.h' \) |
+              grep -E \
+              'wlan_hdd_cfg80211|wlan_hdd_main|vdev_mgr|sme|wmi' |
+              head -n 100
+          } > wifi-investigation-summary.txt
+
+      - name: Upload WiFi investigation
+        uses: actions/upload-artifact@v4
+        with:
+          name: cebu-wifi-vdev-investigation
+          path: |
+            wifi-vdev-investigation.txt
+            wifi-vdev-context.txt
+            wifi-event-ids.txt
+            wifi-investigation-summary.txt
+          if-no-files-found: error
