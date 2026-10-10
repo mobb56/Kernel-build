@@ -1116,11 +1116,11 @@ jobs:
 
 
     
-          - name: Locate wma_vdev_start_resp_handler implementation
-            working-directory: kernel
-            shell: bash
-            run: |
-               set -euo pipefail
+      - name: Locate wma_vdev_start_resp_handler implementation
+        working-directory: kernel
+        shell: bash
+        run: |
+           set -euo pipefail
 
              QCACLD="drivers/staging/qcacld-3.0"
 
