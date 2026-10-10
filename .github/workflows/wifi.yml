@@ -261,6 +261,26 @@ jobs:
 
 
 
+      - name: Dump WMA VDEV start response handler
+        shell: bash
+        run: |
+          set -eu
+          SRC="drivers/staging/qcacld-3.0"
+
+          echo "===== WMA START RESPONSE HANDLER ====="
+          git grep -n -B 10 -A 120 \
+            "wma_vdev_start_resp_handler" -- "$SRC"
+
+          echo "===== START RESPONSE CALLBACK DISPATCH ====="
+          git grep -n -B 15 -A 50 \
+            "mlme_vdev_start_continue" -- "$SRC"
+
+          echo "===== MONITOR MODE CHECKS IN WMA ====="
+          git grep -n -B 10 -A 20 \
+            "QDF_MONITOR_MODE" -- "$SRC/core/wma" | head -n 200
+
+
+
       - name: Trace monitor VDEV start response dispatch
         shell: bash
         run: |
