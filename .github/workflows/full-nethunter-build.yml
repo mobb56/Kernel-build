@@ -963,71 +963,49 @@ jobs:
 
           QCACLD="drivers/staging/qcacld-3.0"
 
-          echo "============================================================"
-          echo "CSR VDEV TYPE / NSS TARGETED AUDIT"
-          echo "============================================================"
+          echo "=============================================="
+          echo "CSR NSS CALL-SITE AUDIT"
+          echo "=============================================="
 
-          CSR_IMPL="$(
-            grep -RIl \
-              --include='*.c' \
-              'csr_get_vdev_type_nss[[:space:]]*(' \
-              "$QCACLD" 2>/dev/null |
-              while read -r f; do
-                if grep -qE \
-                  'QDF_STATUS[[:space:]]+csr_get_vdev_type_nss|csr_get_vdev_type_nss[[:space:]]*\(' \
-                  "$f"; then
-                  echo "$f"
-                  break
-                fi
-              done
-          )"
+           CSR_IMPL="$(grep -RIl --include='*.c' \
+          'csr_get_vdev_type_nss[[:space:]]*(' \
+          "$QCACLD" 2>/dev/null |
+          while read -r f; do
+           if grep -qE \
+             'void[[:space:]]+csr_get_vdev_type_nss[[:space:]]*\(' \
+             "$f"; then
+             echo "$f"
+             break
+           fi
+          done)"
 
-          if [ -z "$CSR_IMPL" ]; then
-            echo "ERROR: csr_get_vdev_type_nss implementation not found"
-            exit 1
-          fi
-
-          echo "Implementation file:"
+          echo
+          echo "Implementation:"
           echo "$CSR_IMPL"
-          echo
-
-          echo "============================================================"
-          echo "FUNCTION BODY"
-          echo "============================================================"
-
-          START_LINE="$(
-            grep -n \
-              'csr_get_vdev_type_nss[[:space:]]*(' \
-              "$CSR_IMPL" |
-              head -1 |
-              cut -d: -f1
-          )"
-
-          if [ -z "$START_LINE" ]; then
-            echo "ERROR: function line not found"
-            exit 1
-          fi
-
-          END_LINE=$((START_LINE + 80))
-
-          sed -n "${START_LINE},${END_LINE}p" "$CSR_IMPL"
 
           echo
-          echo "============================================================"
-          echo "MONITOR / UNKNOWN MODE REFERENCES IN THIS FILE"
-          echo "============================================================"
-
-          grep -n \
-            -E 'QDF_MONITOR_MODE|Unknown device mode' \
-            "$CSR_IMPL" |
-            head -20 || true
+          echo "=== DIRECT CALL SITES ==="
+          grep -RIn --include='*.c' --include='*.h' \
+          'csr_get_vdev_type_nss[[:space:]]*(' \
+          "$QCACLD" 2>/dev/null |
+          grep -v "$CSR_IMPL:" |
+          head -20 || true
 
           echo
-          echo "============================================================"
-          echo "CSR NSS AUDIT COMPLETE"
-          echo "============================================================"
+          echo "=== NSS FUNCTION REFERENCES NEAR MONITOR/VDEV CODE ==="
+          grep -RIn --include='*.c' --include='*.h' \
+          -E 'csr_get_vdev_type_nss|QDF_MONITOR_MODE|monitor.*nss|nss.*monitor' \
+          "$QCACLD" 2>/dev/null |
+           head -40 || true
+
+          echo
+          echo "=============================================="
+          echo "CSR NSS CALL-SITE AUDIT COMPLETE"
           echo "No source modification was performed."
           echo "No kernel build was performed."
+          echo "=============================================="
+
+          
 
 
 
