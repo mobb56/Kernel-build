@@ -8859,34 +8859,88 @@ jobs:
           echo "PATCH MONITOR VDEV COMPLETION DIAGNOSTICS"
           echo "==============================================="
 
-          echo "LIM_SRC=${LIM_SRC}"
+          echo "Workspace: ${GITHUB_WORKSPACE}"
 
-          if [ ! -f "${LIM_SRC}" ]; then
-            echo "ERROR: LIM source file does not exist:"
-            echo "${LIM_SRC}"
-            echo
-            echo "Current directory:"
-            pwd
-            echo
-            echo "Workspace:"
-            ls -la
+          EXPECTED_REPO="${KERNEL_REPO:-https://github.com/LineageOS/android_kernel_motorola_sm6225.git}"
+          EXPECTED_NAME="${EXPECTED_REPO##*/}"
+          EXPECTED_NAME="${EXPECTED_NAME%.git}"
+
+          echo "Expected kernel repository: ${EXPECTED_NAME}"
+          echo "Searching for the monitor response handler..."
+
+          mapfile -d '' -t potential_files < <(
+            find "${GITHUB_WORKSPACE}" \
+              -type f \
+              -path '*/core/mac/src/pe/lim/*.c' \
+              -print0 2>/dev/null
+          )
+
+          candidates=()
+
+          for source in "${potential_files[@]}"; do
+            if grep -q 'lim_handle_mon_switch_channel_rsp' \
+              "${source}"; then
+              candidates+=("${source}")
+            fi
+          done
+
+          if [ "${#candidates[@]}" -eq 0 ]; then
+            echo "ERROR: Could not locate the monitor response handler."
+            echo "No source files were modified."
             exit 1
           fi
 
-          python3 - <<'PY'
-          import os
+          matched=()
+
+          for source in "${candidates[@]}"; do
+            repo_root="$(
+              git -C "$(dirname "${source}")" \
+                rev-parse --show-toplevel 2>/dev/null || true
+            )"
+
+            if [ -z "${repo_root}" ]; then
+              continue
+            fi
+
+            remote="$(
+              git -C "${repo_root}" \
+                remote get-url origin 2>/dev/null || true
+            )"
+
+            if [[ "${remote}" == *"${EXPECTED_NAME}"* ]]; then
+              matched+=("${source}")
+            fi
+          done
+
+          if [ "${#matched[@]}" -eq 1 ]; then
+            LIM_SRC="${matched[0]}"
+          elif [ "${#matched[@]}" -eq 0 ] &&
+               [ "${#candidates[@]}" -eq 1 ]; then
+            LIM_SRC="${candidates[0]}"
+          else
+            echo "ERROR: Could not identify exactly one kernel source file."
+            echo "Candidate files:"
+            printf '  %s\n' "${candidates[@]}"
+            echo "No source files were modified."
+            exit 1
+          fi
+
+          echo "Selected LIM source:"
+          echo "${LIM_SRC}"
+
+          python3 - "${LIM_SRC}" <<'PY'
           import re
+          import sys
           from pathlib import Path
 
-          path = Path(os.environ["LIM_SRC"])
+          path = Path(sys.argv[1])
 
-          if not path.exists():
+          if not path.is_file():
               raise SystemExit(
-                  f"ERROR: LIM source file not found: {path}"
+                  f"ERROR: LIM source file does not exist: {path}"
               )
 
           text = path.read_text()
-
           marker = "MONITOR_START_RSP_DIAGNOSTIC"
 
           if marker in text:
@@ -8911,24 +8965,11 @@ jobs:
                   "was not found. Refusing to modify source."
               )
 
-          insertion = r'''
-              /*
-               * MONITOR_START_RSP_DIAGNOSTIC
-               *
-               * Record the LIM-side state without changing
-               * the existing monitor state machine.
-               */
-              pe_err("MONITOR_START_RSP_DIAGNOSTIC: "
-                     "vdev_id=%d bss_type=%d status=%d",
-                     session ? session->vdev_id : -1,
-                     session ? session->bssType : -1,
-                     status);
-          '''
-
           tail = text[match.end():]
 
           decl = re.search(
-              r'\bstruct\s+scheduler_msg\s+message\s*=\s*\{\s*0\s*\}\s*;',
+              r'\bstruct\s+scheduler_msg\s+message\s*'
+              r'=\s*\{\s*0\s*\}\s*;',
               tail
           )
 
@@ -8937,6 +8978,19 @@ jobs:
                   "ERROR: scheduler_msg declaration not found; "
                   "refusing to modify source."
               )
+
+          insertion = r'''
+              /*
+               * MONITOR_START_RSP_DIAGNOSTIC
+               *
+               * Record the LIM-side monitor response state.
+               */
+              pe_err("MONITOR_START_RSP_DIAGNOSTIC: "
+                     "vdev_id=%d bss_type=%d status=%d",
+                     session ? session->vdev_id : -1,
+                     session ? session->bssType : -1,
+                     status);
+          '''
 
           insert_at = match.end() + decl.end()
 
@@ -8949,15 +9003,13 @@ jobs:
 
           path.write_text(text)
 
-          print("Diagnostic entry logging inserted.")
+          print(f"Diagnostic logging inserted into: {path}")
           PY
 
           echo
           echo "=== VERIFY DIAGNOSTIC PATCH ==="
 
-          grep -n \
-            -A18 \
-            -B5 \
+          grep -n -A18 -B5 \
             "MONITOR_START_RSP_DIAGNOSTIC" \
             "${LIM_SRC}"
 
