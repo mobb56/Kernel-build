@@ -9277,204 +9277,66 @@ jobs:
 
 
 
-      # ============================================================
-      # PATCH MONITOR VDEV START COMPLETION DIAGNOSTICS
-      #
-      # The runtime failure is:
-      #
-      #   monitor vdev up event time out
-      #
-      # Source tracing shows the completion path:
-      #
-      #   VDEV START response
-      #        -> LIM monitor switch response
-      #        -> START_SUCCESS
-      #        -> eWNI_SME_MONITOR_MODE_VDEV_UP
-      #        -> SME
-      #        -> HDD qdf_event_set()
-      #
-      # Instrument the exact LIM function so the next kernel tells us
-      # whether:
-      #
-      #   1. the response is an error,
-      #   2. the monitor VDEV type is wrong,
-      #   3. START_SUCCESS delivery fails, or
-      #   4. the SME event is not posted successfully.
-      #
-      # This does NOT change the monitor state machine.
-      # ============================================================
-      - name: Patch monitor VDEV completion diagnostics
+      
+
+
+      - name: Audit final WMA monitor response dispatch
+        working-directory: kernel
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "==============================================="
-          echo "PATCH MONITOR VDEV COMPLETION DIAGNOSTICS"
-          echo "==============================================="
+          QCACLD="drivers/staging/qcacld-3.0"
+          WMA_SRC="$QCACLD/core/wma/src/wma_main.c"
 
-          echo "Workspace: ${GITHUB_WORKSPACE}"
-
-          EXPECTED_REPO="${KERNEL_REPO:-https://github.com/LineageOS/android_kernel_motorola_sm6225.git}"
-          EXPECTED_NAME="${EXPECTED_REPO##*/}"
-          EXPECTED_NAME="${EXPECTED_NAME%.git}"
-
-          echo "Expected kernel repository: ${EXPECTED_NAME}"
-          echo "Searching for the monitor response handler..."
-
-          mapfile -d '' -t potential_files < <(
-            find "${GITHUB_WORKSPACE}" \
-              -type f \
-              -path '*/core/mac/src/pe/lim/*.c' \
-              -print0 2>/dev/null
-          )
-
-          candidates=()
-
-          for source in "${potential_files[@]}"; do
-            if grep -q 'lim_handle_mon_switch_channel_rsp' \
-              "${source}"; then
-              candidates+=("${source}")
-            fi
-          done
-
-          if [ "${#candidates[@]}" -eq 0 ]; then
-            echo "ERROR: Could not locate the monitor response handler."
-            echo "No source files were modified."
-            exit 1
+          if [ ! -f "$WMA_SRC" ]; then
+            WMA_SRC="$QCACLD/core/wma/src/wma_utils.c"
           fi
 
-          matched=()
-
-          for source in "${candidates[@]}"; do
-            repo_root="$(
-              git -C "$(dirname "${source}")" \
-                rev-parse --show-toplevel 2>/dev/null || true
-            )"
-
-            if [ -z "${repo_root}" ]; then
-              continue
-            fi
-
-            remote="$(
-              git -C "${repo_root}" \
-                remote get-url origin 2>/dev/null || true
-            )"
-
-            if [[ "${remote}" == *"${EXPECTED_NAME}"* ]]; then
-              matched+=("${source}")
-            fi
-          done
-
-          if [ "${#matched[@]}" -eq 1 ]; then
-            LIM_SRC="${matched[0]}"
-          elif [ "${#matched[@]}" -eq 0 ] &&
-               [ "${#candidates[@]}" -eq 1 ]; then
-            LIM_SRC="${candidates[0]}"
-          else
-            echo "ERROR: Could not identify exactly one kernel source file."
-            echo "Candidate files:"
-            printf '  %s\n' "${candidates[@]}"
-            echo "No source files were modified."
-            exit 1
-          fi
-
-          echo "Selected LIM source:"
-          echo "${LIM_SRC}"
-
-          python3 - "${LIM_SRC}" <<'PY'
-          import re
-          import sys
-          from pathlib import Path
-
-          path = Path(sys.argv[1])
-
-          if not path.is_file():
-              raise SystemExit(
-                  f"ERROR: LIM source file does not exist: {path}"
-              )
-
-          text = path.read_text()
-          marker = "MONITOR_START_RSP_DIAGNOSTIC"
-
-          if marker in text:
-              print("Diagnostic patch already present.")
-              raise SystemExit(0)
-
-          print("=== LOCATING FUNCTION ===")
-
-          pattern = re.compile(
-              r'static\s+void\s+lim_handle_mon_switch_channel_rsp\s*'
-              r'\(\s*struct\s+pe_session\s*\*\s*session\s*,\s*'
-              r'QDF_STATUS\s+status\s*\)\s*'
-              r'\{',
-              re.S
-          )
-
-          match = pattern.search(text)
-
-          if not match:
-              raise SystemExit(
-                  "ERROR: lim_handle_mon_switch_channel_rsp() "
-                  "was not found. Refusing to modify source."
-              )
-
-          tail = text[match.end():]
-
-          decl = re.search(
-              r'\bstruct\s+scheduler_msg\s+message\s*'
-              r'=\s*\{\s*0\s*\}\s*;',
-              tail
-          )
-
-          if not decl:
-              raise SystemExit(
-                  "ERROR: scheduler_msg declaration not found; "
-                  "refusing to modify source."
-              )
-
-          insertion = r'''
-              /*
-               * MONITOR_START_RSP_DIAGNOSTIC
-               *
-               * Record the LIM-side monitor response state.
-               */
-              pe_err("MONITOR_START_RSP_DIAGNOSTIC: "
-                     "vdev_id=%d bss_type=%d status=%d",
-                     session ? session->vdev_id : -1,
-                     session ? session->bssType : -1,
-                     status);
-          '''
-
-          insert_at = match.end() + decl.end()
-
-          text = (
-              text[:insert_at]
-              + "\n"
-              + insertion
-              + text[insert_at:]
-          )
-
-          path.write_text(text)
-
-          print(f"Diagnostic logging inserted into: {path}")
-          PY
+          echo "==============================================="
+          echo "FINAL WMA MONITOR RESPONSE DISPATCH AUDIT"
+          echo "==============================================="
 
           echo
-          echo "=== VERIFY DIAGNOSTIC PATCH ==="
-
-          grep -n -A18 -B5 \
-            "MONITOR_START_RSP_DIAGNOSTIC" \
-            "${LIM_SRC}"
-
-          echo
-          echo "=== VERIFY FUNCTION STILL EXISTS ==="
-
-          grep -n \
-            "lim_handle_mon_switch_channel_rsp" \
-            "${LIM_SRC}"
+          echo "=== WMA CHANNEL-SWITCH HANDLER ==="
+          grep -n -A45 -B15 \
+            'wma_handle_channel_switch_resp' \
+            "$QCACLD"/core/wma/src/*.c \
+            2>/dev/null | head -120 || true
 
           echo
-          echo "MONITOR VDEV COMPLETION DIAGNOSTIC PATCH: PASS"
+          echo "=== MONITOR START CALLBACKS ==="
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            -A15 -B10 \
+            'mon_mlme_vdev_start_restart_send|mon_mlme_start_continue|mon_mlme_vdev_up_send' \
+            "$QCACLD" \
+            2>/dev/null | head -120 || true
+
+          echo
+          echo "=== MONITOR WMI VDEV TYPE REFERENCES ==="
+          grep -RniE \
+            --include='*.c' \
+            'WMI_VDEV_TYPE_MONITOR|iface->type' \
+            "$QCACLD/core/wma/src" \
+            2>/dev/null | head -100 || true
+
+          echo
+          echo "=== VDEV START RESPONSE HANDLER REFERENCES ==="
+          grep -RniE \
+            --include='*.c' \
+            --include='*.h' \
+            'wma_vdev_start_resp_handler|vdevmgr_vdev_start_rsp_handle' \
+            "$QCACLD" \
+            2>/dev/null | head -80 || true
+
+          echo
+          echo "==============================================="
+          echo "FINAL WMA DISPATCH AUDIT COMPLETE"
+          echo "==============================================="
+          echo "No source modification was performed."
+          echo "No kernel build was performed."
 
       
                          
