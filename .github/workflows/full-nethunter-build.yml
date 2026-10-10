@@ -1106,6 +1106,51 @@ jobs:
           echo "No kernel build was performed."
 
 
+
+
+      - name: Audit monitor VDEV start response path
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          QCACLD="drivers/staging/qcacld-3.0"
+
+          echo "============================================================"
+          echo "MONITOR VDEV START RESPONSE PATH"
+          echo "============================================================"
+
+          echo
+          echo "=== WMA START RESPONSE HANDLER ==="
+
+          grep -RniE \
+            --include='*.c' \
+            -B15 \
+            -A35 \
+            'wma_vdev_start_resp_handler[[:space:]]*\(' \
+            "$QCACLD" 2>/dev/null |
+            head -80 || true
+
+          echo
+          echo "=== MONITOR START RESPONSE ROUTING ==="
+
+          grep -RniE \
+            --include='*.c' \
+            -B12 \
+            -A30 \
+            'wma_handle_channel_switch_resp|LIM_SWITCH_CHANNEL_MONITOR|lim_process_switch_channel_rsp' \
+            "$QCACLD" 2>/dev/null |
+            head -120 || true
+
+          echo
+          echo "============================================================"
+          echo "MONITOR VDEV START RESPONSE AUDIT COMPLETE"
+          echo "============================================================"
+
+          echo "No source modification was performed."
+          echo "No kernel build was performed."
+
+
           
       # ============================================================
       # 10. CLONE NETHUNTER REFERENCE
