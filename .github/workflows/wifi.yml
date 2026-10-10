@@ -440,6 +440,9 @@ jobs:
           } | tee -a "$OUT"
 
 
+          
+
+
 
       - name: Capture complete monitor channel-switch logic
         shell: bash
@@ -471,6 +474,43 @@ jobs:
               'eWNI_SME_MONITOR_MODE_VDEV_UP' \
               "$SRC/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c" \
               "$SRC/core/sme/src/common/sme_api.c" || true
+          } | tee -a "$OUT"
+
+
+
+
+      - name: Locate monitor switch response implementation
+        shell: bash
+        run: |
+          set -eu
+          SRC="drivers/staging/qcacld-3.0"
+          OUT="wifi-vdev-investigation.txt"
+
+          {
+            echo
+            echo "===== ALL DEFINITIONS OF lim_handle_mon_switch_channel_rsp ====="
+
+            grep -Rnl \
+              --include='*.c' \
+              --include='*.h' \
+              'lim_handle_mon_switch_channel_rsp' \
+              "$SRC" || true
+
+            echo
+            echo "===== FUNCTION DEFINITION CONTEXT ====="
+
+            while IFS= read -r f; do
+              echo "----- FILE: $f -----"
+              grep -n -B 15 -A 100 \
+                'lim_handle_mon_switch_channel_rsp' \
+                "$f" || true
+            done < <(
+              grep -RIl \
+                --include='*.c' \
+                --include='*.h' \
+                'lim_handle_mon_switch_channel_rsp' \
+                "$SRC" || true
+            )
           } | tee -a "$OUT"
 
       - name: Upload WiFi investigation
