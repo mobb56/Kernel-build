@@ -439,6 +439,40 @@ jobs:
               "$SRC/core/hdd" "$SRC/core/sme" || true
           } | tee -a "$OUT"
 
+
+
+      - name: Capture complete monitor channel-switch logic
+        shell: bash
+        run: |
+          set -eu
+          SRC="drivers/staging/qcacld-3.0"
+          OUT="wifi-vdev-investigation.txt"
+
+          {
+            echo
+            echo "===== COMPLETE CHANNEL SWITCH RESPONSE ====="
+            sed -n '2900,3020p' \
+              "$SRC/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
+
+            echo
+            echo "===== MONITOR VDEV STARTED HANDLER ====="
+            sed -n '2220,2330p' \
+              "$SRC/core/mac/src/pe/lim/lim_utils.c"
+
+            echo
+            echo "===== MONITOR CHANNEL REASON SETTING ====="
+            grep -Rn -C 5 \
+              'LIM_SWITCH_CHANNEL_MONITOR' \
+              "$SRC/core/mac/src/pe/lim" || true
+
+            echo
+            echo "===== MONITOR VDEV-UP EVENT POSTING ====="
+            grep -Rn -C 8 \
+              'eWNI_SME_MONITOR_MODE_VDEV_UP' \
+              "$SRC/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c" \
+              "$SRC/core/sme/src/common/sme_api.c" || true
+          } | tee -a "$OUT"
+
       - name: Upload WiFi investigation
         uses: actions/upload-artifact@v4
         with:
