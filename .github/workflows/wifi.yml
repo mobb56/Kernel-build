@@ -259,6 +259,31 @@ jobs:
           sed -n '2850,2890p' \
             "$SRC/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
 
+
+
+      - name: Trace monitor VDEV start response dispatch
+        shell: bash
+        run: |
+          set -eu
+          SRC="drivers/staging/qcacld-3.0"
+
+          echo "===== WMA VDEV START RESPONSE ====="
+          sed -n '1190,1340p' \
+            "$SRC/core/wma/src/wma_dev_if.c"
+
+          echo "===== MONITOR START CONTINUE REFERENCES ====="
+          git grep -n -B 12 -A 30 \
+            "wma_mon_mlme_vdev_start_continue" -- "$SRC"
+
+          echo "===== MONITOR VDEV UP REFERENCES ====="
+          git grep -n -B 12 -A 30 \
+            "wma_mon_mlme_vdev_up_send" -- "$SRC"
+
+          echo "===== MLME MONITOR OPS REGISTRATION ====="
+          git grep -n -B 15 -A 30 \
+            "mon_mlme_vdev_start_restart_send" -- \
+            "$SRC/components/mlme"
+
       - name: Create investigation summary
         shell: bash
         run: |
