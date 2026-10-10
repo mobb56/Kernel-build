@@ -199,43 +199,32 @@ jobs:
 
 
 
-      - name: Trace LIM monitor completion sender
+      - name: Trace monitor VDEV startup
         shell: bash
         run: |
           set -eu
-
           SRC="drivers/staging/qcacld-3.0"
 
-          echo "===== 1. LIM MONITOR COMPLETION MESSAGE ====="
-          git grep -n -B 25 -A 25 \
-            "eWNI_SME_MONITOR_MODE_VDEV_UP" \
-            -- "$SRC/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c" || true
+          echo "===== LIM MONITOR START ====="
+          git grep -n -B 20 -A 35 \
+            "lim_mon_mlme_vdev_start_send" -- "$SRC" || true
 
-          echo
-          echo "===== 2. LIM MONITOR VDEV START ====="
-          git grep -n -B 15 -A 25 \
-            "lim_mon_mlme_vdev_start_send" \
-            -- "$SRC/core/mac/src/pe/lim" || true
-
-          echo
-          echo "===== 3. WMA VDEV START CONTINUATION ====="
+          echo "===== MONITOR START CONTINUATION ====="
           git grep -n -B 15 -A 35 \
-            "wma_sta_mlme_vdev_start_continue" \
-            -- "$SRC/core/wma/src/wma_utils.c" || true
+            "wma_mon_mlme_vdev_start_continue" -- "$SRC" || true
 
-          echo
-          echo "===== 4. WMA VDEV-UP SEND ====="
-          git grep -n -B 12 -A 30 \
-            "wma_sta_vdev_up_send" \
-            -- "$SRC/core/wma" || true
+          echo "===== MONITOR VDEV-UP SEND ====="
+          git grep -n -B 15 -A 35 \
+            "wma_mon_mlme_vdev_up_send" -- "$SRC" || true
 
-          echo
-          echo "===== 5. MONITOR FEATURE DEFINITIONS ====="
-          git grep -n \
-            "FEATURE_MONITOR_MODE_SUPPORT" \
-            -- "$SRC/core/hdd" "$SRC/core/sme" \
-               "$SRC/components/mlme" "$SRC/core/mac" |
-            head -n 100 || true
+          echo "===== COMPLETION EVENT SENDER ====="
+          git grep -n -B 25 -A 25 \
+            "eWNI_SME_MONITOR_MODE_VDEV_UP" -- "$SRC" || true
+
+          echo "===== FEATURE BUILD FLAG ====="
+          grep -n -A 3 -B 3 \
+            "CONFIG_FEATURE_MONITOR_MODE_SUPPORT" \
+            "$SRC/Kbuild" || true
 
       - name: Create investigation summary
         shell: bash
