@@ -8851,7 +8851,6 @@ jobs:
       # This does NOT change the monitor state machine.
       # ============================================================
       - name: Patch monitor VDEV completion diagnostics
-        working-directory: kernel1
         shell: bash
         run: |
           set -euo pipefail
@@ -8860,11 +8859,26 @@ jobs:
           echo "PATCH MONITOR VDEV COMPLETION DIAGNOSTICS"
           echo "==============================================="
 
+          echo "LIM_SRC=${LIM_SRC}"
+
+          if [ ! -f "${LIM_SRC}" ]; then
+            echo "ERROR: LIM source file does not exist:"
+            echo "${LIM_SRC}"
+            echo
+            echo "Current directory:"
+            pwd
+            echo
+            echo "Workspace:"
+            ls -la
+            exit 1
+          fi
+
           python3 - <<'PY'
+          import os
           import re
           from pathlib import Path
 
-          path = Path("${LIM_SRC}")
+          path = Path(os.environ["LIM_SRC"])
 
           if not path.exists():
               raise SystemExit(
