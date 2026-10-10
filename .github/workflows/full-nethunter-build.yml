@@ -8905,21 +8905,18 @@ jobs:
               )
 
           insertion = r'''
-              /*
-               * MONITOR_START_RSP_DIAGNOSTIC
-               *
-               * Runtime monitor-mode failure currently occurs while
-               * HDD waits for the monitor VDEV-UP event.
-               *
-               * Record the exact LIM-side state without changing
-               * the existing monitor state machine.
-               */
-              lim_info("MONITOR_START_RSP_DIAGNOSTIC: "
-                       "vdev_id=%d bss_type=%d status=%d",
-                       session ? session->vdev_id : -1,
-                       session ? session->bssType : -1,
-                       status);
-          '''
+               /*
+                * MONITOR_START_RSP_DIAGNOSTIC
+                *
+                * Record the LIM-side state without changing
+                * the existing monitor state machine.
+                */
+                  pe_err("MONITOR_START_RSP_DIAGNOSTIC: "
+                  "vdev_id=%d bss_type=%d status=%d",
+                   session ? session->vdev_id : -1,
+                   session ? session->bssType : -1,
+                   status);
+              '''
 
           text = (
               text[:match.end()]
