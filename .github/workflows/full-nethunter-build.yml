@@ -389,35 +389,60 @@ jobs:
            echo "Correct cebu kernel source verified."
 
 
+
+    
+         - name: AWK trace monitor VDEV-UP chain
+           shell: bash
+           run: |
+              set -eu
  
-      - name: Locate actual monitor VDEV-UP implementation
-        shell: bash
-        run: |
-          set +e
-          SRC="drivers/staging/qcacld-3.0"
+              SRC="drivers/staging/qcacld-3.0"
 
-          echo "=== monitor VDEV-UP ==="
-          grep -Rns --include='*.c' --include='*.h' \
-          -E "monitor.*vdev.*up|vdev.*up.*monitor|monitor_mode_vdev_up" \
-          "$SRC" 2>/dev/null | head -n 80
+              echo "=============================================="
+              echo " QCACLD3 MONITOR VDEV-UP AWK SOURCE TRACE"
+              echo "=============================================="
+              echo "SOURCE: $SRC"
+              echo
 
-          echo
-          echo "=== MLME VDEV-UP ==="
-          grep -Rns --include='*.c' --include='*.h' \
-           -E "sta_mlme_vdev_up_send|vdev_up_send|vdev_start_continue" \
-           "$SRC" 2>/dev/null | head -n 80
+             find "$SRC" -type f \( -name '*.c' -o -name '*.h' \) -print0 |
+             xargs -0 awk '
+         {
+              if ($0 ~ /sme_process_monitor_mode_vdev_up_evt/) {
+              print "[MONITOR EVENT] " FILENAME ":" FNR ":" $0
+          }
 
-          echo
-          echo "=== VDEV START RESPONSE ==="
-            grep -Rns --include='*.c' --include='*.h' \
-          -E "VDEV_START_RESP|VDEV_START.*RESP|START_RESP_EVENT" \
-          "$SRC" 2>/dev/null | head -n 80
+             if ($0 ~ /sta_mlme_vdev_up_send/) {
+             print "[VDEV-UP SEND] " FILENAME ":" FNR ":" $0
+          }
 
-          echo
-          echo "=== WMI EVENT REGISTRATION ==="
-            grep -Rns --include='*.c' --include='*.h' \
-            -E "register_event_handler.*(VDEV|START)|wmi_unified_register_event_handler.*(VDEV|START)" \
-           "$SRC" 2>/dev/null | head -n 80
+             if ($0 ~ /sta_mlme_vdev_start_continue/) {
+             print "[START CONTINUE] " FILENAME ":" FNR ":" $0
+         }
+
+             if ($0 ~ /sme_set_monitor_mode_cb/) {
+              print "[CALLBACK REGISTER] " FILENAME ":" FNR ":" $0
+         }
+
+            if ($0 ~ /hdd_sme_monitor_mode_callback/) {
+            print "[HDD CALLBACK] " FILENAME ":" FNR ":" $0
+         }
+
+            if ($0 ~ /WMI_VDEV_START_RESP_EVENTID/) {
+            print "[WMI START RESP] " FILENAME ":" FNR ":" $0
+         }
+
+            if ($0 ~ /wmi_unified_register_event_handler/) {
+            print "[WMI REGISTER] " FILENAME ":" FNR ":" $0
+          }
+         }
+         ' | tee monitor-vdev-trace.txt
+
+         echo
+         echo "=============================================="
+         echo " TRACE COMPLETE"
+         echo "=============================================="
+
+          test -s monitor-vdev-trace.txt
 
       # ============================================================
       # 9. VERIFY QCACLD3 SOURCE TREE
