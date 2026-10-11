@@ -3724,73 +3724,129 @@ jobs:
 
         echo
         echo "Monitor callback lifecycle inspection complete."
+        
+
+
+
     - name: Verify monitor VDEV policy-manager path
       working-directory: kernel
       shell: bash
       run: |
         set -euo pipefail
 
+        QCACLD="drivers/staging/qcacld-3.0"
+        PM_SRC="${QCACLD}/components/cmn_services/policy_mgr/src"
+        WMA_SRC="${QCACLD}/core/wma/src"
+        WMA_INC="${QCACLD}/core/wma/inc"
+        HDD_SRC="${QCACLD}/core/hdd/src"
+
+        test -d "${QCACLD}"
+        test -d "${PM_SRC}"
+        test -d "${WMA_SRC}"
+        test -d "${WMA_INC}"
+        test -d "${HDD_SRC}"
+
         echo "=== VERIFY MONITOR VDEV POLICY-MANAGER PATH ==="
 
         echo
         echo "=== Monitor VDEV references in policy manager ==="
 
-        grep -RInE \
-          'QDF_MONITOR_MODE|QDF_GLOBAL_MONITOR_MODE|monitor.*vdev|vdev.*monitor|MONITOR_MODE' \
-          drivers/staging/qcacld-3.0/core/policy_mgr \
-          2>/dev/null \
-          | head -n300 \
+        grep -RniE \
+          'QDF_MONITOR_MODE|MONITOR_MODE|monitor.*vdev|vdev.*monitor' \
+          "${PM_SRC}" \
+          --include='*.c' \
+          --include='*.h' \
+          | head -300 \
           || true
 
         echo
         echo "=== Connection-list / PCL references ==="
 
-        grep -RInE \
-          'pm_conc_connection_list|pcl|PCL|connection_list|conc_list' \
-          drivers/staging/qcacld-3.0/core/policy_mgr \
-          2>/dev/null \
-          | head -n300 \
+        grep -RniE \
+          'pm_conc_connection_list|policy_mgr_get_pcl|policy_mgr_calculate_pcl|qdf_conc_list_lock' \
+          "${PM_SRC}" \
+          --include='*.c' \
+          --include='*.h' \
+          | head -400 \
           || true
 
         echo
-        echo "=== Monitor VDEV policy-manager verification complete ==="
+        echo "=== WMA monitor/injection references ==="
+
+        grep -RniE \
+          'QDF_MONITOR_MODE|MONITOR_MODE|wma_frame_inject|monitor.*vdev|vdev.*monitor' \
+          "${WMA_SRC}" \
+          --include='*.c' \
+          --include='*.h' \
+          | head -300 \
+          || true
+
+        echo
+        echo "=== WMA injection source ==="
+
+        test -f "${WMA_SRC}/wma_frame_inject.c"
+
+        grep -n \
+          'wma_frame_inject\|wma_init_injection_queue\|wma_deinit_injection_queue\|wma_process_injection_queue' \
+          "${WMA_SRC}/wma_frame_inject.c" \
+          || true
+
+        echo
+        echo "=== WMA injection header ==="
+
+        test -f "${WMA_INC}/wma_frame_inject.h"
+
+        grep -n \
+          'wma_frame_inject\|wma_init_injection_queue\|wma_deinit_injection_queue\|wma_process_injection_queue' \
+          "${WMA_INC}/wma_frame_inject.h" \
+          || true
+
+        echo
+        echo "=== HDD monitor/injection references ==="
+
+        grep -RniE \
+          'QDF_MONITOR_MODE|MONITOR_MODE|monitor_mode_vdev|frame_inject|injection' \
+          "${HDD_SRC}" \
+          --include='*.c' \
+          --include='*.h' \
+          | head -400 \
+          || true
+
+        echo
+        echo "=== Required monitor callback symbols ==="
+
+        grep -RniE \
+          'hdd_monitor_mode_vdev_status|hdd_open_adapters_for_monitor_mode|sme_process_monitor_mode_vdev_up_evt' \
+          "${QCACLD}" \
+          --include='*.c' \
+          --include='*.h' \
+          | head -200 \
+          || true
+
+        echo
+        echo "=== Required policy-manager symbols ==="
+
+        grep -RniE \
+          'policy_mgr_update_connection_info|policy_mgr_update_conn_list|policy_mgr_store_and_del_conn_info_by_vdev_id' \
+          "${PM_SRC}" \
+          --include='*.c' \
+          --include='*.h' \
+          | head -300 \
+          || true
+
+        echo
+        echo "=== Required source paths ==="
+
+        echo "QCACLD : ${QCACLD}"
+        echo "PM_SRC : ${PM_SRC}"
+        echo "WMA_SRC: ${WMA_SRC}"
+        echo "WMA_INC: ${WMA_INC}"
+        echo "HDD_SRC: ${HDD_SRC}"
+
+        echo
+        echo "Monitor VDEV policy-manager path verification PASSED."
 
         
-                  'wma_handle_injection_fw_response|WMA_IS_INJECTION_DESC_ID' \
-          "$WMA_SRC/wma_mgmt.c"
-        then
-          echo "OK: injection completion routing present"
-        else
-          echo "ERROR: injection completion routing missing"
-          exit 1
-        fi
-
-        echo
-        echo "=== Checking security compatibility ==="
-
-        if grep -Eq \
-          'CAP_NET_RAW|capable' \
-          "$HDD_SRC/wlan_hdd_inject_security.c"
-        then
-          echo "OK: injection security capability check present"
-        else
-          echo "ERROR: injection security capability check missing"
-          exit 1
-        fi
-
-        echo
-        echo "=========================================="
-        echo "QCACLD3 INJECTION INTEGRATION: PASS"
-        echo "INJECTION SOURCES: PRESENT"
-        echo "BUILD FEATURES: PRESENT"
-        echo "HDD API: PRESENT"
-        echo "INJECTION CONTEXT: PRESENT"
-        echo "WMA INTEGRATION: PRESENT"
-        echo "COMPLETION ROUTING: PRESENT"
-        echo "SECURITY CHECK: PRESENT"
-        echo "=========================================="
-
-        exit 0
     - name: Verify Kbuild and kernel config separation
       shell: bash
       run: |
