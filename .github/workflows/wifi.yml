@@ -2457,9 +2457,9 @@ jobs:
           '#if\|#ifdef\|#ifndef\|#else\|#elif\|#endif' \
           "${FRAME_H}" | tail -10
 
-        echo
-        echo "=== Duplicate injection helper fix passed ==="
-        
+         echo
+         echo "=== Duplicate injection helper fix passed ==="
+          
     - name: Integrate injection context into HDD
       working-directory: kernel
       shell: bash
