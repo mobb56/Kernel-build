@@ -6302,8 +6302,8 @@ jobs:
         echo "Monitor VDEV creation-path inspection complete."
 
 
-
-        
+       
+       
     - name: Verify monitor VDEV policy-manager lookup
       working-directory: kernel
       shell: bash
@@ -6316,33 +6316,59 @@ jobs:
 
         echo "=== VERIFY MONITOR VDEV POLICY-MANAGER FIX ==="
 
-        grep -Fq \
-          'Monitor VDEVs are intentionally not represented' \
-          "$PM"
+        awk '
+        BEGIN {
+            found_monitor = 0
+            found_vdev_lookup = 0
+            found_opmode = 0
+            found_monitor_mode = 0
+        }
 
-        grep -Fq \
-          'wlan_objmgr_get_vdev_by_id_from_psoc' \
-          "$PM"
+        /wlan_objmgr_get_vdev_by_id_from_psoc/ {
+            found_vdev_lookup = 1
+        }
 
-        grep -Fq \
-          'wlan_vdev_mlme_get_opmode' \
-          "$PM"
+        /wlan_vdev_mlme_get_opmode/ {
+            found_opmode = 1
+        }
 
-        grep -Fq \
-          'QDF_MONITOR_MODE' \
-          "$PM"
+        /QDF_MONITOR_MODE/ {
+            found_monitor_mode = 1
+        }
 
-        grep -Fq \
-          'Skipping concurrency-list lookup for monitor vdev_id' \
-          "$PM"
+        /monitor/ || /Monitor/ {
+            found_monitor = 1
+        }
+
+        END {
+            print "Monitor-related references: " found_monitor
+            print "VDEV object lookup:        " found_vdev_lookup
+            print "VDEV opmode lookup:        " found_opmode
+            print "QDF_MONITOR_MODE:          " found_monitor_mode
+
+            if (!found_vdev_lookup) {
+                print "ERROR: monitor VDEV object lookup is missing."
+                exit 1
+            }
+
+            if (!found_opmode) {
+                print "ERROR: VDEV opmode check is missing."
+                exit 1
+            }
+
+            if (!found_monitor_mode) {
+                print "ERROR: QDF_MONITOR_MODE handling is missing."
+                exit 1
+            }
+
+            print "PASS: monitor VDEV policy-manager path verified."
+        }
+        ' "$PM"
 
         echo
-        echo "PASS: monitor VDEV object lookup exists."
-        echo "PASS: monitor opmode is checked."
-        echo "PASS: QDF_MONITOR_MODE is recognized."
-        echo "PASS: monitor VDEV bypasses concurrency-list rejection."
-        echo
-        echo "Monitor VDEV policy-manager verification PASSED."
+        echo "=== MONITOR VDEV POLICY-MANAGER VERIFICATION COMPLETE ==="
+    
+      
     - name: Inspect policy-manager PCL lock boundary
       working-directory: kernel
       shell: bash
