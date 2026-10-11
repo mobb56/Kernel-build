@@ -5744,6 +5744,7 @@ jobs:
           "${GITHUB_WORKSPACE}/vdev-create.clean" \
           "${GITHUB_WORKSPACE}/vdev-destroy.clean" \
           "${GITHUB_WORKSPACE}/vdev-status.clean" <<'PY'
+          
         from pathlib import Path
         import re
         import sys
@@ -5771,10 +5772,10 @@ jobs:
 
         match = pattern.search(text)
 
-         if not match:
-           raise SystemExit(
+          if not match:
+            raise SystemExit(
             f"ERROR: callback not found: {name}"
-        )
+         )
 
          start = match.start()
          brace = text.find("{", match.start())
@@ -5783,11 +5784,11 @@ jobs:
         i = brace
 
         while i < len(text):
-           if text[i] == "{":
+         if text[i] == "{":
             depth += 1
-           elif text[i] == "}":
+         elif text[i] == "}":
             depth -= 1
-            if depth == 0:
+         if depth == 0:
                 return start, i + 1
         i += 1
 
@@ -5797,7 +5798,7 @@ jobs:
 
         replacements = []
 
-         for name, replacement in callbacks:
+          for name, replacement in callbacks:
           start, end = locate(text, name)
          replacements.append((start, end, replacement))
            print(f"PASS: located {name}")
