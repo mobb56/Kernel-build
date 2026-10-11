@@ -1,525 +1,1966 @@
-name: WiFi Monitor VDEV Investigation
-
-on:
-  workflow_dispatch:
-
+name: Build cebu NetHunter Wi-Fi module
+'on':
+  workflow_dispatch: {}
+permissions:
+  contents: read
+env:
+  KERNEL_REPO: https://github.com/LineageOS/android_kernel_motorola_sm6225.git
+  KERNEL_BRANCH: lineage-23.2
+  NETHUNTER_REPO: https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git
+  NETHUNTER_BRANCH: nethunter-lineage-23.2
+  ARCH: arm64
+  CROSS_COMPILE: aarch64-linux-gnu-
+  OUT_DIR: out
+  LLVM_DIR: /usr/lib/llvm-21
 jobs:
-  investigate-wifi:
-    name: Investigate QCACLD3 Monitor Mode
+  build-wifi-module:
+    name: Build and verify QCACLD3 Wi-Fi module
     runs-on: ubuntu-22.04
-
     steps:
-      - name: Checkout kernel source
-        uses: actions/checkout@v4
-        with:
-          repository: LineageOS/android_kernel_motorola_sm6225
-          ref: lineage-23.2
-          fetch-depth: 1
+    - name: Checkout build repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+    - name: Install build dependencies
+      shell: bash
+      run: |
+        set -euxo pipefail
 
-      - name: Verify kernel source
-        shell: bash
-        run: |
-          set -euo pipefail
+        sudo apt-get update
 
-          echo "=========================================="
-          echo "CEBU WIFI INVESTIGATION"
-          echo "=========================================="
+        sudo apt-get install -y \
+          bc \
+          bison \
+          build-essential \
+          ccache \
+          flex \
+          gcc-aarch64-linux-gnu \
+          git \
+          kmod \
+          libssl-dev \
+          curl \
+          python3 \
+          rsync \
+          unzip \
+          wget \
+          xz-utils \
+          zip
+    - name: Install Android LLVM clang-r563880c
+      shell: bash
+      run: |
+        set -euo pipefail
 
-          echo "Kernel:"
-          make -s kernelversion || true
+        NDK_VERSION="r29"
+        NDK_ARCHIVE="android-ndk-r29-linux.zip"
+        NDK_URL="https://dl.google.com/android/repository/${NDK_ARCHIVE}"
+        NDK_SHA1="87e2bb7e9be5d6a1c6cdf5ec40dd4e0c6d07c30b"
 
-          echo
-          echo "Commit:"
-          git rev-parse HEAD
+        NDK_ROOT="${GITHUB_WORKSPACE}/android-ndk-r29"
+        ANDROID_LLVM_DIR="${GITHUB_WORKSPACE}/android-llvm"
+        NDK_ZIP="${RUNNER_TEMP}/${NDK_ARCHIVE}"
 
-          echo
-          echo "Defconfig:"
-          test -f arch/arm64/configs/vendor/bengal-perf_defconfig
-          echo "OK"
+        echo "============================================================"
+        echo "ANDROID NDK r29 / CLANG-r563880c"
+        echo "============================================================"
 
-          echo
-          echo "QCACLD3:"
-          test -d drivers/staging/qcacld-3.0
-          echo "OK"
+        rm -rf "${NDK_ROOT}"
+        rm -rf "${ANDROID_LLVM_DIR}"
+        rm -f "${NDK_ZIP}"
 
-      - name: Trace monitor VDEV-UP architecture
-        shell: bash
-        run: |
-          set -euo pipefail
+        echo
+        echo "=== Downloading official Google Android NDK r29 ==="
 
-          SRC="drivers/staging/qcacld-3.0"
-          OUT="$GITHUB_WORKSPACE/wifi-vdev-investigation.txt"
+        curl -fL \
+          --retry 5 \
+          --retry-delay 5 \
+          --retry-all-errors \
+          -o "${NDK_ZIP}" \
+          "${NDK_URL}"
 
-          : > "$OUT"
+        test -s "${NDK_ZIP}"
 
-          log() {
-            echo "$@" | tee -a "$OUT"
-          }
+        echo
+        echo "=== Verifying NDK SHA-1 ==="
 
-          trace_symbol() {
-            local SYMBOL="$1"
+        echo "${NDK_SHA1}  ${NDK_ZIP}" | sha1sum -c -
 
-            log ""
-            log "============================================================"
-            log "SYMBOL: $SYMBOL"
-            log "============================================================"
+        echo
+        echo "NDK archive verified."
 
-            find "$SRC" -type f \
-              \( -name '*.c' -o -name '*.h' \) -print0 |
-            xargs -0 grep -nF "$SYMBOL" 2>/dev/null |
-            head -n 100 |
-            tee -a "$OUT" || true
-          }
+        echo
+        echo "=== Extracting Android NDK r29 ==="
 
-          log "============================================================"
-          log " QCACLD3 MONITOR/VDEV-UP INVESTIGATION"
-          log "============================================================"
-          log "Kernel commit: $(git rev-parse HEAD)"
-          log ""
+        unzip -q "${NDK_ZIP}" -d "${GITHUB_WORKSPACE}"
 
-          # HDD monitor channel path
-          trace_symbol "__wlan_hdd_cfg80211_set_mon_ch"
+        test -d "${NDK_ROOT}"
 
-          # Monitor VDEV-UP SME event
-          trace_symbol "sme_process_monitor_mode_vdev_up_evt"
+        echo
+        echo "=== Selecting LLVM toolchain ==="
 
-          # HDD callback which should wake the waiting event
-          trace_symbol "hdd_sme_monitor_mode_callback"
+        LLVM_SOURCE="${NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64"
+                test -d "${LLVM_SOURCE}"
 
-          # Callback registration
-          trace_symbol "sme_set_monitor_mode_cb"
+        cp -a "${LLVM_SOURCE}" "${ANDROID_LLVM_DIR}"
 
-          # MLME VDEV-UP
-          trace_symbol "sta_mlme_vdev_up_send"
+        test -x "${ANDROID_LLVM_DIR}/bin/clang"
+        test -x "${ANDROID_LLVM_DIR}/bin/ld.lld"
+        test -x "${ANDROID_LLVM_DIR}/bin/llvm-ar"
+        test -x "${ANDROID_LLVM_DIR}/bin/llvm-nm"
+        test -x "${ANDROID_LLVM_DIR}/bin/llvm-objcopy"
+        test -x "${ANDROID_LLVM_DIR}/bin/llvm-strip"
+        test -x "${ANDROID_LLVM_DIR}/bin/llvm-readelf"
+        test -x "${ANDROID_LLVM_DIR}/bin/llvm-objdump"
 
-          # MLME START continuation
-          trace_symbol "sta_mlme_vdev_start_continue"
+        echo
+        echo "=== Verify clang version ==="
 
-          # VDEV START response
-          trace_symbol "WMI_VDEV_START_RESP_EVENTID"
+        "${ANDROID_LLVM_DIR}/bin/clang" --version
 
-          log ""
-          log "============================================================"
-          log "VDEV START / VDEV UP REFERENCES"
-          log "============================================================"
+        "${ANDROID_LLVM_DIR}/bin/clang" --version \
+          | grep -q -F "clang version 21.0.0"
 
-          git grep -n -E \
-            'VDEV_START|VDEV_UP|vdev_start|vdev_up' \
-            -- "$SRC" |
-            head -n 300 |
-            tee -a "$OUT" || true
+           echo
+           echo "=== Verify clang source revision ==="
 
-          log ""
-          log "============================================================"
-          log "MONITOR MODE REFERENCES"
-          log "============================================================"
+           echo "Checking compiler identity..."
 
-          git grep -n -Ei \
-            'monitor_mode|monitor.*vdev|vdev.*monitor' \
-            -- "$SRC" |
-            head -n 300 |
-            tee -a "$OUT" || true
+           CLANG_VERSION="$("${ANDROID_LLVM_DIR}/bin/clang" --version)"
 
-          log ""
-          log "============================================================"
-          log "WMI EVENT REGISTRATION"
-          log "============================================================"
+            echo "${CLANG_VERSION}"
 
-          git grep -n \
-            'wmi_unified_register_event_handler' \
-            -- "$SRC" |
-            grep -Ei 'vdev|start|up|monitor' |
-            head -n 250 |
-            tee -a "$OUT" || true
+             echo
+             echo "=== Verify clang-r563880c ==="
 
-      - name: Inspect monitor event implementation
-        shell: bash
-        run: |
-          set -euo pipefail
+             echo "${CLANG_VERSION}" | grep -F "clang version 21.0.0"
+             echo "${CLANG_VERSION}" | grep -F "based on r563880c"
 
-          SRC="drivers/staging/qcacld-3.0"
-          OUT="$GITHUB_WORKSPACE/wifi-vdev-context.txt"
-
-          : > "$OUT"
-
-          {
-            echo "============================================================"
-            echo "TARGETED SOURCE CONTEXT"
-            echo "============================================================"
-
-            for symbol in \
-              "sme_process_monitor_mode_vdev_up_evt" \
-              "sta_mlme_vdev_up_send" \
-              "sta_mlme_vdev_start_continue" \
-              "hdd_sme_monitor_mode_callback" \
-              "__wlan_hdd_cfg80211_set_mon_ch"
-            do
               echo
-              echo "############################################################"
-              echo "### $symbol"
-              echo "############################################################"
+              echo "Android clang-r563880c source revision verified."
+    - name: Prepare Android LLVM toolchain
+      shell: bash
+      run: |
+        set -euo pipefail
 
-              git grep -n -B 12 -A 20 "$symbol" -- "$SRC" || true
+        ANDROID_LLVM_DIR="${GITHUB_WORKSPACE}/android-llvm"
+        LLVM_BIN="${ANDROID_LLVM_DIR}/bin"
+
+        test -x "${ANDROID_LLVM_DIR}/bin/clang"
+        test -x "${ANDROID_LLVM_DIR}/bin/ld.lld"
+        test -x "${ANDROID_LLVM_DIR}/bin/llvm-ar"
+        test -x "${ANDROID_LLVM_DIR}/bin/llvm-nm"
+        test -x "${ANDROID_LLVM_DIR}/bin/llvm-objcopy"
+        test -x "${ANDROID_LLVM_DIR}/bin/llvm-strip"
+        test -x "${ANDROID_LLVM_DIR}/bin/llvm-readelf"
+        test -x "${ANDROID_LLVM_DIR}/bin/llvm-objdump"
+
+        echo "=== Android LLVM toolchain selected ==="
+
+        echo "LLVM_DIR=${ANDROID_LLVM_DIR}" >> "${GITHUB_ENV}"
+        echo "LLVM_BIN=${LLVM_BIN}" >> "${GITHUB_ENV}"
+        echo "PATH=${LLVM_BIN}:${PATH}" >> "${GITHUB_ENV}"
+
+        echo
+        echo "=== Verify Android Clang directly ==="
+
+        "${ANDROID_LLVM_DIR}/bin/clang" --version
+        "${ANDROID_LLVM_DIR}/bin/ld.lld" --version
+
+        "${ANDROID_LLVM_DIR}/bin/clang" --version \
+          | grep -q -F 'clang version 21.0.0'
+
+        echo
+        echo "Android LLVM toolchain prepared successfully."
+    - name: Verify Android Clang 21.0.0 toolchain
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        export PATH="${LLVM_BIN}:${PATH}"
+
+        echo "clang:"
+        command -v clang
+        clang --version
+
+        echo
+        echo "ld.lld:"
+        command -v ld.lld
+        ld.lld --version
+
+        echo
+        echo "llvm-ar:"
+        command -v llvm-ar
+        llvm-ar --version
+
+        echo
+        echo "llvm-nm:"
+        command -v llvm-nm
+        llvm-nm --version
+
+        echo
+        echo "llvm-objcopy:"
+        command -v llvm-objcopy
+
+        echo
+        echo "llvm-strip:"
+        command -v llvm-strip
+
+        echo
+        echo "llvm-readelf:"
+        command -v llvm-readelf
+
+        echo
+        echo "Checking compiler generation..."
+
+        "${LLVM_BIN}/clang" --version |
+        grep -q -F 'clang version 21.0.0'
+
+        echo
+        echo "Android Clang 21.0.0 toolchain verification PASSED."
+    - name: Verify stock cebu configuration
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        test -f cebu-stock.config
+        test -s cebu-stock.config
+
+        echo "Stock configuration:"
+        ls -lh cebu-stock.config
+
+        echo
+        echo "Configuration line count:"
+        wc -l cebu-stock.config
+
+        echo
+        echo "First configuration lines:"
+        head -n 10 cebu-stock.config
+
+        echo
+        echo "Stock cebu configuration is present."
+    - name: Clone cebu kernel source
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        rm -rf kernel
+
+         git clone \
+           --branch "${KERNEL_BRANCH}" \
+           --single-branch \
+            "${KERNEL_REPO}" \
+             kernel
+
+             cd kernel
+
+          git checkout 39bcecd5c63df849923b1faadc9cde482648a1a1
+
+        echo
+        echo "============================================================"
+        echo "CEBU KERNEL SOURCE IDENTITY"
+        echo "============================================================"
+
+        CURRENT_COMMIT="$(git rev-parse HEAD)"
+        CURRENT_SHORT="$(git rev-parse --short=12 HEAD)"
+
+        echo
+        echo "Repository:"
+        git remote get-url origin
+
+        echo
+        echo "Branch:"
+        git branch --show-current
+
+        echo
+        echo "Current HEAD:"
+        echo "${CURRENT_COMMIT}"
+
+        echo
+        echo "Current 12-character commit:"
+        echo "${CURRENT_SHORT}"
+                test -n "${CURRENT_COMMIT}"
+        test -n "${CURRENT_SHORT}"
+
+        echo
+        echo "Kernel source successfully cloned."
+    - name: Verify cebu kernel source
+      working-directory: kernel
+      shell: bash
+      run: "set -euo pipefail\n\necho \"============================================================\"\necho \"\
+        CEBU KERNEL SOURCE VERIFIED\"\necho \"============================================================\"\n\n\
+       \  EXPECTED_COMMIT=\"39bcecd5c63df849923b1faadc9cde482648a1a1\"\n  \
+        CURRENT_BRANCH=\"$(git branch --show-current)\"\
+        \n CURRENT_COMMIT=\"$(git rev-parse HEAD)\"\n CURRENT_SHORT=\"$(git rev-parse --short=12 HEAD)\"\n\n  echo\n\
+        \  echo \"Branch:\"\n  echo \"${CURRENT_BRANCH}\"\n\n  echo\n  echo \"Commit:\"\n  echo \"${CURRENT_COMMIT}\"\
+        \n\n  echo\n  echo \"12-character commit:\"\n  echo \"${CURRENT_SHORT}\"\n\n  echo\n  echo \"Expected stock\
+        \ source revision:\"\n  echo \"${EXPECTED_COMMIT}\"\n\n   test \"${CURRENT_COMMIT}\" = \"${EXPECTED_COMMIT}\"\
+        \n\n  test -f Makefile\n  test -d arch/arm64\n  test -d drivers\n test -f arch/arm64/configs/vendor/bengal-perf_defconfig\n\
+        \n  echo\n  echo \"Defconfig:\"\n  echo \"arch/arm64/configs/vendor/bengal-perf_defconfig\"\n\n  echo\n\
+        \  echo \"Correct cebu kernel source verified.\"\n"
+        
+    - name: Verify QCACLD3 source tree
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        mkdir -p ../artifacts/source-audit
+
+        echo "=== QCACLD3 source tree ==="
+
+        test -d drivers/staging/qcacld-3.0
+        test -f drivers/staging/qcacld-3.0/Kbuild
+
+        echo "QCACLD3 root:"
+        find drivers/staging/qcacld-3.0 \
+          -maxdepth 3 \
+          -type f \
+          \( -name 'wlan_hdd_main.c' -o -name 'wlan_hdd_main.h' \) \
+          -print
+
+        HDD_MAIN_C="$(
+          find drivers/staging/qcacld-3.0 \
+            -type f \
+            -name 'wlan_hdd_main.c' \
+            -print -quit
+        )"
+
+        HDD_MAIN_H="$(
+          find drivers/staging/qcacld-3.0 \
+            -type f \
+            -name 'wlan_hdd_main.h' \
+            -print -quit
+        )"
+
+        if [ -z "${HDD_MAIN_C}" ]; then
+          echo "ERROR: wlan_hdd_main.c was not found anywhere in QCACLD3."
+          exit 1
+        fi
+
+        if [ -z "${HDD_MAIN_H}" ]; then
+          echo "ERROR: wlan_hdd_main.h was not found anywhere in QCACLD3."
+          exit 1
+        fi
+
+        echo "wlan_hdd_main.c: ${HDD_MAIN_C}"
+        echo "wlan_hdd_main.h: ${HDD_MAIN_H}"
+
+        {
+          echo "QCACLD3_ROOT=drivers/staging/qcacld-3.0"
+          echo "WLAN_HDD_MAIN_C=${HDD_MAIN_C}"
+          echo "WLAN_HDD_MAIN_H=${HDD_MAIN_H}"
+        } > ../artifacts/source-audit/qcacld3-paths.txt
+
+        echo "QCACLD3 source tree verified."
+        
+    - name: Clone NetHunter reference
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        rm -rf nethunter-reference
+
+        git clone \
+          --depth=1 \
+          --branch "${NETHUNTER_BRANCH}" \
+          "${NETHUNTER_REPO}" \
+          nethunter-reference
+
+        cd nethunter-reference
+
+        echo
+        echo "NetHunter reference:"
+        git remote -v
+
+        echo
+        echo "NetHunter branch:"
+        git branch --show-current
+
+        echo
+        echo "NetHunter commit:"
+        git rev-parse HEAD
+    - name: Verify required injection sources
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        NH="nethunter-reference/drivers/staging/qcacld-3.0"
+
+        REQUIRED_FILES=(
+          "${NH}/core/hdd/src/wlan_hdd_frame_inject.c"
+          "${NH}/core/hdd/src/wlan_hdd_frame_validate.c"
+          "${NH}/core/hdd/src/wlan_hdd_inject_security.c"
+          "${NH}/core/hdd/src/wlan_hdd_frame_inject_debug.c"
+          "${NH}/core/wma/src/wma_frame_inject.c"
+        )
+
+        for file in "${REQUIRED_FILES[@]}"; do
+          if [ ! -f "${file}" ]; then
+            echo "ERROR: required NetHunter source is missing:"
+            echo "${file}"
+            exit 1
+          fi
+
+          echo "FOUND: ${file}"
+        done
+
+        echo
+        echo "All required injection sources are present."
+    - name: Prepare audit directories
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        mkdir -p \
+          artifacts \
+          artifacts/source-audit
+
+        echo "Audit directories ready."
+    - name: Record source versions
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        {
+          echo "============================================================"
+          echo "CEBU NETHUNTER SOURCE MANIFEST"
+          echo "============================================================"
+          echo
+          echo "Kernel repository:"
+          echo "${KERNEL_REPO}"
+          echo
+          echo "Kernel branch:"
+          echo "${KERNEL_BRANCH}"
+          echo
+          echo "Kernel commit:"
+          git -C kernel rev-parse HEAD
+          echo
+          echo "NetHunter repository:"
+          echo "${NETHUNTER_REPO}"
+          echo
+          echo "NetHunter branch:"
+          echo "${NETHUNTER_BRANCH}"
+          echo
+          echo "NetHunter commit:"
+          git -C nethunter-reference rev-parse HEAD
+          echo
+          echo "Architecture:"
+          echo "${ARCH}"
+          echo
+          echo "Cross compiler:"
+          echo "${CROSS_COMPILE}"
+          echo
+          echo "LLVM:"
+          echo "${LLVM_DIR}"
+        } > artifacts/source-audit/source-manifest.txt
+
+        cat artifacts/source-audit/source-manifest.txt
+    - name: Record stock configuration hash
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        sha256sum \
+          cebu-stock.config \
+          > artifacts/source-audit/stock-config.sha256
+
+        cat artifacts/source-audit/stock-config.sha256
+    - name: Prepare kernel output directory
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        cd kernel
+
+        rm -rf "${OUT_DIR}"
+        mkdir -p "${OUT_DIR}"
+
+        echo "Kernel output directory:"
+        echo "${OUT_DIR}"
+    - name: Load stock cebu configuration
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        cd kernel
+
+        cp \
+          "${GITHUB_WORKSPACE}/cebu-stock.config" \
+          "${OUT_DIR}/.config"
+
+        test -s "${OUT_DIR}/.config"
+
+                echo "Loaded stock cebu configuration."
+
+        echo
+        echo "Configuration:"
+        wc -l "${OUT_DIR}/.config"
+
+        sha256sum "${OUT_DIR}/.config"
+    - name: Verify critical stock build configuration
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        CONFIG="${OUT_DIR}/.config"
+
+        test -s "${CONFIG}"
+
+        echo "============================================================"
+        echo " CRITICAL STOCK CONFIGURATION CHECK"
+        echo "============================================================"
+
+        REQUIRED=(
+          "CONFIG_LTO=y"
+          "CONFIG_THINLTO=y"
+          "CONFIG_LTO_CLANG=y"
+          "CONFIG_CFI=y"
+          "CONFIG_CFI_CLANG=y"
+          "CONFIG_CFI_CLANG_SHADOW=y"
+          "CONFIG_SHADOW_CALL_STACK=y"
+          "CONFIG_INIT_STACK_ALL_ZERO=y"
+          "CONFIG_DEBUG_INFO=y"
+          "CONFIG_MODVERSIONS=y"
+          "CONFIG_HZ_300=y"
+          "CONFIG_HZ=300"
+          "CONFIG_INPUT_TOUCHSCREEN=y"
+          "CONFIG_TOUCHSCREEN_NT36xxx_HOSTDL_SPI_MMI=m"
+          "CONFIG_INPUT_TOUCHSCREEN_FOCALTECH_0FLASH_MMI=m"
+          "CONFIG_TOUCHSCREEN_CHIPONE_TDDI=m"
+          "CONFIG_INPUT_MISC_FPC1020=m"
+          "CONFIG_I2C_QCOM_GENI=y"
+          "CONFIG_SPI_QCOM_GENI=y"
+          "CONFIG_WLAN=y"
+          "CONFIG_QCA_CLD_WLAN=m"
+          "CONFIG_RMNET=y"
+          "CONFIG_IPA3=y"
+          "CONFIG_RMNET_IPA3=y"
+          "CONFIG_USB_GADGET=y"
+          "CONFIG_USB_CONFIGFS=y"
+          "CONFIG_HIDRAW=y"
+          "CONFIG_UHID=y"
+        )
+
+        for expected in "${REQUIRED[@]}"; do
+          if ! grep -Fxq "${expected}" "${CONFIG}"; then
+            echo
+            echo "ERROR: Critical stock configuration mismatch:"
+            echo "  ${expected}"
+            echo
+            echo "The final kernel configuration is NOT stock-compatible."
+            exit 1
+          fi
+
+          echo "OK: ${expected}"
+        done
+
+        echo
+        echo "============================================================"
+        echo " CRITICAL STOCK CONFIGURATION PASSED"
+        echo "============================================================"
+    - name: Verify stock compiler configuration
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        cd kernel
+
+        CONFIG="${OUT_DIR}/.config"
+
+        echo "Stock compiler metadata:"
+
+        grep -E \
+          '^CONFIG_(CLANG_VERSION|AS_VERSION|LLD_VERSION)=' \
+          "${CONFIG}"
+
+        test \
+          "$(sed -n 's/^CONFIG_CLANG_VERSION=//p' "${CONFIG}")" \
+          = "210000"
+
+        test \
+          "$(sed -n 's/^CONFIG_AS_VERSION=//p' "${CONFIG}")" \
+          = "210000"
+
+        test \
+          "$(sed -n 's/^CONFIG_LLD_VERSION=//p' "${CONFIG}")" \
+          = "210000"
+
+        echo
+        echo "Stock compiler metadata verified."
+    - name: Create complete NetHunter configuration
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        mkdir -p kernel/nethunter-config
+
+        cat > kernel/nethunter-config/cebu-nethunter.config <<'EOF'
+        # ============================================================
+        # Moto G9 Power cebu - NetHunter additive configuration
+        #
+        # IMPORTANT:
+        # This is merged into the verified stock cebu configuration.
+        #
+        # Do NOT put:
+        #   CONFIG_LTO
+        #   CONFIG_CFI
+        #   CONFIG_SHADOW_CALL_STACK
+        #   CONFIG_MODVERSIONS
+        #   CONFIG_DEBUG_INFO
+        # etc. here.
+        #
+        # Those ABI/security/compiler settings come from stock.
+        #
+        # QCACLD3 FEATURE_* variables are Kbuild variables and do
+        # NOT belong in this file.
+        # ============================================================
+
+        # ============================================================
+        # HID
+        # ============================================================
+
+        CONFIG_HID=y
+        CONFIG_HIDRAW=y
+        CONFIG_UHID=y
+
+
+        # ============================================================
+        # BLUETOOTH
+        # ============================================================
+
+        CONFIG_BT=y
+        CONFIG_BT_BREDR=y
+        CONFIG_BT_LE=y
+
+        # RFCOMM deliberately built into kernel.
+        CONFIG_BT_RFCOMM=y
+        CONFIG_BT_RFCOMM_TTY=y
+
+        # NetHunter Bluetooth PAN.
+        CONFIG_BT_BNEP=m
+        CONFIG_BT_BNEP_MC_FILTER=y
+        CONFIG_BT_BNEP_PROTO_FILTER=y
+
+        # Bluetooth HID.
+        CONFIG_BT_HIDP=m
+
+        # Bluetooth HCI UART.
+        CONFIG_BT_HCIUART=m
+        CONFIG_BT_HCIUART_H4=y
+
+        # Bluetooth VHCI.
+        CONFIG_BT_HCIVHCI=m
+
+
+        # ============================================================
+        # USB GADGET / CONFIGFS
+        # ============================================================
+
+        CONFIG_USB_GADGET=y
+        CONFIG_USB_CONFIGFS=y
+        CONFIG_USB_CONFIGFS_UEVENT=y
+
+        CONFIG_USB_CONFIGFS_ACM=y
+        CONFIG_USB_CONFIGFS_NCM=y
+        CONFIG_USB_CONFIGFS_RNDIS=y
+        CONFIG_USB_CONFIGFS_ECM=y
+        CONFIG_USB_CONFIGFS_EEM=y
+
+        CONFIG_USB_CONFIGFS_F_FS=y
+        CONFIG_USB_CONFIGFS_F_HID=y
+
+
+        # ============================================================
+        # USB SERIAL
+        # ============================================================
+
+        CONFIG_USB_SERIAL=y
+        CONFIG_USB_SERIAL_GENERIC=y
+
+        CONFIG_USB_ACM=m
+
+
+        # ============================================================
+        # USB NETWORKING
+        # ============================================================
+
+        CONFIG_USB_USBNET=m
+        CONFIG_USB_NET_CDCETHER=m
+        CONFIG_USB_NET_CDC_NCM=m
+
+
+        # ============================================================
+        # USB ETHERNET ADAPTERS
+        # ============================================================
+
+        CONFIG_USB_RTL8150=m
+        CONFIG_USB_RTL8152=m
+
+
+        # ============================================================
+        # PACKET SOCKETS
+                # ============================================================
+
+        CONFIG_PACKET=y
+
+
+        # ============================================================
+        # SENSORS
+        # ============================================================
+
+        CONFIG_SENSORS_SSC=y
+        CONFIG_SENSORS_CLASS=m
+
+
+        # ============================================================
+        # QUALCOMM WLAN
+        # ============================================================
+
+        CONFIG_WLAN=y
+        CONFIG_QCA_CLD_WLAN=m
+
+
+        # ============================================================
+        # END
+        # ============================================================
+        EOF
+
+        test -s kernel/nethunter-config/cebu-nethunter.config
+
+        echo
+        echo "=== COMPLETE NETHUNTER CONFIGURATION ==="
+        cat kernel/nethunter-config/cebu-nethunter.config
+    - name: Verify injection feature symbols are not config symbols
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        cd kernel
+
+        FRAGMENT="nethunter-config/cebu-nethunter.config"
+
+        if grep -Eq \
+          '^CONFIG_(FEATURE_FRAME_INJECTION_SUPPORT|FEATURE_MONITOR_MODE_SUPPORT)(=| is not set)' \
+          "${FRAGMENT}"; then
+
+          echo "ERROR: QCACLD3 FEATURE_* variable was incorrectly added"
+          echo "to the kernel configuration fragment."
+
+          exit 1
+        fi
+
+        echo
+        echo "QCACLD3 FEATURE_* variables correctly absent."
+    - name: Merge NetHunter configuration
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        cd kernel
+
+        CONFIG_BEFORE="${OUT_DIR}/stock-before-nethunter.config"
+
+        cp \
+          "${OUT_DIR}/.config" \
+          "${CONFIG_BEFORE}"
+
+        scripts/kconfig/merge_config.sh \
+        -m \
+        -O "${OUT_DIR}" \
+        "${CONFIG_BEFORE}" \
+         nethunter-config/cebu-nethunter.config
+
+        test -s "${OUT_DIR}/.config"
+
+        echo
+        echo "NetHunter fragment merged."
+    - name: Audit CFI/LTO before olddefconfig
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        CONFIG="${OUT_DIR}/.config"
+
+        echo "============================================================"
+        echo "CFI/LTO CONFIG BEFORE OLDDEFCONFIG"
+        echo "============================================================"
+
+        for SYMBOL in \
+          LTO \
+          THINLTO \
+          LTO_CLANG \
+          LTO_NONE \
+          CFI \
+          CFI_CLANG \
+          CFI_CLANG_SHADOW \
+          SHADOW_CALL_STACK \
+          INIT_STACK_ALL_ZERO \
+          DEBUG_INFO \
+          MODVERSIONS
+        do
+          echo -n "${SYMBOL}: "
+          scripts/config --file "${CONFIG}" --state "${SYMBOL}" || true
+        done
+
+        echo
+        echo "Relevant raw config lines:"
+        grep -E \
+          '^(CONFIG_(LTO|THINLTO|LTO_CLANG|LTO_NONE|CFI|CFI_CLANG|CFI_CLANG_SHADOW|SHADOW_CALL_STACK|INIT_STACK_ALL_ZERO|DEBUG_INFO|MODVERSIONS)=|# CONFIG_(LTO|THINLTO|LTO_CLANG|LTO_NONE|CFI|CFI_CLANG|CFI_CLANG_SHADOW|SHADOW_CALL_STACK|INIT_STACK_ALL_ZERO|DEBUG_INFO|MODVERSIONS) is not set)' \
+          "${CONFIG}" || true
+    - name: Resolve Kconfig dependencies
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        echo "============================================================"
+        echo "KCONFIG RESOLUTION / ABI SAFETY CHECK"
+        echo "============================================================"
+
+        CONFIG="${OUT_DIR}/.config"
+        STOCK_CONFIG="${GITHUB_WORKSPACE}/cebu-stock.config"
+        PREMERGE_CONFIG="${OUT_DIR}/stock-before-nethunter.config"
+
+        test -s "${CONFIG}"
+        test -s "${STOCK_CONFIG}"
+        test -s "${PREMERGE_CONFIG}"
+
+        test -x "${LLVM_BIN}/clang"
+        test -x "${LLVM_BIN}/ld.lld"
+
+        export PATH="${LLVM_BIN}:${PATH}"
+
+        echo
+        echo "=== Verify Android Clang ==="
+        clang --version
+        ld.lld --version
+
+        echo
+        echo "=== Verify exact stock config before Kconfig resolution ==="
+
+        STOCK_SHA="$(sha256sum "${STOCK_CONFIG}" | awk '{print $1}')"
+        PREMERGE_SHA="$(sha256sum "${PREMERGE_CONFIG}" | awk '{print $1}')"
+
+        echo "Stock config:    ${STOCK_SHA}"
+        echo "Pre-merge copy:  ${PREMERGE_SHA}"
+
+        test "${STOCK_SHA}" = "${PREMERGE_SHA}"
+
+        echo
+        echo "=== Critical settings BEFORE olddefconfig ==="
+
+        REQUIRED=(
+          "LTO=y"
+          "THINLTO=y"
+          "LTO_CLANG=y"
+          "CFI=y"
+          "CFI_CLANG=y"
+          "CFI_CLANG_SHADOW=y"
+          "SHADOW_CALL_STACK=y"
+          "INIT_STACK_ALL_ZERO=y"
+          "DEBUG_INFO=y"
+          "MODVERSIONS=y"
+          "HZ_300=y"
+        )
+
+        for item in "${REQUIRED[@]}"; do
+          symbol="${item%%=*}"
+          expected="${item#*=}"
+
+          actual="$(
+            scripts/config \
+              --file "${CONFIG}" \
+              --state "${symbol}"
+          )"
+
+          echo "${symbol}: ${actual}"
+
+          test "${actual}" = "${expected}"
+        done
+
+        echo
+        echo "=== Running olddefconfig ==="
+
+        make \
+          O="${OUT_DIR}" \
+          ARCH="${ARCH}" \
+          LLVM=1 \
+          LLVM_IAS=1 \
+          CROSS_COMPILE="${CROSS_COMPILE}" \
+          olddefconfig
+
+
+
+        echo
+        echo "=========================================================="
+        echo "KCONFIG DELTA AFTER OLDDEFCONFIG"
+        echo "============================================================"
+
+        FINAL_CONFIG="${OUT_DIR}/.config"
+        PREMERGE_CONFIG="${OUT_DIR}/stock-before-nethunter.config"
+
+        awk '
+          /^[#] CONFIG_[A-Za-z0-9_]+ is not set$/ {
+            print $2 "=n"
+            next
+          }
+
+          /^CONFIG_[A-Za-z0-9_]+=/ {
+            line=$0
+            sub(/^CONFIG_/, "", line)
+
+                        split(line, a, "=")
+            print "CONFIG_" a[1] "=" a[2]
+          }
+        ' "${PREMERGE_CONFIG}" | sort > "${OUT_DIR}/premerge.normalized"
+
+        awk '
+          /^[#] CONFIG_[A-Za-z0-9_]+ is not set$/ {
+            print $2 "=n"
+            next
+          }
+
+          /^CONFIG_[A-Za-z0-9_]+=/ {
+            line=$0
+            sub(/^CONFIG_/, "", line)
+            split(line, a, "=")
+            print "CONFIG_" a[1] "=" a[2]
+          }
+        ' "${FINAL_CONFIG}" | sort > "${OUT_DIR}/final.normalized"
+
+        echo
+        echo "=== Changes introduced by NetHunter merge + olddefconfig ==="
+
+        comm -3 \
+          "${OUT_DIR}/premerge.normalized" \
+          "${OUT_DIR}/final.normalized" \
+          > "${OUT_DIR}/kconfig-full-delta.txt"
+
+        cat "${OUT_DIR}/kconfig-full-delta.txt"
+
+        echo
+        echo "=== DEBUG_FS dependency-related symbols ==="
+
+        grep -E \
+          '(^|[[:space:]])CONFIG_(DEBUG_FS|DEBUG_KERNEL|DEBUG_MISC|DEBUG_INFO|STACKTRACE|KALLSYMS|KALLSYMS_ALL|LOCKDEP|FTRACE|FUNCTION_TRACER|TRACING|KGDB|PROFILING)=' \
+          "${FINAL_CONFIG}" \
+          || true
+
+        echo
+        echo "=== Critical settings AFTER olddefconfig ==="
+
+        for item in "${REQUIRED[@]}"; do
+          symbol="${item%%=*}"
+          expected="${item#*=}"
+
+          actual="$(
+            scripts/config \
+              --file "${CONFIG}" \
+              --state "${symbol}"
+          )"
+
+          echo "${symbol}: ${actual}"
+
+          if [ "${actual}" != "${expected}" ]; then
+            echo
+            echo "ERROR: olddefconfig changed a stock ABI/security setting."
+            echo "  Symbol:   ${symbol}"
+            echo "  Expected: ${expected}"
+            echo "  Actual:   ${actual}"
+            echo
+            echo "This proves the problem occurs during Kconfig resolution."
+            exit 1
+          fi
+        done
+
+        echo
+        echo "============================================================"
+        echo "KCONFIG RESOLUTION PASSED"
+        echo "All required stock ABI/security settings survived."
+        echo "============================================================"
+    - name: Audit ABI-sensitive configuration
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        STOCK_CONFIG="${GITHUB_WORKSPACE}/cebu-stock.config"
+        FINAL_CONFIG="${OUT_DIR}/.config"
+
+         test -s "${STOCK_CONFIG}"
+         test -s "${FINAL_CONFIG}"
+
+         echo "============================================================"
+         echo "ABI-SENSITIVE CONFIGURATION AUDIT"
+         echo "============================================================"
+
+          FAILED=0
+
+           for HEADER in \
+           include/linux/module.h \
+           include/net/cfg80211.h
+          do
+         echo
+         echo "------------------------------------------------------------"
+         echo "Header: ${HEADER}"
+         echo "------------------------------------------------------------"
+
+            while read -r SYMBOL; do
+
+               STOCK_STATE="$(
+              scripts/config \
+           --file "${STOCK_CONFIG}" \
+           --state "${SYMBOL}" 2>/dev/null ||
+           true
+           )"
+
+             FINAL_STATE="$(
+             scripts/config \
+          --file "${FINAL_CONFIG}" \
+          --state "${SYMBOL}" 2>/dev/null ||
+           true
+          )"
+
+          if [ "${STOCK_STATE}" != "${FINAL_STATE}" ]; then
+          echo
+          echo "ABI CONFIG DIFFERENCE:"
+           echo "  ${SYMBOL}"
+           echo "  stock = ${STOCK_STATE:-unset}"
+           echo "  final = ${FINAL_STATE:-unset}"
+           FAILED=1
+          fi
+
+          done < <(
+          grep -oE 'CONFIG_[A-Z0-9_]+' "${HEADER}" |
+           sort -u
+           )
             done
-          } | tee "$OUT"
 
-      - name: Inspect relevant event IDs
-        shell: bash
-        run: |
-          set -euo pipefail
+           if [ "${FAILED}" -ne 0 ]; then
+        echo
+        echo "ERROR: ABI-sensitive configuration differs from stock."
+        echo "The NetHunter configuration must not change these"
+        echo "configuration conditions until the ABI is understood."
+        exit 1
+        fi
 
-          SRC="drivers/staging/qcacld-3.0"
-          OUT="$GITHUB_WORKSPACE/wifi-event-ids.txt"
+         echo
+         echo "ABI-sensitive configuration matches stock."
+    - name: Audit complete stock versus final config
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+         echo "=== Complete stock versus final config audit ==="
+
+        STOCK_CONFIG="${GITHUB_WORKSPACE}/cebu-stock.config"
+        FINAL_CONFIG="${OUT_DIR}/.config"
+        REPORT="${OUT_DIR}/stock-final-config.diff"
+
+        test -s "${STOCK_CONFIG}"
+         test -s "${FINAL_CONFIG}"
+
+        scripts/diffconfig \
+        "${STOCK_CONFIG}" \
+        "${FINAL_CONFIG}" \
+        > "${REPORT}" || true
+
+        echo
+        echo "=== Configuration differences ==="
+
+         if [ -s "${REPORT}" ]; then
+         cat "${REPORT}"
+         else
+         echo "No configuration differences."
+         fi
+
+        echo
+        echo "Configuration audit report:"
+         wc -l "${REPORT}"
+    - name: Set kernel release to stock-compatible release
+      working-directory: kernel
+      shell: bash
+      run: "set -euo pipefail\n\nCONFIG=\"${OUT_DIR}/.config\"\n\ntest -s \"${CONFIG}\"\n\necho \"=== Set stock-compatible\
+        \ kernel release ===\"\n\nscripts/config \\\n  --file \"${CONFIG}\" \\\n  --disable LOCALVERSION_AUTO \\\
+        \n  --set-str LOCALVERSION \"-perf\"\n\necho\necho \"=== Final local-version settings ===\"\n\ngrep -E '^CONFIG_LOCALVERSION='\
+        \ \"${CONFIG}\"\ngrep -E '^# CONFIG_LOCALVERSION_AUTO is not set$' \"${CONFIG}\"\n\ngrep -Fxq 'CONFIG_LOCALVERSION=\"\
+        -perf\"' \"${CONFIG}\"\ngrep -Fxq '# CONFIG_LOCALVERSION_AUTO is not set' \"${CONFIG}\"\n\n\n: > .scmversion\
+        \ntest -f .scmversion\necho \"SCM version suffix disabled.\"\n\necho\necho \"=== Verify expected kernel release\
+        \ ===\"\n\nRELEASE=\"$(make -s \\\n  O=\"${OUT_DIR}\" \\\n  ARCH=arm64 \\\n  LLVM=1 \\\n  LLVM_IAS=1 \\\n\
+        \  CROSS_COMPILE=\"${CROSS_COMPILE}\" \\\n  LOCALVERSION=\"-g39bcecd5c63d\" \\\n  kernelrelease)\"\n\necho\
+        \ \"KERNEL_RELEASE=${RELEASE}\"\n\ntest \"${RELEASE}\" = \"4.19.325-cip135-st19-perf-g39bcecd5c63d\"\n\n\
+        echo\necho \"Stock-compatible kernel release confirmed.\"\n\n\n\n  \n"
+    - name: Full stock-vs-final configuration audit
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        CONFIG="${OUT_DIR}/.config"
+        STOCK="../cebu-stock.config"
+        FRAGMENT="nethunter-config/cebu-nethunter.config"
+
+        test -s "${CONFIG}"
+        test -s "${STOCK}"
+        test -s "${FRAGMENT}"
+
+        echo "============================================================"
+        echo " FULL STOCK VS FINAL CONFIGURATION AUDIT"
+        echo "============================================================"
+
+        TMP_DIR="${GITHUB_WORKSPACE}/config-audit"
+        rm -rf "${TMP_DIR}"
+        mkdir -p "${TMP_DIR}"
+
+        STOCK_NORM="${TMP_DIR}/stock.normalized"
+        FINAL_NORM="${TMP_DIR}/final.normalized"
+        ALLOWED="${TMP_DIR}/allowed.symbols"
+        DIFFERENCES="${TMP_DIR}/unexpected-differences"
+
+        echo
+                echo "=== Normalize stock configuration ==="
+
+        awk '
+          /^# CONFIG_[A-Za-z0-9_]+ is not set$/ {
+            line=$0
+            sub(/^# /, "", line)
+            sub(/ is not set$/, "", line)
+            print line "=n"
+            next
+          }
+
+          /^CONFIG_[A-Za-z0-9_]+=/ {
+            pos=index($0, "=")
+            print substr($0, 1, pos-1) "=" substr($0, pos+1)
+          }
+        ' "${STOCK}" | sort -u > "${STOCK_NORM}"
+
+        echo
+        echo "=== Normalize final configuration ==="
+
+        awk '
+          /^# CONFIG_[A-Za-z0-9_]+ is not set$/ {
+            line=$0
+            sub(/^# /, "", line)
+            sub(/ is not set$/, "", line)
+            print line "=n"
+            next
+          }
+
+          /^CONFIG_[A-Za-z0-9_]+=/ {
+            pos=index($0, "=")
+            print substr($0, 1, pos-1) "=" substr($0, pos+1)
+          }
+        ' "${CONFIG}" | sort -u > "${FINAL_NORM}"
+
+        echo
+        echo "=== Build explicit NetHunter change allowlist ==="
+
+        ALLOWED_CHANGES="${TMP_DIR}/allowed.changes"
+
+        cat > "${ALLOWED_CHANGES}" <<'EOF'
+           CONFIG_HIDRAW=y
+           CONFIG_UHID=y
+           CONFIG_BT=y
+          CONFIG_BT_BREDR=y
+           CONFIG_BT_LE=y
+           CONFIG_BT_RFCOMM=y
+          CONFIG_BT_RFCOMM_TTY=y
+           CONFIG_BT_BNEP=m
+           CONFIG_BT_BNEP_PROTO_FILTER=y
+           CONFIG_BT_BNEP_MC_FILTER=y
+           CONFIG_BT_HIDP=m
+          CONFIG_BT_HCIUART=m
+          CONFIG_BT_HCIUART_H4=y
+           CONFIG_BT_HCIVHCI=m
+           CONFIG_USB_GADGET=y
+          CONFIG_USB_CONFIGFS=y
+           CONFIG_USB_CONFIGFS_UEVENT=y
+           CONFIG_USB_CONFIGFS_ACM=y
+            CONFIG_USB_CONFIGFS_NCM=y
+          CONFIG_USB_CONFIGFS_RNDIS=y
+          CONFIG_USB_CONFIGFS_ECM=y
+         CONFIG_USB_CONFIGFS_EEM=y
+          CONFIG_USB_CONFIGFS_F_HID=y
+          CONFIG_USB_CONFIGFS_F_FS=y
+           CONFIG_USB_SERIAL=y
+           CONFIG_USB_SERIAL_GENERIC=y
+           CONFIG_USB_USBNET=m
+           CONFIG_USB_NET_CDCETHER=m
+           CONFIG_USB_NET_CDC_NCM=m
+           CONFIG_PACKET=y
+           CONFIG_SENSORS_SSC=y
+            CONFIG_SENSORS_CLASS=m
+            CONFIG_WLAN=y
+             CONFIG_QCA_CLD_WLAN=m
+             CONFIG_LOCALVERSION_AUTO=n
+           EOF
+
+        sort -u "${ALLOWED_CHANGES}" -o "${ALLOWED_CHANGES}"
+
+        echo
+        echo "=== Explicitly allowed configuration changes ==="
+        cat "${ALLOWED_CHANGES}"
+
+        echo
+        echo "=== Compare every stock CONFIG symbol ==="
+
+        awk -F= '
+          NR==FNR {
+            stock[$1]=$0
+            next
+          }
 
           {
-            echo "============================================================"
-            echo "VDEV EVENT IDS"
-            echo "============================================================"
+            final[$1]=$0
+          }
 
-            git grep -n -E \
-              'WMI_.*VDEV.*(START|UP|STOP|DOWN).*EVENTID|VDEV_.*EVENTID' \
-              -- "$SRC" |
-              head -n 400 || true
+          END {
+            for (symbol in stock) {
+              if (!(symbol in final)) {
+                print "REMOVED|" symbol "|" stock[symbol] "|<missing>"
+              }
+              else if (stock[symbol] != final[symbol]) {
+                print "CHANGED|" symbol "|" stock[symbol] "|" final[symbol]
+              }
+            }
 
-            echo
-            echo "============================================================"
-            echo "MONITOR EVENT DEFINITIONS"
-            echo "============================================================"
+            for (symbol in final) {
+              if (!(symbol in stock)) {
+                print "ADDED|" symbol "|<absent-from-stock>|" final[symbol]
+              }
+            }
+          }
+        ' "${STOCK_NORM}" "${FINAL_NORM}" > "${TMP_DIR}/all-differences"
 
-            git grep -n -Ei \
-              'MONITOR.*EVENT|EVENT.*MONITOR|MONITOR_MODE.*EVENT' \
-              -- "$SRC" |
-              head -n 300 || true
-          } | tee "$OUT"
+          : > "${DIFFERENCES}"
 
+        awk -F'|' \
+          -v allowed="${ALLOWED_CHANGES}" \
+          -v differences="${DIFFERENCES}" '
+        BEGIN {
+          while ((getline line < allowed) > 0) {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
 
+            if (line == "")
+              continue
 
+            pos = index(line, "=")
 
+            if (pos == 0)
+              continue
 
+            symbol = substr(line, 1, pos - 1)
+            value  = substr(line, pos + 1)
 
+            allowed_value[symbol] = value
+          }
 
+          close(allowed)
+        }
 
-      - name: Trace monitor VDEV startup
-        shell: bash
-        run: |
-          set -eu
-          SRC="drivers/staging/qcacld-3.0"
+        {
+          type   = $1
+          symbol = $2
+          stock  = $3
+          final  = $4
 
-          echo "===== LIM MONITOR START ====="
-          git grep -n -B 20 -A 35 \
-            "lim_mon_mlme_vdev_start_send" -- "$SRC" || true
+          if ((symbol in allowed_value) &&
+              (final == allowed_value[symbol])) {
 
-          echo "===== MONITOR START CONTINUATION ====="
-          git grep -n -B 15 -A 35 \
-            "wma_mon_mlme_vdev_start_continue" -- "$SRC" || true
+            print "ALLOWED: " symbol ": " stock " -> " final
 
-          echo "===== MONITOR VDEV-UP SEND ====="
-          git grep -n -B 15 -A 35 \
-            "wma_mon_mlme_vdev_up_send" -- "$SRC" || true
+          } else {
 
-          echo "===== COMPLETION EVENT SENDER ====="
-          git grep -n -B 25 -A 25 \
-            "eWNI_SME_MONITOR_MODE_VDEV_UP" -- "$SRC" || true
+            print type "|" symbol "|" stock "|" final >> differences
+          }
+        }
+        ' "${TMP_DIR}/all-differences"
 
-          echo "===== FEATURE BUILD FLAG ====="
-          grep -n -A 3 -B 3 \
-            "CONFIG_FEATURE_MONITOR_MODE_SUPPORT" \
-            "$SRC/Kbuild" || true
+        echo
+        echo "============================================================"
+        echo " UNEXPECTED STOCK CONFIGURATION DIFFERENCES"
+        echo "============================================================"
 
-
-
-
-      - name: Dump exact monitor MLME path
-        shell: bash
-        run: |
-          set -eu
-          SRC="drivers/staging/qcacld-3.0"
-
-          echo "===== MONITOR MLME OPS ====="
-          sed -n '1110,1160p' \
-            "$SRC/components/mlme/core/src/wlan_mlme_vdev_mgr_interface.c"
-
-          echo "===== MONITOR OPS REGISTRATION ====="
-          sed -n '1418,1440p' \
-            "$SRC/components/mlme/core/src/wlan_mlme_vdev_mgr_interface.c"
-
-          echo "===== MONITOR START SEND ====="
-          git grep -n -B 10 -A 45 \
-            "mon_mlme_vdev_start_restart_send" -- "$SRC"
-
-          echo "===== MONITOR START CONTINUE ====="
-          git grep -n -B 10 -A 45 \
-            "mon_mlme_start_continue" -- "$SRC"
-
-          echo "===== MONITOR VDEV UP SEND ====="
-          git grep -n -B 10 -A 35 \
-            "mon_mlme_vdev_up_send" -- "$SRC"
-
-          echo "===== LIM COMPLETION ====="
-          sed -n '2850,2890p' \
-            "$SRC/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
-
-
-
-
-      - name: Dump WMA VDEV start response handler
-        shell: bash
-        run: |
-          set -u
-          SRC="drivers/staging/qcacld-3.0"
-
-          echo "===== FIND WMA VDEV START RESPONSE HANDLER ====="
-          git grep -n -B 5 -A 120 \
-            "wma_vdev_start_resp_handler" -- "$SRC" || true
-
+        if [ -s "${DIFFERENCES}" ]; then
+          cat "${DIFFERENCES}"
           echo
-          echo "===== FIND START RESPONSE DISPATCH ====="
-          git grep -n -B 10 -A 50 \
-            "mlme_vdev_start_continue" -- "$SRC" || true
+          echo "ERROR: Unexpected configuration differences detected."
+          echo "The final configuration is NOT an acceptable stock cebu baseline."
+          exit 1
+        fi
 
-          echo
-          echo "===== FIND MONITOR MODE REFERENCES IN WMA ====="
-          git grep -n -B 5 -A 15 \
-            "QDF_MONITOR_MODE" -- "$SRC/core/wma" |
-            head -n 200 || true
+        echo "No unexpected stock configuration differences detected."
 
-          echo
-          echo "===== FIND VDEV START RESPONSE EVENT ====="
-          git grep -n -B 10 -A 40 \
-            "VDEV_START_RESP" -- "$SRC/core/wma" || true
+        echo
+        echo "============================================================"
+        echo " STOCK CONFIGURATION PRESERVATION PASSED"
+        echo "============================================================"
+
+        echo
+        echo "Stock symbols:"
+        wc -l < "${STOCK_NORM}"
+
+        echo "Final symbols:"
+        wc -l < "${FINAL_NORM}"
+
+        echo
+        echo "The final configuration contains the complete stock"
+        echo "configuration plus only explicitly allowed NetHunter"
+        echo "and deliberate kernel-release changes."
+    - name: Verify NetHunter configuration
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        cd kernel
+
+        CONFIG="${OUT_DIR}/.config"
+
+        REQUIRED=(
+          "CONFIG_HIDRAW=y"
+          "CONFIG_UHID=y"
+          "CONFIG_BT=y"
+          "CONFIG_BT_BREDR=y"
+          "CONFIG_BT_LE=y"
+          "CONFIG_BT_RFCOMM=y"
+          "CONFIG_BT_RFCOMM_TTY=y"
+          "CONFIG_BT_HCIUART=m"
+          "CONFIG_BT_HCIVHCI=m"
+          "CONFIG_USB_GADGET=y"
+          "CONFIG_USB_CONFIGFS=y"
+                    "CONFIG_USB_CONFIGFS_ACM=y"
+          "CONFIG_USB_CONFIGFS_NCM=y"
+          "CONFIG_USB_CONFIGFS_RNDIS=y"
+          "CONFIG_USB_CONFIGFS_ECM=y"
+          "CONFIG_USB_CONFIGFS_EEM=y"
+          "CONFIG_USB_CONFIGFS_F_HID=y"
+          "CONFIG_PACKET=y"
+          "CONFIG_SENSORS_SSC=y"
+          "CONFIG_QCA_CLD_WLAN=m"
+        )
+
+        for symbol in "${REQUIRED[@]}"; do
+          if ! grep -Fxq "${symbol}" "${CONFIG}"; then
+            echo "ERROR: expected NetHunter configuration missing:"
+            echo "${symbol}"
+            exit 1
+          fi
+
+          echo "OK: ${symbol}"
+        done
+
+        echo
+        echo "NetHunter configuration verified."
+    - name: Verify QCACLD3 feature separation
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        cd kernel
+
+        CONFIG="${OUT_DIR}/.config"
+
+        if grep -Eq \
+          '^CONFIG_(FEATURE_FRAME_INJECTION_SUPPORT|FEATURE_MONITOR_MODE_SUPPORT)(=| is not set)' \
+          "${CONFIG}"; then
+
+          echo "ERROR: QCACLD3 FEATURE_* variable leaked into .config."
+          exit 1
+        fi
+
+        echo
+        echo "QCACLD3 FEATURE_* variables are absent from .config."
+    - name: Save configuration snapshots
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        cd kernel
+
+        cp \
+          "${OUT_DIR}/stock-before-nethunter.config" \
+          "${GITHUB_WORKSPACE}/artifacts/stock-before-nethunter.config"
+
+        cp \
+          "${OUT_DIR}/.config" \
+          "${GITHUB_WORKSPACE}/artifacts/config-after-nethunter.config"
+
+        cp \
+          nethunter-config/cebu-nethunter.config \
+          "${GITHUB_WORKSPACE}/artifacts/cebu-nethunter.config"
+
+        echo
+        echo "Configuration snapshots saved."
+
+        echo
+        echo "Hashes:"
+
+        sha256sum \
+          "${GITHUB_WORKSPACE}/artifacts/stock-before-nethunter.config" \
+          "${GITHUB_WORKSPACE}/artifacts/config-after-nethunter.config" \
+          "${GITHUB_WORKSPACE}/artifacts/cebu-nethunter.config"
+    - name: Import QCACLD3 injection sources
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        KERNEL_QCACLD="${GITHUB_WORKSPACE}/kernel/drivers/staging/qcacld-3.0"
+        NH_QCACLD="${GITHUB_WORKSPACE}/nethunter-reference/drivers/staging/qcacld-3.0"
+
+        # --------------------------------------------------------
+        # HDD injection sources
+        # --------------------------------------------------------
+
+        cp \
+          "${NH_QCACLD}/core/hdd/src/wlan_hdd_frame_inject.c" \
+          "${KERNEL_QCACLD}/core/hdd/src/"
+
+        cp \
+          "${NH_QCACLD}/core/hdd/src/wlan_hdd_frame_validate.c" \
+          "${KERNEL_QCACLD}/core/hdd/src/"
+
+        cp \
+          "${NH_QCACLD}/core/hdd/src/wlan_hdd_inject_security.c" \
+          "${KERNEL_QCACLD}/core/hdd/src/"
+
+        cp \
+          "${NH_QCACLD}/core/hdd/src/wlan_hdd_frame_inject_debug.c" \
+          "${KERNEL_QCACLD}/core/hdd/src/"
+
+        # --------------------------------------------------------
+        # WMA injection source
+        # --------------------------------------------------------
+
+        cp \
+          "${NH_QCACLD}/core/wma/src/wma_frame_inject.c" \
+          "${KERNEL_QCACLD}/core/wma/src/"
+
+        echo
+        echo "QCACLD3 injection source files imported."
 
 
+         echo "=== Verify original QCACLD3 HDD files survived import ==="
 
-      - name: Trace monitor VDEV start response dispatch
-        shell: bash
-        run: |
-          set -eu
-          SRC="drivers/staging/qcacld-3.0"
 
-          echo "===== WMA VDEV START RESPONSE ====="
-          sed -n '1190,1340p' \
-            "$SRC/core/wma/src/wma_dev_if.c"
+          echo "=== QCACLD3 HDD directory state after import ==="
 
-          echo "===== MONITOR START CONTINUE REFERENCES ====="
-          git grep -n -B 12 -A 30 \
-            "wma_mon_mlme_vdev_start_continue" -- "$SRC"
+        echo "QCACLD3 path:"
+        printf '%s\n' "${KERNEL_QCACLD}"
 
-          echo "===== MONITOR VDEV UP REFERENCES ====="
-          git grep -n -B 12 -A 30 \
-            "wma_mon_mlme_vdev_up_send" -- "$SRC"
+        echo
+        echo "HDD directory:"
+        ls -ld "${KERNEL_QCACLD}/core/hdd" || true
 
-          echo "===== MLME MONITOR OPS REGISTRATION ====="
-          git grep -n -B 15 -A 30 \
-            "mon_mlme_vdev_start_restart_send" -- \
-            "$SRC/components/mlme"
+        echo
+        echo "HDD src directory:"
+        ls -lad "${KERNEL_QCACLD}/core/hdd/src" || true
 
-      - name: Create investigation summary
-        shell: bash
-        run: |
-          set -euo pipefail
+        echo
+        echo "Original HDD files:"
+        ls -la \
+          "${KERNEL_QCACLD}/core/hdd/src/wlan_hdd_main.c" \
+          "${KERNEL_QCACLD}/core/hdd/src/wlan_hdd_main.h" \
+          2>&1 || true
+
+        echo
+        echo "Anything named wlan_hdd_main:"
+        find "${KERNEL_QCACLD}/core/hdd" \
+          -type f \
+          \( -name 'wlan_hdd_main.c' -o -name 'wlan_hdd_main.h' \) \
+          -print || true
+
+        echo
+        echo "Git tracked locations:"
+        git ls-files \
+          '*wlan_hdd_main.c' \
+          '*wlan_hdd_main.h' || true
+
+        echo
+        echo "=== End QCACLD3 HDD diagnostic ==="
+    - name: Import QCACLD3 injection headers
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        KERNEL_QCACLD="${GITHUB_WORKSPACE}/kernel/drivers/staging/qcacld-3.0"
+        NH_QCACLD="${GITHUB_WORKSPACE}/nethunter-reference/drivers/staging/qcacld-3.0"
+
+        find "${NH_QCACLD}" \
+          -type f \
+          \( \
+            -name '*frame*inject*.h' \
+            -o \
+            -name '*inject*security*.h' \
+            -o \
+            -name '*frame*validate*.h' \
+          \) \
+          -print \
+          | sort
+
+        # Copy the matching injection-related headers while
+        # preserving their relative directory structure.
+
+        while IFS= read -r header; do
+          relative="${header#${NH_QCACLD}/}"
+          destination="${KERNEL_QCACLD}/${relative}"
+
+          mkdir -p "$(dirname "${destination}")"
+          cp "${header}" "${destination}"
+
+          echo "Imported: ${relative}"
+        done < <(
+          find "${NH_QCACLD}" \
+            -type f \
+            \( \
+              -name '*frame*inject*.h' \
+              -o \
+              -name '*inject*security*.h' \
+              -o \
+              -name '*frame*validate*.h' \
+            \) \
+            -print
+        )
+
+
+        mkdir -p drivers/staging/qcacld-3.0/core/wma/inc
+
+        cp "${GITHUB_WORKSPACE}/nethunter-reference/drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h" \
+        drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h
+    - name: Route injection descriptor completions
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        WMA_MGMT="drivers/staging/qcacld-3.0/core/wma/src/wma_mgmt.c"
+
+        test -f "$WMA_MGMT"
+
+        echo "=== Ensuring WMA frame injection header is included ==="
+
+                if ! grep -Fq '#include "wma_frame_inject.h"' "$WMA_MGMT"; then
+
+          awk '
+          BEGIN {
+              inserted = 0
+          }
+
+          /^#include/ {
+              print
+              if (!inserted &&
+                  $0 ~ /#include "wma\.h"/) {
+                  print "#include \"wma_frame_inject.h\""
+                  inserted = 1
+              }
+              next
+          }
 
           {
-            echo "QCACLD3 Wi-Fi Monitor Investigation"
-            echo
-            echo "Repository:"
-            echo "LineageOS/android_kernel_motorola_sm6225"
-            echo
-            echo "Branch:"
-            echo "lineage-23.2"
-            echo
-            echo "Commit:"
-            git rev-parse HEAD
-            echo
-            echo "Important files:"
-            find drivers/staging/qcacld-3.0 \
-              -type f \
-              \( -name '*.c' -o -name '*.h' \) |
-              grep -E \
-              'wlan_hdd_cfg80211|wlan_hdd_main|vdev_mgr|sme|wmi' |
-              head -n 100
-          } > wifi-investigation-summary.txt
+              print
+          }
 
+          END {
+              if (!inserted) {
+                  print "ERROR: Could not insert wma_frame_inject.h"
+                  exit 2
+              }
+          }
+          ' "$WMA_MGMT" > "${WMA_MGMT}.new"
 
+          mv "${WMA_MGMT}.new" "$WMA_MGMT"
+        fi
 
+        echo
+        echo "=== Patching single management-TX completion ==="
 
-      - name: Capture exact WMA response handler
-        shell: bash
-        run: |
-          set -eu
-          SRC="drivers/staging/qcacld-3.0"
-          OUT="wifi-vdev-investigation.txt"
+        awk '
+        BEGIN {
+            patched = 0
+        }
+
+        !patched && /mgmt_txrx_get_nbuf[[:space:]]*\(/ {
+            print "        /* NETHUNTER_INJECTION_COMPLETION_BRIDGE */"
+            print "#ifdef FEATURE_FRAME_INJECTION_SUPPORT"
+            print "        if (WMA_IS_INJECTION_DESC_ID(desc_id)) {"
+            print "                QDF_STATUS injection_status;"
+            print ""
+            print "                injection_status ="
+            print "                        wma_handle_injection_fw_response("
+            print "                                wma_handle, desc_id, status);"
+            print ""
+            print "                if (injection_status != QDF_STATUS_SUCCESS)"
+            print "                        wma_err(\"Failed to process injection completion: %d\","
+            print "                                injection_status);"
+            print ""
+            print "                return 0;"
+            print "        }"
+            print "#endif"
+            print ""
+            print
+            patched = 1
+            next
+        }
+
+        {
+            print
+        }
+
+        END {
+            if (!patched) {
+                print "ERROR: Could not find normal MGMT TX descriptor lookup."
+                exit 3
+            }
+        }
+        ' "$WMA_MGMT" > "${WMA_MGMT}.new"
+
+        mv "${WMA_MGMT}.new" "$WMA_MGMT"
+
+        echo
+        echo "=== Patching bundled management-TX completion ==="
+
+        awk '
+        BEGIN {
+            patched = 0
+        }
+
+        !patched &&
+        /for \(i = 0; i < num_reports; i\+\+\)/ {
+
+            print
+            print "        {"
+            print "                uint32_t injection_desc_id = desc_ids[i];"
+            print ""
+            print "#ifdef FEATURE_FRAME_INJECTION_SUPPORT"
+            print "                if (WMA_IS_INJECTION_DESC_ID(injection_desc_id)) {"
+            print "                        QDF_STATUS injection_status;"
+            print ""
+            print "                        injection_status ="
+            print "                                wma_handle_injection_fw_response("
+            print "                                        wma_handle,"
+            print "                                        injection_desc_id,"
+            print "                                        status[i]);"
+            print ""
+            print "                        if (injection_status != QDF_STATUS_SUCCESS)"
+            print "                                wma_err(\"Failed to process bundled injection completion: %d\","
+            print "                                        injection_status);"
+            print ""
+            print "                        continue;"
+            print "                }"
+            print "#endif"
+            print "        }"
+
+            patched = 1
+            next
+        }
+
+        {
+            print
+        }
+
+        END {
+            if (!patched) {
+                print "ERROR: Could not find management bundle completion loop."
+                exit 4
+            }
+        }
+        ' "$WMA_MGMT" > "${WMA_MGMT}.new"
+
+        mv "${WMA_MGMT}.new" "$WMA_MGMT"
+
+        echo
+        echo "=== Verifying injection completion API ==="
+
+        grep -n \
+          'wma_handle_injection_fw_response' \
+          "$WMA_MGMT"
+
+        echo
+        echo "Injection completion routing patch completed successfully."
+    - name: Inspect hdd_set_station_ops
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        HDD_MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+
+        awk '
+        /void hdd_set_station_ops\(struct net_device \*dev\)/ {
+            found = 1
+            depth = 0
+        }
+
+        found {
+            print
+        }
+
+        found {
+            line = $0
+            opens = gsub(/\{/, "{", line)
+            closes = gsub(/\}/, "}", line)
+            depth += opens - closes
+
+            if (depth == 0 && closes > 0)
+                exit
+        }
+        ' "$HDD_MAIN"
+    - name: Route per-interface monitor netdev ops
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+
+        test -f "$MAIN"
+
+        echo "=== SAFE hdd_set_station_ops NORMALIZATION ==="
+        echo "Target: $MAIN"
+
+        cp "$MAIN" "$MAIN.before_station_ops_fix"
+
+        echo
+        echo "=== LOCATING EXISTING DEFINITIONS ==="
+
+        awk '
+        /(^|[[:space:]])(static[[:space:]]+)?void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
+            print NR ":" $0
+        }
+        ' "$MAIN"
+
+        echo
+        echo "=== NORMALIZING LINKAGE ONLY ==="
+
+        awk '
+        {
+            line = $0
+
+            sub(/^[[:space:]]*static[[:space:]]+void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/,
+                "void hdd_set_station_ops(",
+                line)
+
+            print line
+        }
+        ' "$MAIN" > "$MAIN.tmp"
+
+        mv "$MAIN.tmp" "$MAIN"
+
+        echo
+        echo "=== REMOVING ONLY ethtool ASSIGNMENT FROM hdd_set_station_ops ==="
+
+                if ! grep -Fq '#include "wma_frame_inject.h"' "$WMA_MGMT"; then
+
+          awk '
+          BEGIN {
+              inserted = 0
+          }
+
+          /^#include/ {
+              print
+              if (!inserted &&
+                  $0 ~ /#include "wma\.h"/) {
+                  print "#include \"wma_frame_inject.h\""
+                  inserted = 1
+              }
+              next
+          }
 
           {
-            echo
-            echo "===== WMA VDEV START RESPONSE HANDLER ====="
-            sed -n '1194,1345p' \
-              "$SRC/core/wma/src/wma_dev_if.c"
+              print
+          }
 
-            echo
-            echo "===== MLME RESPONSE CALLBACK ====="
-            sed -n '1288,1315p' \
-              "$SRC/components/mlme/core/src/wlan_mlme_vdev_mgr_interface.c"
+          END {
+              if (!inserted) {
+                  print "ERROR: Could not insert wma_frame_inject.h"
+                  exit 2
+              }
+          }
+          ' "$WMA_MGMT" > "${WMA_MGMT}.new"
 
-            echo
-            echo "===== MONITOR CALLBACK REGISTRATION ====="
-            sed -n '1418,1438p' \
-              "$SRC/components/mlme/core/src/wlan_mlme_vdev_mgr_interface.c"
-          } | tee -a "$OUT"
+          mv "${WMA_MGMT}.new" "$WMA_MGMT"
+        fi
 
+        echo
+        echo "=== Patching single management-TX completion ==="
 
+        awk '
+        BEGIN {
+            patched = 0
+        }
 
+        !patched && /mgmt_txrx_get_nbuf[[:space:]]*\(/ {
+            print "        /* NETHUNTER_INJECTION_COMPLETION_BRIDGE */"
+            print "#ifdef FEATURE_FRAME_INJECTION_SUPPORT"
+            print "        if (WMA_IS_INJECTION_DESC_ID(desc_id)) {"
+            print "                QDF_STATUS injection_status;"
+            print ""
+            print "                injection_status ="
+            print "                        wma_handle_injection_fw_response("
+            print "                                wma_handle, desc_id, status);"
+            print ""
+            print "                if (injection_status != QDF_STATUS_SUCCESS)"
+            print "                        wma_err(\"Failed to process injection completion: %d\","
+            print "                                injection_status);"
+            print ""
+            print "                return 0;"
+            print "        }"
+            print "#endif"
+            print ""
+            print
+            patched = 1
+            next
+        }
 
-      - name: Capture monitor VDEV completion path
-        shell: bash
-        run: |
-          set -eu
-          SRC="drivers/staging/qcacld-3.0"
-          OUT="wifi-vdev-investigation.txt"
+        {
+            print
+        }
 
-          {
-            echo
-            echo "===== COMPLETE WMA START RESPONSE HANDLER ====="
-            sed -n '1194,1385p' \
-              "$SRC/core/wma/src/wma_dev_if.c"
+        END {
+            if (!patched) {
+                print "ERROR: Could not find normal MGMT TX descriptor lookup."
+                exit 3
+            }
+        }
+        ' "$WMA_MGMT" > "${WMA_MGMT}.new"
 
-            echo
-            echo "===== MONITOR START CONTINUE AND UP SEND ====="
-            sed -n '4608,4665p' \
-              "$SRC/core/wma/src/wma_utils.c"
+        mv "${WMA_MGMT}.new" "$WMA_MGMT"
 
-            echo
-            echo "===== SME MONITOR UP CALLBACK ====="
-            sed -n '16425,16475p' \
-              "$SRC/core/sme/src/common/sme_api.c"
+        echo
+        echo "=== Patching bundled management-TX completion ==="
 
-            echo
-            echo "===== HDD MONITOR CALLBACK ====="
-            sed -n '18057,18110p' \
-              "$SRC/core/hdd/src/wlan_hdd_main.c"
+        awk '
+        BEGIN {
+            patched = 0
+        }
 
-            echo
-            echo "===== CHANNEL SWITCH RESPONSE DEFINITIONS ====="
-            grep -Rn -E \
-              'wma_handle_channel_switch_resp|lim_process_switch_channel_rsp' \
-              "$SRC/core/wma" "$SRC/core/mac/src/pe/lim" || true
+        !patched &&
+        /for \(i = 0; i < num_reports; i\+\+\)/ {
 
-            echo
-            echo "===== MONITOR UP EVENT PRODUCER AND HANDLER ====="
-            grep -Rn -E \
-              'eWNI_SME_MONITOR_MODE_VDEV_UP|sme_process_monitor_mode_vdev_up_evt' \
-              "$SRC/core/mac/src/pe/lim" \
-              "$SRC/core/sme/src/common/sme_api.c" || true
-          } | tee -a "$OUT"
+            print
+            print "        {"
+            print "                uint32_t injection_desc_id = desc_ids[i];"
+            print ""
+            print "#ifdef FEATURE_FRAME_INJECTION_SUPPORT"
+            print "                if (WMA_IS_INJECTION_DESC_ID(injection_desc_id)) {"
+            print "                        QDF_STATUS injection_status;"
+            print ""
+            print "                        injection_status ="
+            print "                                wma_handle_injection_fw_response("
+            print "                                        wma_handle,"
+            print "                                        injection_desc_id,"
+            print "                                        status[i]);"
+            print ""
+            print "                        if (injection_status != QDF_STATUS_SUCCESS)"
+            print "                                wma_err(\"Failed to process bundled injection completion: %d\","
+            print "                                        injection_status);"
+            print ""
+            print "                        continue;"
+            print "                }"
+            print "#endif"
+            print "        }"
 
+            patched = 1
+            next
+        }
 
+        {
+            print
+        }
 
+        END {
+            if (!patched) {
+                print "ERROR: Could not find management bundle completion loop."
+                exit 4
+            }
+        }
+        ' "$WMA_MGMT" > "${WMA_MGMT}.new"
 
-      - name: Capture LIM monitor completion logic
-        shell: bash
-        run: |
-          set -eu
-          SRC="drivers/staging/qcacld-3.0"
-          OUT="wifi-vdev-investigation.txt"
+        mv "${WMA_MGMT}.new" "$WMA_MGMT"
 
-          {
-            echo
-            echo "===== LIM SWITCH CHANNEL RESPONSE ====="
-            sed -n '2860,2960p' \
-              "$SRC/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
+        echo
+        echo "=== Verifying injection completion API ==="
 
-            echo
-            echo "===== MONITOR VDEV START SEND ====="
-            sed -n '8585,8665p' \
-              "$SRC/core/mac/src/pe/lim/lim_utils.c"
+        grep -n \
+          'wma_handle_injection_fw_response' \
+          "$WMA_MGMT"
 
-            echo
-            echo "===== MONITOR CALLBACK REGISTRATION SITES ====="
-            grep -Rn -E \
-              'sme_set_monitor_mode_cb|hdd_sme_monitor_mode_callback' \
-              "$SRC/core/hdd" "$SRC/core/sme" || true
-          } | tee -a "$OUT"
+        echo
+        echo "Injection completion routing patch completed successfully."
+    - name: Inspect hdd_set_station_ops
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
 
+        HDD_MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
 
-          
+        awk '
+        /void hdd_set_station_ops\(struct net_device \*dev\)/ {
+            found = 1
+            depth = 0
+        }
 
+        found {
+            print
+        }
 
+        found {
+            line = $0
+            opens = gsub(/\{/, "{", line)
+            closes = gsub(/\}/, "}", line)
+            depth += opens - closes
 
-      - name: Capture complete monitor channel-switch logic
-        shell: bash
-        run: |
-          set -eu
-          SRC="drivers/staging/qcacld-3.0"
-          OUT="wifi-vdev-investigation.txt"
+            if (depth == 0 && closes > 0)
+                exit
+        }
+        ' "$HDD_MAIN"
+    - name: Route per-interface monitor netdev ops
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
 
-          {
-            echo
-            echo "===== COMPLETE CHANNEL SWITCH RESPONSE ====="
-            sed -n '2900,3020p' \
-              "$SRC/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
+        MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
 
-            echo
-            echo "===== MONITOR VDEV STARTED HANDLER ====="
-            sed -n '2220,2330p' \
-              "$SRC/core/mac/src/pe/lim/lim_utils.c"
+        test -f "$MAIN"
 
-            echo
-            echo "===== MONITOR CHANNEL REASON SETTING ====="
-            grep -Rn -C 5 \
-              'LIM_SWITCH_CHANNEL_MONITOR' \
-              "$SRC/core/mac/src/pe/lim" || true
+        echo "=== SAFE hdd_set_station_ops NORMALIZATION ==="
+        echo "Target: $MAIN"
 
-            echo
-            echo "===== MONITOR VDEV-UP EVENT POSTING ====="
-            grep -Rn -C 8 \
-              'eWNI_SME_MONITOR_MODE_VDEV_UP' \
-              "$SRC/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c" \
-              "$SRC/core/sme/src/common/sme_api.c" || true
-          } | tee -a "$OUT"
+        cp "$MAIN" "$MAIN.before_station_ops_fix"
 
+        echo
+        echo "=== LOCATING EXISTING DEFINITIONS ==="
 
+        awk '
+        /(^|[[:space:]])(static[[:space:]]+)?void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
+            print NR ":" $0
+        }
+        ' "$MAIN"
 
+        echo
+        echo "=== NORMALIZING LINKAGE ONLY ==="
 
-      - name: Locate monitor switch response implementation
-        shell: bash
-        run: |
-          set -eu
-          SRC="drivers/staging/qcacld-3.0"
-          OUT="wifi-vdev-investigation.txt"
+        awk '
+        {
+            line = $0
 
-          {
-            echo
-            echo "===== ALL DEFINITIONS OF lim_handle_mon_switch_channel_rsp ====="
+            sub(/^[[:space:]]*static[[:space:]]+void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/,
+                "void hdd_set_station_ops(",
+                line)
 
-            grep -Rnl \
-              --include='*.c' \
-              --include='*.h' \
-              'lim_handle_mon_switch_channel_rsp' \
-              "$SRC" || true
+            print line
+        }
+        ' "$MAIN" > "$MAIN.tmp"
 
-            echo
-            echo "===== FUNCTION DEFINITION CONTEXT ====="
+        mv "$MAIN.tmp" "$MAIN"
 
-            while IFS= read -r f; do
-              echo "----- FILE: $f -----"
-              grep -n -B 15 -A 100 \
-                'lim_handle_mon_switch_channel_rsp' \
-                "$f" || true
-            done < <(
-              grep -RIl \
-                --include='*.c' \
-                --include='*.h' \
-                'lim_handle_mon_switch_channel_rsp' \
-                "$SRC" || true
-            )
-          } | tee -a "$OUT"
+        echo
+        echo "=== REMOVING ONLY ethtool ASSIGNMENT FROM hdd_set_station_ops ==="
 
-      - name: Upload WiFi investigation
-        uses: actions/upload-artifact@v4
-        with:
-          name: cebu-wifi-vdev-investigation
-          path: |
-            wifi-vdev-investigation.txt
-            wifi-vdev-context.txt
-            wifi-event-ids.txt
-            wifi-investigation-summary.txt
-          if-no-files-found: error
+        
+        
+        
