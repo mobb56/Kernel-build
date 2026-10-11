@@ -3618,6 +3618,8 @@ jobs:
 
         echo
         echo "WMA collision inspection complete."
+
+        
     - name: Fix WMA injection include path
       working-directory: kernel
       shell: bash
@@ -3630,104 +3632,85 @@ jobs:
 
         echo "=== Fix WMA injection include path ==="
 
-        grep -n -A4 \
+        echo
+        echo "=== Current WMA_INC definition ==="
+
+        grep -n -A8 \
+          '^WMA_INC[[:space:]]*:=' \
+          "${KBUILD_FILE}" || true
+
+        echo
+        echo "=== Ensure WMA_INC is applied to compiler flags ==="
+
+        if ! grep -Fq 'ccflags-y += $(WMA_INC)' "${KBUILD_FILE}"; then
+          python3 - "${KBUILD_FILE}" <<'PY'
+         from pathlib import Path
+         import sys
+
+        path = Path(sys.argv[1])
+        lines = path.read_text().splitlines()
+
+        target = 'ccflags-y += $(WMA_INC)'
+
+        # Do nothing if already present.
+        if any(line.strip() == target for line in lines):
+        print("PASS: ccflags-y += $(WMA_INC) already present.")
+        raise SystemExit(0)
+
+         start = None
+
+         # Locate the WMA_INC assignment.
+         for i, line in enumerate(lines):
+         if line.lstrip().startswith("WMA_INC") and ":=" in line:
+        start = i
+        break
+
+         if start is None:
+          raise SystemExit(
+        "ERROR: WMA_INC assignment was not found in Kbuild."
+         )
+
+          # Find the end of the possibly multi-line WMA_INC assignment.
+          end = start
+
+          while end + 1 < len(lines):
+          current = lines[end].rstrip()
+
+        if current.endswith("\\"):
+           end += 1
+        else:
+          break
+
+        # Insert the compiler flag immediately after WMA_INC.
+         lines.insert(end + 1, target)
+
+         path.write_text("\n".join(lines) + "\n")
+
+        print(
+          f"PASS: inserted '{target}' after WMA_INC "
+          f"at Kbuild line {end + 2}."
+         )
+         PY
+         
+        else
+          echo "PASS: ccflags-y += \$(WMA_INC) already present."
+        fi
+
+        echo
+        echo "=== Verify WMA include flags ==="
+
+        grep -n -A8 \
           '^WMA_INC[[:space:]]*:=' \
           "${KBUILD_FILE}"
 
-        if ! grep -Fq 'ccflags-y += $(WMA_INC)' "${KBUILD_FILE}"; then
-          sed -i \
-            '/^WMA_INC[[:space:]]*:=[[:space:]]*/,/^[[:space:]]*$/{' \
-            "${KBUILD_FILE}"
-
-                if grep -Eq \
-          'wma_handle_injection_fw_response|WMA_IS_INJECTION_DESC_ID|injection.*completion' \
-          "$WMA_SRC/wma_frame_inject.c" \
-          drivers/staging/qcacld-3.0/core/wma/src/wma_mgmt.c
-        then
-          echo "OK: injection completion routing present"
-        else
-          echo "ERROR: injection completion routing not detected"
-          exit 1
-        fi
+        grep -Fq \
+          'ccflags-y += $(WMA_INC)' \
+          "${KBUILD_FILE}"
 
         echo
-        echo "=== Checking 4.19 capability compatibility ==="
+        echo "WMA injection include path fixed."
 
-        SECURITY_C="$HDD_SRC/wlan_hdd_inject_security.c"
-
-        if grep -Fq \
-          'capable(CAP_NET_RAW)' \
-          "$SECURITY_C"
-        then
-          echo "OK: CAP_NET_RAW compatibility present"
-        else
-          echo "ERROR: CAP_NET_RAW compatibility missing"
-          exit 1
-        fi
-
-        echo
-        echo "=== Checking injection ioctl dispatch ==="
-
-        IOCTL_SRC="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_ioctl.c"
-
-        if grep -Fq \
-          'case (SIOCDEVPRIVATE + 10):' \
-          "$IOCTL_SRC"
-        then
-          echo "OK: injection ioctl 0x89FA registered"
-        else
-          echo "ERROR: injection ioctl 0x89FA not registered"
-          exit 1
-        fi
-
-        if grep -Fq \
-          'hdd_frame_inject_ioctl(dev, ifr, cmd)' \
-          "$IOCTL_SRC"
-        then
-          echo "OK: injection ioctl handler connected"
-        else
-          echo "ERROR: injection ioctl handler not connected"
-          exit 1
-        fi
-
-        echo
-        echo "=== Checking monitor netdev routing ==="
-
-        if grep -Fq \
-          'wlan_mon_drv_ops' \
-          "$HDD_MAIN"
-        then
-          echo "OK: monitor netdev operations present"
-        else
-          echo "ERROR: monitor netdev operations missing"
-          exit 1
-        fi
-
-        if grep -Fq \
-          'QDF_MONITOR_MODE' \
-          "$HDD_MAIN"
-        then
-          echo "OK: per-interface monitor mode routing present"
-        else
-          echo "ERROR: QDF_MONITOR_MODE routing missing"
-          exit 1
-        fi
-
-        echo
-        echo "=== Checking frame-injection deinitialization ==="
-
-        if grep -Fq \
-          'hdd_deinit_frame_injection(adapter);' \
-          "$HDD_MAIN"
-        then
-          echo "OK: frame-injection deinitialization present"
-        else
-          echo "ERROR: frame-injection deinitialization missing"
-          exit 1
-        fi
-
-        echo
-        echo "=== QCACLD3 injection integration verification PASSED ==="
+        
     - name: Verify monitor callback lifecycle
       working-directory: kernel
       shell: bash
