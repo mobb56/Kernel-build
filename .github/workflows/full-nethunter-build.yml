@@ -1074,7 +1074,7 @@ jobs:
 
 
      
-      - name: Audit actual wlan_vdev_mlme_get_opmode implementation
+      - name: Audit exact wlan_vdev_mlme_get_opmode definition
         working-directory: kernel
         shell: bash
         run: |
@@ -1082,49 +1082,34 @@ jobs:
 
           QCACLD="drivers/staging/qcacld-3.0"
 
-          echo "========================================"
-          echo "ACTUAL MLME OPMODE IMPLEMENTATION AUDIT"
-          echo "========================================"
+           echo "========================================"
+           echo "EXACT MLME OPMODE DEFINITION AUDIT"
+           echo "========================================"
 
-           IMPL="$(grep -RIl \
+           echo
+           echo "=== Definitions ==="
+
+           grep -RInE \
             --include='*.c' \
-             -E '(^|[[:space:]])(enum[[:space:]]+QDF_OPMODE[[:space:]]+)?wlan_vdev_mlme_get_opmode[[:space:]]*\(' \
-             "$QCACLD" 2>/dev/null | while read -r f; do
-             if grep -Eq \
-             '(^|[[:space:]])(enum[[:space:]]+QDF_OPMODE[[:space:]]+)?wlan_vdev_mlme_get_opmode[[:space:]]*\([^;]*\)[[:space:]]*\{' \
-             "$f"; then
-             echo "$f"
-             break
-            fi
-          done)"
+            --include='*.h' \
+            '^[[:space:]]*(enum[[:space:]]+QDF_OPMODE|QDF_OPMODE)[[:space:]]+wlan_vdev_mlme_get_opmode[[:space:]]*\(' \
+             "$QCACLD" 2>/dev/null | head -20 || true
 
-           if [ -z "$IMPL" ]; then
-           echo "ERROR: Actual implementation was not found"
-          exit 1
-          fi
+            echo
+            echo "=== All direct references ==="
 
-          echo
-          echo "Implementation:"
-          echo "$IMPL"
+            grep -RInE \
+            --include='*.c' \
+            --include='*.h' \
+            'wlan_vdev_mlme_get_opmode[[:space:]]*\(' \
+            "$QCACLD" 2>/dev/null | head -30 || true
 
-          LINE="$(grep -n -E \
-          '(^|[[:space:]])(enum[[:space:]]+QDF_OPMODE[[:space:]]+)?wlan_vdev_mlme_get_opmode[[:space:]]*\([^;]*\)[[:space:]]*\{' \
-          "$IMPL" | head -1 | cut -d: -f1)"
-
-          echo
-          echo "Function starts at line: $LINE"
-          echo
-          echo "=== FUNCTION BODY ==="
-
-          END=$((LINE + 100))
-          sed -n "${LINE},${END}p" "$IMPL"
-
-          echo
-          echo "========================================"
-          echo "OPMODE IMPLEMENTATION AUDIT COMPLETE"
-          echo "No source modification was performed."
-          echo "No kernel build was performed."
-          echo "========================================"
+           echo
+           echo "========================================"
+           echo "EXACT OPMODE DEFINITION AUDIT COMPLETE"
+           echo "No source modification was performed."
+           echo "No kernel build was performed."
+           echo "========================================"
 
           
 
