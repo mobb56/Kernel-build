@@ -3247,13 +3247,340 @@ jobs:
         print()
         print("QCACLD3 module lifecycle verification PASSED.")
         PY
-    - name: Apply 4.19 injection capability compatibility
+        
+    
+    - name: Apply 4.19 injection capability compatibility      
       shell: bash
-      run: "set -euxo pipefail\n\ncd kernel\n\nSECURITY_C=\"drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c\"\n\ntest -f \"${SECURITY_C}\"\n\necho \"Relevant capability code:\"\n\ngrep -n \\\n  -A15 \\\n  -B5 \\\n  \"hdd_check_injection_capability\" \\\n  \"${SECURITY_C}\" \\\n  || true\n\nif grep -Fq \\\n  \"capable(CAP_NET_RAW)\" \\\n  \"${SECURITY_C}\"; then\n\n  echo \"CAP_NET_RAW compatibility already present.\"\n\nelif grep -Fq \\\n  \"hdd_check_injection_capability\" \\\n  \"${SECURITY_C}\"; then\n\n  python3 - \"${SECURITY_C}\" <<'PY'\nimport pathlib\nimport re\nimport sys\n\npath = pathlib.Path(sys.argv[1])\ntext = path.read_text()\n\npattern = re.compile(\n    r\"\"\"\n    hdd_check_injection_capability\n    \\s*\\(\n    [^)]*\n    \\)\n    \\s*\\{\n    .*?\n    \\}\n    \"\"\",\n    re.S | re.X\n)\n\nmatch = pattern.search(text)\n\nif not match:\n    raise SystemExit(\n        \"ERROR: could not safely locate \"\n        \"hdd_check_injection_capability body\"\n    )\n\nreplacement = \"\"\"hdd_check_injection_capability(struct task_struct *task)\n{\n    return capable(CAP_NET_RAW);\n}\"\"\"\n\ntext = text[:match.start()] + replacement + text[match.end():]\n\npath.write_text(text)\nPY\n\nelse\n  echo \"ERROR: expected injection capability function was not found.\"\n  exit 1\nfi\n\necho\necho \"Final capability implementation:\"\n\ngrep -n \\\n  -A8 \\\n  -B3 \\\n  \"hdd_check_injection_capability\" \\\n  \"${SECURITY_C}\"\n\ngrep -Fq \\\n  \"capable(CAP_NET_RAW)\" \\\n  \"${SECURITY_C}\"\n\n\n\n\n  \n"
+      run: "set -euxo pipefail\n\ncd kernel\n\nSECURITY_C=\"drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c\"\n\ntest -f \"${SECURITY_C}\"\n\necho \"Relevant capability code:\"\n\ngrep -n \\\n  -A15 \\\n  -B5 \\\n  \"hdd_check_injection_capability\" \\\n  \"${SECURITY_C}\" \\\n  || true\n\nif grep -Fq \\\n  \"capable(CAP_NET_RAW)\" \\\n  \"${SECURITY_C}\"; then\n\n  echo \"CAP_NET_RAW compatibility already present.\"\n\nelif grep -Fq \\\n  \"hdd_check_injection_capability\" \\\n  \"${SECURITY_C}\"; then\n\n  python3 - \"${SECURITY_C}\" <<'PY'\nimport pathlib\nimport re\nimport sys\n\npath = pathlib.Path(sys.argv[1])\ntext = path.read_text()\n\npattern = re.compile(\n    r\"\"\"\n    hdd_check_injection_capability\n    \\s*\\(\n    [^)]*\n    \\)\n    \\s*\\{\n    .*?\n    \\}\n    \"\"\",\n    re.S | re.X\n)\n\nmatch = pattern.search(text)\n\nif not match:\n    raise SystemExit(\n        \"ERROR: could not safely locate \"\n        \"hdd_check_injection_capability body\"\n    )\n\nreplacement = \"\"\"hdd_check_injection_capability(struct task_struct *task)\n{\n    return capable(CAP_NET_RAW);\n}\"\"\"\n\ntext = text[:match.start()] + replacement + text[match.end():]\n\npath.write_text(text)\nPY\n\nelse\n  echo \"ERROR: expected injection capability function was not found.\"\n  exit 1\nfi\n\necho\necho \"Final capability implementation:\"\n\ngrep -n \\\n  -A8 \\\n  -B3 \\\n  \"hdd_check_injection_capability\" \\\n  \"${SECURITY_C}\"\n\ngrep -Fq \\\n  \"capable(CAP_NET_RAW)\" \\\n  \"${SECURITY_C}\"\n\n\n\n\n\n"
+  
+      
+      # ============================================================
+      # 34. ENABLE QCACLD3 MONITOR MODE + FRAME INJECTION IN KBUILD
+      #
+      # These are Kbuild variables.
+      # They MUST NOT become CONFIG_* entries in .config.
+      # ============================================================
+
     - name: Enable QCACLD3 injection Kbuild features
       working-directory: kernel
       shell: bash
-      run: "set -euo pipefail\n\nKBUILD_FILE=\"drivers/staging/qcacld-3.0/Kbuild\"\n\ntest -f \"${KBUILD_FILE}\"\n\necho \"=== Enable QCACLD3 injection Kbuild features ===\"\n\n# ------------------------------------------------------------\n# Remove previous custom registrations from earlier workflow\n# attempts. Do not touch the original QCACLD3 object lists.\n# ------------------------------------------------------------\n\nsed -i \\\n  '\\|HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o|d' \\\n  \"${KBUILD_FILE}\"\n\nsed -i \\\n  '\\|WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o|d' \\\n  \"${KBUILD_FILE}\"\n\nsed -i \\\n  '\\|CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y|d' \\\n  \"${KBUILD_FILE}\"\n\nsed -i \\\n  '\\|CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y|d' \\\n  \"${KBUILD_FILE}\"\n\nsed -i \\\n  '\\|ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT|d' \\\n  \"${KBUILD_FILE}\"\n\nsed -i \\\n  '\\|ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT|d' \\\n  \"${KBUILD_FILE}\"\n\n# ------------------------------------------------------------\n# Add the QCACLD3 feature variables and compiler defines near\n# the beginning of the Kbuild file.\n# ------------------------------------------------------------\n\nsed -i '1i\\\nCONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y\\\nCONFIG_FEATURE_MONITOR_MODE_SUPPORT := y\\\nccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT\\\nccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT\\\n' \"${KBUILD_FILE}\"\n\necho\necho \"=== Verify QCACLD3 feature definitions ===\"\n\ngrep -nF \\\n  'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y' \\\n  \"${KBUILD_FILE}\"\n\ngrep -nF \\\n  'CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y' \\\n  \"${KBUILD_FILE}\"\n\ngrep -nF \\\n  'ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT' \\\n  \"${KBUILD_FILE}\"\n\ngrep -nF \\\n  'ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT' \\\n  \"${KBUILD_FILE}\"\n\n# ------------------------------------------------------------\n# Register HDD frame injection object.\n#\n# The existing Kbuild uses:\n#\n#     OBJS := $(HDD_OBJS)\n#\n# We insert the injection object immediately before that\n# aggregation point.\n# ------------------------------------------------------------\n\necho\necho \"=== Register HDD frame injection objects ===\"\n\n# Remove any previous HDD injection registrations.\nsed -i \\\n  '\\|HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o|d' \\\n  \"${KBUILD_FILE}\"\n\nsed -i \\\n  '\\|HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_validate.o|d' \\\n  \"${KBUILD_FILE}\"\n\nsed -i \\\n  '\\|HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_inject_security.o|d' \\\n  \"${KBUILD_FILE}\"\n\nsed -i \\\n  '\\|HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject_debug.o|d' \\\n  \"${KBUILD_FILE}\"\n\necho \"Locating HDD OBJS aggregation point...\"\n\nif ! grep -Eq \\\n  '^[[:space:]]*OBJS[[:space:]]*:=[:space:]*\\$\\(HDD_OBJS\\)' \\\n  \"${KBUILD_FILE}\"; then\n  echo \"ERROR: HDD OBJS aggregation point was not found.\"\n  grep -n -E 'OBJS.*HDD_OBJS' \"${KBUILD_FILE}\" || true\n  exit 1\nfi\n\nTMP_KBUILD=\"${KBUILD_FILE}.tmp\"\n\nawk '\nBEGIN {\n  inserted = 0\n}\n\n!inserted &&\n$0 ~ /^[[:space:]]*OBJS[[:space:]]*:=[:space:]*\\$\\(HDD_OBJS\\)/ {\n  print \"HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o\"\n  print \"HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_validate.o\"\n  print \"HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_inject_security.o\"\n  print \"HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject_debug.o\"\n  inserted = 1\n}\n\n{\n  print\n}\n\nEND {\n  if (!inserted)\n    exit 1\n}\n' \"${KBUILD_FILE}\" > \"${TMP_KBUILD}\"\n\nmv \"${TMP_KBUILD}\" \"${KBUILD_FILE}\"\n\necho\necho \"=== Verify HDD injection object registration ===\"\n\nfor obj in \\\n  wlan_hdd_frame_inject.o \\\n  wlan_hdd_frame_validate.o \\\n  wlan_hdd_inject_security.o \\\n  wlan_hdd_frame_inject_debug.o\ndo\n  if ! grep -Fq \\\n    \"HDD_OBJS += \\$(HDD_SRC_DIR)/${obj}\" \\\n    \"${KBUILD_FILE}\"; then\n    echo \"ERROR: Missing HDD injection object: ${obj}\"\n    exit 1\n  fi\ndone\n\ngrep -n -B5 -A8 \\\n  -E '^[[:space:]]*OBJS[[:space:]]*:=[:space:]*\\$\\(HDD_OBJS\\)' \\\n  \"${KBUILD_FILE}\"\n\necho\necho \"HDD injection objects registered correctly.\"\n\necho\necho \"=== Register WMA frame injection object ===\"\n\nsed -i \\\n  '\\|WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o|d' \\\n  \"${KBUILD_FILE}\"\n\nWMA_OBJS_LINE=\"$(\n  awk '\n    index($0, \"$(WMA_OBJS)\") {\n      print NR\n      exit\n    }\n  ' \"${KBUILD_FILE}\"\n)\"\n\nif [ -z \"${WMA_OBJS_LINE}\" ]; then\n  echo \"ERROR: WMA OBJS aggregation point was not found.\"\n  grep -nF '$(WMA_OBJS)' \"${KBUILD_FILE}\" || true\n  exit 1\nfi\n\necho \"WMA OBJS aggregation line: ${WMA_OBJS_LINE}\"\n\nsed -i \\\n  \"${WMA_OBJS_LINE}i WMA_OBJS += \\$(WMA_SRC_DIR)/wma_frame_inject.o\" \\\n  \"${KBUILD_FILE}\"\n\necho\necho \"=== Verify injection object registration ===\"\n\nHDD_INJECT_COUNT=\"$(\n  grep -Fc \\\n    'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \\\n    \"${KBUILD_FILE}\"\n)\"\n\nWMA_INJECT_COUNT=\"$(\n  grep -Fc \\\n    'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \\\n    \"${KBUILD_FILE}\"\n)\"\n\nif [ \"${HDD_INJECT_COUNT}\" -ne 1 ]; then\n  echo \"ERROR: HDD injection object count = ${HDD_INJECT_COUNT}\"\n  exit 1\nfi\n\nif [ \"${WMA_INJECT_COUNT}\" -ne 1 ]; then\n  echo \"ERROR: WMA injection object count = ${WMA_INJECT_COUNT}\"\n  exit 1\nfi\n\necho\necho \"=== HDD injection placement ===\"\n\ngrep -n -B3 -A3 \\\n  -F 'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \\\n  \"${KBUILD_FILE}\"\n\necho\necho \"=== WMA injection placement ===\"\n\ngrep -n -B3 -A3 \\\n  -F 'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \\\n  \"${KBUILD_FILE}\"\n\necho\necho \"QCACLD3 injection Kbuild configuration complete.\"\n\n# ------------------------------------------------------------\n# Verify that each custom object is registered exactly once.\n# ------------------------------------------------------------\n\necho\necho \"=== Verify injection object registration ===\"\n\nHDD_INJECT_COUNT=\"$(\n  grep -Fc \\\n    'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \\\n    \"${KBUILD_FILE}\"\n)\"\n\nWMA_INJECT_COUNT=\"$(\n  grep -Fc \\\n    'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \\\n    \"${KBUILD_FILE}\"\n)\"\n\nif [ \"${HDD_INJECT_COUNT}\" -ne 1 ]; then\n  echo \"ERROR: Expected exactly one HDD injection object registration; found ${HDD_INJECT_COUNT}.\"\n  exit 1\nfi\n\nif [ \"${WMA_INJECT_COUNT}\" -ne 1 ]; then\n  echo \"ERROR: Expected exactly one WMA injection object registration; found ${WMA_INJECT_COUNT}.\"\n  exit 1\nfi\n\necho\necho \"=== HDD injection placement ===\"\n\ngrep -n -B3 -A3 \\\n  -F 'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \\\n  \"${KBUILD_FILE}\"\n\necho\necho \"=== WMA injection placement ===\"\n\ngrep -n -B3 -A3 \\\n  -F 'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \\\n  \"${KBUILD_FILE}\"\n\n# ------------------------------------------------------------\n# Final verification.\n# ------------------------------------------------------------\n\necho\necho \"=== Final QCACLD3 injection Kbuild configuration ===\"\n\ngrep -n -E \\\n  'CONFIG_FEATURE_(FRAME_INJECTION|MONITOR_MODE)_SUPPORT|wlan_hdd_frame_inject\\.o|wma_frame_inject\\.o|FEATURE_(FRAME_INJECTION|MONITOR_MODE)_SUPPORT' \\\n  \"${KBUILD_FILE}\"\n\necho\necho \"QCACLD3 injection Kbuild configuration complete.\"\n\n\n              \n"
+      run: |
+          set -euo pipefail
+
+          KBUILD_FILE="drivers/staging/qcacld-3.0/Kbuild"
+
+          test -f "${KBUILD_FILE}"
+
+          echo "=== Enable QCACLD3 injection Kbuild features ==="
+
+          # ------------------------------------------------------------
+          # Remove previous custom registrations from earlier workflow
+          # attempts. Do not touch the original QCACLD3 object lists.
+          # ------------------------------------------------------------
+
+          sed -i \
+            '\|HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o|d' \
+            "${KBUILD_FILE}"
+
+          sed -i \
+            '\|HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_validate.o|d' \
+            "${KBUILD_FILE}"
+
+          sed -i \
+            '\|HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_inject_security.o|d' \
+            "${KBUILD_FILE}"
+
+          sed -i \
+            '\|HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject_debug.o|d' \
+            "${KBUILD_FILE}"
+
+          sed -i \
+            '\|WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o|d' \
+            "${KBUILD_FILE}"
+
+          sed -i \
+            '\|CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y|d' \
+            "${KBUILD_FILE}"
+
+          sed -i \
+            '\|CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y|d' \
+            "${KBUILD_FILE}"
+
+          sed -i \
+            '\|ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT|d' \
+            "${KBUILD_FILE}"
+
+          sed -i \
+            '\|ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT|d' \
+            "${KBUILD_FILE}"
+
+          # ------------------------------------------------------------
+          # Add the QCACLD3 feature variables and compiler defines near
+          # the beginning of the Kbuild file.
+          # ------------------------------------------------------------
+
+          sed -i '1i\
+          CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y\
+          CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y\
+          ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT\
+          ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT\
+          ' "${KBUILD_FILE}"
+
+          echo
+          echo "=== Verify QCACLD3 feature definitions ==="
+
+          grep -nF \
+            'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y' \
+            "${KBUILD_FILE}"
+
+          grep -nF \
+            'CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y' \
+            "${KBUILD_FILE}"
+
+          grep -nF \
+            'ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT' \
+            "${KBUILD_FILE}"
+
+          grep -nF \
+            'ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT' \
+            "${KBUILD_FILE}"
+
+          # ------------------------------------------------------------
+          # Register HDD frame injection objects.
+          #
+          # The existing Kbuild uses:
+          #
+          #     OBJS := $(HDD_OBJS)
+          #
+          # Insert the custom HDD objects immediately before the
+          # aggregation point.
+          # ------------------------------------------------------------
+
+          echo
+          echo "=== Register HDD frame injection objects ==="
+
+          echo "Locating HDD OBJS aggregation point..."
+
+          if ! grep -Eq \
+            '^[[:space:]]*OBJS[[:space:]]*:=[[:space:]]*\$\(HDD_OBJS\)' \
+            "${KBUILD_FILE}"; then
+            echo "ERROR: HDD OBJS aggregation point was not found."
+            grep -n -E 'OBJS.*HDD_OBJS' \
+              "${KBUILD_FILE}" || true
+            exit 1
+          fi
+
+          TMP_KBUILD="${KBUILD_FILE}.tmp"
+
+          awk '
+          BEGIN {
+            inserted = 0
+          }
+
+          !inserted &&
+          $0 ~ /^[[:space:]]*OBJS[[:space:]]*:=[[:space:]]*\$\(HDD_OBJS\)/ {
+            print "HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o"
+            print "HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_validate.o"
+            print "HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_inject_security.o"
+            print "HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject_debug.o"
+            inserted = 1
+          }
+
+          {
+            print
+          }
+
+          END {
+            if (!inserted)
+              exit 1
+          }
+          ' "${KBUILD_FILE}" > "${TMP_KBUILD}"
+
+          mv "${TMP_KBUILD}" "${KBUILD_FILE}"
+
+          echo
+          echo "=== Verify HDD injection object registration ==="
+
+          for obj in \
+            wlan_hdd_frame_inject.o \
+            wlan_hdd_frame_validate.o \
+            wlan_hdd_inject_security.o \
+            wlan_hdd_frame_inject_debug.o
+          do
+            if ! grep -Fq \
+              "HDD_OBJS += \$(HDD_SRC_DIR)/${obj}" \
+              "${KBUILD_FILE}"; then
+              echo "ERROR: Missing HDD injection object: ${obj}"
+              exit 1
+            fi
+          done
+
+          echo
+          echo "=== HDD injection placement ==="
+
+          grep -n -B5 -A8 \
+            -E '^[[:space:]]*OBJS[[:space:]]*:=[[:space:]]*\$\(HDD_OBJS\)' \
+            "${KBUILD_FILE}"
+
+          echo
+          echo "=== Register WMA frame injection object ==="
+
+          # ------------------------------------------------------------
+          # Register WMA frame injection object immediately before the
+          # existing WMA_OBJS aggregation.
+          # ------------------------------------------------------------
+
+          WMA_OBJS_LINE="$(
+            awk '
+              index($0, "$(WMA_OBJS)") {
+                print NR
+                exit
+              }
+            ' "${KBUILD_FILE}"
+          )"
+
+          if [ -z "${WMA_OBJS_LINE}" ]; then
+            echo "ERROR: WMA OBJS aggregation point was not found."
+            grep -nF \
+              '$(WMA_OBJS)' \
+              "${KBUILD_FILE}" || true
+            exit 1
+          fi
+
+          echo "WMA OBJS aggregation line: ${WMA_OBJS_LINE}"
+
+          sed -i \
+            "${WMA_OBJS_LINE}i WMA_OBJS += \$(WMA_SRC_DIR)/wma_frame_inject.o" \
+            "${KBUILD_FILE}"
+
+          echo
+          echo "=== Verify WMA injection object registration ==="
+
+          if ! grep -Fq \
+            'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \
+            "${KBUILD_FILE}"; then
+            echo "ERROR: WMA injection object was not registered."
+            exit 1
+          fi
+
+          # ------------------------------------------------------------
+          # Verify every custom injection object exists exactly once.
+          # ------------------------------------------------------------
+
+          echo
+          echo "=== Verify injection object registration counts ==="
+
+          HDD_FRAME_COUNT="$(
+            grep -Fc \
+              'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
+              "${KBUILD_FILE}"
+          )"
+
+          HDD_VALIDATE_COUNT="$(
+            grep -Fc \
+              'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_validate.o' \
+              "${KBUILD_FILE}"
+          )"
+
+          HDD_SECURITY_COUNT="$(
+            grep -Fc \
+              'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_inject_security.o' \
+              "${KBUILD_FILE}"
+          )"
+
+          HDD_DEBUG_COUNT="$(
+            grep -Fc \
+              'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject_debug.o' \
+              "${KBUILD_FILE}"
+          )"
+
+          WMA_INJECT_COUNT="$(
+            grep -Fc \
+              'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \
+              "${KBUILD_FILE}"
+          )"
+
+          if [ "${HDD_FRAME_COUNT}" -ne 1 ]; then
+            echo "ERROR: wlan_hdd_frame_inject.o count = ${HDD_FRAME_COUNT}"
+            exit 1
+          fi
+
+          if [ "${HDD_VALIDATE_COUNT}" -ne 1 ]; then
+            echo "ERROR: wlan_hdd_frame_validate.o count = ${HDD_VALIDATE_COUNT}"
+            exit 1
+          fi
+
+          if [ "${HDD_SECURITY_COUNT}" -ne 1 ]; then
+            echo "ERROR: wlan_hdd_inject_security.o count = ${HDD_SECURITY_COUNT}"
+            exit 1
+          fi
+
+          if [ "${HDD_DEBUG_COUNT}" -ne 1 ]; then
+            echo "ERROR: wlan_hdd_frame_inject_debug.o count = ${HDD_DEBUG_COUNT}"
+            exit 1
+          fi
+
+          if [ "${WMA_INJECT_COUNT}" -ne 1 ]; then
+            echo "ERROR: wma_frame_inject.o count = ${WMA_INJECT_COUNT}"
+            exit 1
+          fi
+
+          echo
+          echo "All injection objects are registered exactly once."
+
+          # ------------------------------------------------------------
+          # Final placement diagnostics.
+          # ------------------------------------------------------------
+
+          echo
+          echo "=== HDD injection placement ==="
+
+          grep -n -B3 -A3 \
+            -F 'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \
+            "${KBUILD_FILE}"
+
+          echo
+          echo "=== HDD validation placement ==="
+
+          grep -n -B3 -A3 \
+            -F 'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_validate.o' \
+            "${KBUILD_FILE}"
+
+          echo
+          echo "=== HDD security placement ==="
+
+          grep -n -B3 -A3 \
+            -F 'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_inject_security.o' \
+            "${KBUILD_FILE}"
+
+          echo
+          echo "=== HDD debug placement ==="
+
+          grep -n -B3 -A3 \
+            -F 'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject_debug.o' \
+            "${KBUILD_FILE}"
+
+          echo
+          echo "=== WMA injection placement ==="
+
+          grep -n -B3 -A3 \
+            -F 'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \
+            "${KBUILD_FILE}"
+
+          # ------------------------------------------------------------
+          # Final QCACLD3 Kbuild verification.
+          # ------------------------------------------------------------
+
+          echo
+          echo "=== Final QCACLD3 injection Kbuild configuration ==="
+
+          grep -n -E \
+            'CONFIG_FEATURE_(FRAME_INJECTION|MONITOR_MODE)_SUPPORT|wlan_hdd_(frame_inject|frame_validate|inject_security|frame_inject_debug)\.o|wma_frame_inject\.o|FEATURE_(FRAME_INJECTION|MONITOR_MODE)_SUPPORT' \
+            "${KBUILD_FILE}"
+
+          echo
+          echo "QCACLD3 injection Kbuild configuration complete."
+        
     - name: Inspect exact HDD Kbuild structure
       if: always()
       working-directory: kernel
