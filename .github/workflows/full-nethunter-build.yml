@@ -962,48 +962,35 @@ jobs:
           set -euo pipefail
 
           QCACLD="drivers/staging/qcacld-3.0"
+          SME="drivers/staging/qcacld-3.0/core/sme/src/common/sme_api.c"
 
           echo "=============================================="
-          echo "CSR NSS CALL-SITE AUDIT"
+          echo "CSR NSS CALL CONTEXT AUDIT"
           echo "=============================================="
 
-           CSR_IMPL="$(grep -RIl --include='*.c' \
-          'csr_get_vdev_type_nss[[:space:]]*(' \
-          "$QCACLD" 2>/dev/null |
-          while read -r f; do
-           if grep -qE \
-             'void[[:space:]]+csr_get_vdev_type_nss[[:space:]]*\(' \
-             "$f"; then
-             echo "$f"
-             break
-           fi
-          done)"
+          echo
+          echo "=== CALL SITE ==="
+          sed -n '13580,13635p' "$SME"
 
           echo
-          echo "Implementation:"
-          echo "$CSR_IMPL"
+          echo "=== FUNCTION CONTAINING CALL ==="
+          awk '
+          NR >= 13520 && NR <= 13630 { print NR ":" $0 }
+          ' "$SME"
 
           echo
-          echo "=== DIRECT CALL SITES ==="
-          grep -RIn --include='*.c' --include='*.h' \
-          'csr_get_vdev_type_nss[[:space:]]*(' \
-          "$QCACLD" 2>/dev/null |
-          grep -v "$CSR_IMPL:" |
-          head -20 || true
-
-          echo
-          echo "=== NSS FUNCTION REFERENCES NEAR MONITOR/VDEV CODE ==="
-          grep -RIn --include='*.c' --include='*.h' \
-          -E 'csr_get_vdev_type_nss|QDF_MONITOR_MODE|monitor.*nss|nss.*monitor' \
-          "$QCACLD" 2>/dev/null |
-           head -40 || true
+          echo "=== dev_mode REFERENCES IN THIS REGION ==="
+          sed -n '13520,13630p' "$SME" |
+          grep -n -E 'dev_mode|vdev|QDF_MONITOR_MODE|csr_get_vdev_type_nss' |
+          head -30 || true
 
           echo
           echo "=============================================="
-          echo "CSR NSS CALL-SITE AUDIT COMPLETE"
+          echo "CSR NSS CALL CONTEXT AUDIT COMPLETE"
           echo "No source modification was performed."
           echo "No kernel build was performed."
           echo "=============================================="
+          
 
           
 
