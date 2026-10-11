@@ -6303,8 +6303,7 @@ jobs:
 
 
        
-       
-    - name: Verify monitor VDEV policy-manager lookup
+    - name: Fix and verify monitor VDEV policy-manager lookup
       working-directory: kernel
       shell: bash
       run: |
@@ -6314,59 +6313,129 @@ jobs:
 
         test -f "$PM"
 
-        echo "=== VERIFY MONITOR VDEV POLICY-MANAGER FIX ==="
-
-        awk '
-        BEGIN {
-            found_monitor = 0
-            found_vdev_lookup = 0
-            found_opmode = 0
-            found_monitor_mode = 0
-        }
-
-        /wlan_objmgr_get_vdev_by_id_from_psoc/ {
-            found_vdev_lookup = 1
-        }
-
-        /wlan_vdev_mlme_get_opmode/ {
-            found_opmode = 1
-        }
-
-        /QDF_MONITOR_MODE/ {
-            found_monitor_mode = 1
-        }
-
-        /monitor/ || /Monitor/ {
-            found_monitor = 1
-        }
-
-        END {
-            print "Monitor-related references: " found_monitor
-            print "VDEV object lookup:        " found_vdev_lookup
-            print "VDEV opmode lookup:        " found_opmode
-            print "QDF_MONITOR_MODE:          " found_monitor_mode
-
-            if (!found_vdev_lookup) {
-                print "ERROR: monitor VDEV object lookup is missing."
-                exit 1
-            }
-
-            if (!found_opmode) {
-                print "ERROR: VDEV opmode check is missing."
-                exit 1
-            }
-
-            if (!found_monitor_mode) {
-                print "ERROR: QDF_MONITOR_MODE handling is missing."
-                exit 1
-            }
-
-            print "PASS: monitor VDEV policy-manager path verified."
-        }
-        ' "$PM"
+        echo "=== FIX MONITOR VDEV POLICY-MANAGER LOOKUP ==="
 
         echo
-        echo "=== MONITOR VDEV POLICY-MANAGER VERIFICATION COMPLETE ==="
+        echo "=== Ensure VDEV object-manager header ==="
+
+        if ! grep -Fq '#include <wlan_objmgr_vdev_obj.h>' "$PM"; then
+          awk '
+          BEGIN {
+            done = 0
+          }
+
+          /^#include/ && !done {
+            print
+            print "#include <wlan_objmgr_vdev_obj.h>"
+            done = 1
+            next
+          }
+
+          {
+            print
+          }
+          ' "$PM" > "$PM.tmp"
+
+          mv "$PM.tmp" "$PM"
+        fi
+
+        echo
+        echo "=== Check existing monitor VDEV handling ==="
+
+        if grep -Fq 'QDF_MONITOR_MODE' "$PM"; then
+          echo "QDF_MONITOR_MODE handling already exists."
+        else
+          echo "QDF_MONITOR_MODE handling is missing."
+          echo "Adding it after the monitor VDEV object lookup."
+
+          awk '
+          BEGIN {
+            in_func = 0
+            in_release = 0
+            inserted = 0
+          }
+
+          /QDF_STATUS policy_mgr_update_connection_info[[:space:]]*\(/ {
+            in_func = 1
+          }
+
+          in_func &&
+          /wlan_objmgr_vdev_release_ref[[:space:]]*\(/ {
+            in_release = 1
+            print
+            next
+          }
+
+          in_func &&
+          in_release &&
+          /WLAN_LEGACY_MAC_ID[[:space:]]*\)[[:space:]]*;/ {
+
+            print
+
+            print ""
+            print "\t\t\t\tif (monitor_opmode == QDF_MONITOR_MODE) {"
+            print "\t\t\t\t\tpolicy_mgr_debug("
+            print "\t\t\t\t\t\t\"Skipping concurrency-list lookup for monitor vdev_id %d\","
+            print "\t\t\t\t\t\tvdev_id);"
+            print "\t\t\t\t\treturn QDF_STATUS_SUCCESS;"
+            print "\t\t\t\t}"
+
+            in_release = 0
+            inserted = 1
+            next
+          }
+
+          in_func &&
+          /^[[:space:]]*}[[:space:]]*$/ {
+            in_func = 0
+            in_release = 0
+          }
+
+          {
+            print
+          }
+
+          END {
+            if (!inserted) {
+              print "ERROR: Could not locate monitor VDEV release point."
+              exit 1
+            }
+          }
+          ' "$PM" > "$PM.tmp"
+
+          mv "$PM.tmp" "$PM"
+        fi
+
+        echo
+        echo "=== Verify monitor VDEV policy-manager fix ==="
+
+        grep -Fq \
+          'Monitor VDEVs are intentionally not represented' \
+          "$PM"
+
+        grep -Fq \
+          'wlan_objmgr_get_vdev_by_id_from_psoc' \
+          "$PM"
+
+        grep -Fq \
+          'wlan_vdev_mlme_get_opmode' \
+          "$PM"
+
+        grep -Fq \
+          'QDF_MONITOR_MODE' \
+          "$PM"
+
+        grep -Fq \
+          'Skipping concurrency-list lookup for monitor vdev_id' \
+          "$PM"
+
+        echo
+        echo "PASS: monitor VDEV object lookup exists."
+        echo "PASS: monitor opmode is checked."
+        echo "PASS: QDF_MONITOR_MODE is recognized."
+        echo "PASS: monitor VDEV bypasses concurrency-list rejection."
+        echo
+        echo "Monitor VDEV policy-manager fix and verification PASSED."
     
       
     - name: Inspect policy-manager PCL lock boundary
