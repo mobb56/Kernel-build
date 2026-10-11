@@ -3182,13 +3182,14 @@ jobs:
         echo
         echo "=== VERIFY DESTROY CALL ==="
 
-        grep -n \
-          'wlan_hdd_state_ctrl_param_destroy' \
-
-                  "${MAIN_C}"
+        grep -nF \
+          'wlan_hdd_state_ctrl_param_destroy();' \
+          "${MAIN_C}"
 
         echo
         echo "QCACLD3 lifecycle source fix PASSED."
+
+        
     - name: Verify QCACLD3 module lifecycle cleanup
       working-directory: kernel
       shell: bash
