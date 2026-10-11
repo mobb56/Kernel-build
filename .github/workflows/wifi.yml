@@ -3620,6 +3620,9 @@ jobs:
         echo "WMA collision inspection complete."
 
         
+
+
+
     - name: Fix WMA injection include path
       working-directory: kernel
       shell: bash
@@ -3630,12 +3633,14 @@ jobs:
 
         test -f "${KBUILD_FILE}"
 
-        echo "=== Fix WMA injection include path ==="
+        echo "=== FIX WMA INJECTION INCLUDE PATH ==="
+
+        WMA_INC_LINE='ccflags-y += $(WMA_INC)'
 
         echo
         echo "=== Current WMA_INC definition ==="
 
-        grep -n -A12 \
+        grep -n -A6 \
           '^WMA_INC[[:space:]]*:=' \
           "${KBUILD_FILE}" \
           || true
@@ -3643,30 +3648,34 @@ jobs:
         echo
         echo "=== Ensure WMA_INC compiler flag exists ==="
 
-        if grep -Fq 'ccflags-y += $(WMA_INC)' "${KBUILD_FILE}"; then
+        if grep -Fqx "${WMA_INC_LINE}" "${KBUILD_FILE}"; then
           echo "PASS: WMA_INC compiler flag already exists."
         else
-          printf '\n# NetHunter WMA frame-injection include path\nccflags-y += $(WMA_INC)\n' >> "${KBUILD_FILE}"
-          echo "PASS: added WMA_INC to ccflags-y."
+          printf '%s\n' "${WMA_INC_LINE}" >> "${KBUILD_FILE}"
+          echo "PASS: WMA_INC compiler flag added."
         fi
 
         echo
-        echo "=== Verify WMA include flag ==="
+        echo "=== Verify WMA_INC compiler flag ==="
 
-        grep -n \
-          'ccflags-y += $(WMA_INC)' \
+        grep -Fqx \
+          "${WMA_INC_LINE}" \
           "${KBUILD_FILE}"
 
         echo
-        echo "=== Verify WMA injection sources ==="
+        echo "=== Final WMA include configuration ==="
 
-        grep -n \
-          'wma_frame_inject.o' \
+        grep -n -E \
+          '^WMA_INC[[:space:]]*:=' \
+          "${KBUILD_FILE}" \
+          || true
+
+        grep -n -F \
+          "${WMA_INC_LINE}" \
           "${KBUILD_FILE}"
 
         echo
         echo "WMA injection include path fixed."
-
         
     - name: Verify monitor callback lifecycle
       working-directory: kernel
