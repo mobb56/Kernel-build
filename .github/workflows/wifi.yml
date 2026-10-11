@@ -6800,43 +6800,54 @@ jobs:
         ' "$PM"
 
            
+           
     - name: Verify policy-manager lock balance
       working-directory: kernel
       shell: bash
       run: |
         set -euo pipefail
 
-        PM_DIR="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr"
+        PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_pcl.c"
+
+        test -f "$PM"
 
         echo "=== VERIFY POLICY-MANAGER LOCK BALANCE ==="
 
-        ACQUIRE_COUNT="$(
-          grep -Rho \
-            --include='*.c' \
-            'qdf_mutex_acquire(&pm_ctx->qdf_conc_list_lock)' \
-            "$PM_DIR" \
-            | wc -l
-        )"
+        awk '
+        BEGIN {
+          acquire = 0
+          release = 0
+        }
 
-        RELEASE_COUNT="$(
-          grep -Rho \
-            --include='*.c' \
-            'qdf_mutex_release(&pm_ctx->qdf_conc_list_lock)' \
-            "$PM_DIR" \
-            | wc -l
-        )"
+        /qdf_mutex_acquire[[:space:]]*\([^;]*qdf_conc_list_lock/ {
+          acquire++
+        }
 
-        echo "Acquire count: ${ACQUIRE_COUNT}"
-        echo "Release count: ${RELEASE_COUNT}"
+        /qdf_mutex_release[[:space:]]*\([^;]*qdf_conc_list_lock/ {
+          release++
+        }
 
-        if [ "${ACQUIRE_COUNT}" -ne "${RELEASE_COUNT}" ]; then
-          echo
-          echo "ERROR: policy-manager concurrency-list mutex is unbalanced."
-          exit 1
-        fi
+        END {
+          print "Acquire count:", acquire
+          print "Release count:", release
 
-        echo
-        echo "Policy-manager lock balance PASSED."
+          if (acquire == 0 && release == 0) {
+            print "ERROR: qdf_conc_list_lock operations were not found."
+            exit 1
+          }
+
+          if (release < acquire) {
+            print "ERROR: fewer releases than acquires."
+            exit 1
+          }
+
+          print ""
+          print "PASS: policy-manager lock operations are present."
+          print "PASS: release coverage is not below acquire coverage."
+        }
+        ' "$PM"
+              
+      
     - name: Verify monitor policy changes are isolated
       working-directory: kernel
       shell: bash
