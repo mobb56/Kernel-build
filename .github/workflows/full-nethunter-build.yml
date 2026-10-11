@@ -1070,6 +1070,42 @@ jobs:
           echo "No kernel build was performed."
           echo "========================================"
 
+
+
+
+      - name: Audit monitor VDEV opmode source
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          QCACLD="drivers/staging/qcacld-3.0"
+
+          echo "========================================"
+          echo "MONITOR VDEV OPMODE AUDIT"
+          echo "========================================"
+
+          echo
+          echo "=== wlan_vdev_mlme_get_opmode definition ==="
+          grep -RIn \
+            --include='*.c' \
+            'wlan_vdev_mlme_get_opmode[[:space:]]*(' \
+            "$QCACLD/components/mlme" 2>/dev/null | head -20
+
+          echo
+          echo "=== Monitor opmode references ==="
+          grep -RIn \
+            --include='*.c' \
+            'wlan_vdev_mlme_get_opmode.*QDF_MONITOR_MODE\|QDF_MONITOR_MODE.*wlan_vdev_mlme_get_opmode' \
+            "$QCACLD/components/mlme" 2>/dev/null | head -20
+
+          echo
+          echo "========================================"
+          echo "MONITOR VDEV OPMODE AUDIT COMPLETE"
+          echo "No source modification was performed."
+          echo "No kernel build was performed."
+          echo "========================================"
+
           
 
 
