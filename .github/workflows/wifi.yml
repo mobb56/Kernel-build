@@ -5571,8 +5571,67 @@ jobs:
          sha256sum \
            kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
             2>/dev/null || true
+            
+            
     - name: Inspect exact sysfs initializer caller
-      run: "echo \"=== FINAL wlan_hdd_main.c CALLER ===\"\nsed -n '15535,15575p' kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c\n\n        \necho\n echo \"=== ALL FINAL CALLS ===\"\n   grep -n -B15 -A20 \\\n   'hdd_injection_init_debug_interfaces'\n        \\ \\\n   kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c \\\n   kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c\\\n        \\ \\\n   kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_test.c \\\n   2>/dev/null\n        \\ || true\n\necho\necho \"=== FINAL hdd_init_frame_injection ===\"\ngrep -n -B10 -A45 \\\n'hdd_init_frame_injection'\\\n        \\ \\\nkernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.c \\\n  kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c\\\n        \\ \\\n 2>/dev/null || true  \n"
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        MAIN_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+        INJECT_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.c"
+        DEBUG_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c"
+        TEST_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_test.c"
+
+        test -f "${MAIN_C}"
+        test -f "${INJECT_C}"
+
+        echo "=== FINAL wlan_hdd_main.c CALLER ==="
+
+        sed -n '15535,15575p' \
+          "${MAIN_C}" \
+          || true
+
+        echo
+        echo "=== ALL FINAL hdd_injection_init_debug_interfaces CALLS ==="
+
+        grep -n \
+          -B15 \
+          -A20 \
+          'hdd_injection_init_debug_interfaces' \
+          "${MAIN_C}" \
+          "${DEBUG_C}" \
+          "${TEST_C}" \
+          2>/dev/null \
+          || true
+
+        echo
+        echo "=== FINAL hdd_init_frame_injection REFERENCES ==="
+
+        grep -n \
+          -B10 \
+          -A45 \
+          'hdd_init_frame_injection' \
+          "${INJECT_C}" \
+          "${MAIN_C}" \
+          2>/dev/null \
+          || true
+
+        echo
+        echo "=== FINAL INJECTION INITIALIZER REFERENCES ==="
+
+        grep -Rni \
+          -E \
+          'hdd_(init|deinit)_frame_injection|hdd_injection_init_debug_interfaces' \
+          drivers/staging/qcacld-3.0/core/hdd/src \
+          2>/dev/null \
+          | head -200 \
+          || true
+
+        echo
+        echo "=== SYSFS INITIALIZER CALLER INSPECTION COMPLETE ==="
+        
     - name: Restore native policy-manager VDEV callbacks
       working-directory: kernel
       shell: bash
