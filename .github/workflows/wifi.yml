@@ -7071,44 +7071,266 @@ jobs:
 
          echo
          echo "=== PRE-BUILD POLICY SOURCE CHECK COMPLETE ==="
+
+
+       
     - name: Build kernel
       working-directory: kernel
       shell: bash
-      run: "set -euo pipefail\n\necho \"=== Kernel build ===\"\n\nLLVM_BIN=\"${LLVM_DIR}/bin\"\n\n   echo \"===\
-        \\ Checking LLVM toolchain ===\"\n\n  for tool in \\\n  clang \\\n  ld.lld \\\n  llvm-ar \\\n  llvm-nm \\\
-        \n  llvm-objcopy \\\n  llvm-objdump \\\n  llvm-strip \\\n  llvm-readelf\n do\n  if [ ! -x \"${LLVM_BIN}/${tool}\"\
-        \ ]; then\n  echo \"ERROR: Missing or non-executable: ${LLVM_BIN}/${tool}\"\nexit 1\nfi\n\necho \"OK: ${tool}\"\
-        \ndone\n\nexport PATH=\"${LLVM_BIN}:${PATH}\"\nhash -r\n\necho \"=== LLVM tools visible to build ===\"\n\
-        \ncommand -v clang\ncommand -v ld.lld\ncommand -v llvm-ar\ncommand -v llvm-nm\ncommand -v llvm-objcopy\n\
-        command -v llvm-objdump\ncommand -v llvm-strip\ncommand -v llvm-readelf\n\necho\nllvm-objdump --version\n\
-        \ntest -f \"${OUT_DIR}/.config\"\ntest -d \"arch/arm64/boot\"\n\n\n\n\n\n echo\necho \"=== Kernel version\
-        \\ suffix sources ===\"\n\necho \"CONFIG_LOCALVERSION:\"\n grep -E '^CONFIG_LOCALVERSION=' \"${OUT_DIR}/.config\"\
-        \ || true\n\n echo \"CONFIG_LOCALVERSION_AUTO:\"\n grep -E '^CONFIG_LOCALVERSION_AUTO=' \"${OUT_DIR}/.config\"\
-        \ || \\\n grep -E '^# CONFIG_LOCALVERSION_AUTO is not set$' \"${OUT_DIR}/.config\" || true\n\necho\n echo\
-        \\ \"Repository status:\"\n git status --short --branch\n\necho\n echo \"Repository HEAD:\"\n git rev-parse\
-        \ --short=12 HEAD\n\necho\n echo \"localversion files:\"\n find . -maxdepth 2 \\\n -type f \\\n -name 'localversion*'\
-        \ \\\n -print \\\n -exec cat {} \\; || true\n\necho\n\n  \n\n\n\necho\necho \"=== Set stock-compatible\
-        \\ kernel release ===\"\n\n   CONFIG=\"${OUT_DIR}/.config\"\n\n    scripts/config \\\n  --file \"${CONFIG}\"\
-        \ \\\n  --disable LOCALVERSION_AUTO \\\n  --set-str LOCALVERSION \"-perf\"\n\n  : > .scmversion\n  test\
-        \ -f .scmversion\n\n  echo \"CONFIG_LOCALVERSION:\"\n  grep '^CONFIG_LOCALVERSION=' \"${CONFIG}\"\n\n  echo\
-        \ \"CONFIG_LOCALVERSION_AUTO:\"\n  grep '^# CONFIG_LOCALVERSION_AUTO is not set$' \"${CONFIG}\"\n\n  echo\
-        \ \"=== Verify kernel release with explicit LOCALVERSION ===\"\n\n  RELEASE=\"$(make -s \\\n  O=\"${OUT_DIR}\"\
-        \ \\\n ARCH=arm64 \\\n  LLVM=1 \\\n  LLVM_IAS=1 \\\n CROSS_COMPILE=\"${CROSS_COMPILE}\" \\\n LOCALVERSION=\"\
-        -g39bcecd5c63d\" \\\n kernelrelease)\"\n\n echo \"KERNEL_RELEASE=${RELEASE}\"\n\n test \"${RELEASE}\" =\
-        \ \"4.19.325-cip135-st19-perf-g39bcecd5c63d\"\n\n echo \"Stock-compatible kernel release confirmed.\"\n\n\
-        \necho\necho \"=== Building kernel ABI prerequisites (vmlinux; no boot Image) ===\"\n\n     make -j2 \\\n\
-        \n        \\     O=\"${OUT_DIR}\" \\\n     ARCH=arm64 \\\n     LLVM=1 \\\n     LLVM_IAS=1 \\\n     CROSS_COMPILE=\"\
-        ${CROSS_COMPILE}\" \\\n     KBUILD_SYMTYPES=1 \\\n     LOCALVERSION=\"-g39bcecd5c63d\" \\\n     vmlinux\n\
-        \n echo\necho \"=== Kernel compilation completed ===\"\n\n    ACTUAL_RELEASE=\"$(make -s \\\n    O=\"\
-        ${OUT_DIR}\" \\\n    ARCH=arm64 \\\n    LLVM=1 \\\n   LLVM_IAS=1 \\\n   CROSS_COMPILE=\"${CROSS_COMPILE}\"\
-        \ \\\n   LOCALVERSION=\"-g39bcecd5c63d\" \\\n   kernelrelease)\"\n\n echo \"ACTUAL_KERNEL_RELEASE=${ACTUAL_RELEASE}\"\
-        \n\n test \"${ACTUAL_RELEASE}\" = \"4.19.325-cip135-st19-perf-g39bcecd5c63d\"\n\n echo \"Actual built kernel\
-        \ release is correct.\"\n\n test -s \"${OUT_DIR}/vmlinux\"\ntest -s \"${OUT_DIR}/Module.symvers\"\n\necho\
-        \ \"vmlinux and Module.symvers created for ABI-aware module build.\"\nls -lh \"${OUT_DIR}/vmlinux\" \"${OUT_DIR}/Module.symvers\"\
-        \n\n\n     echo\n    echo \"=== Building kernel modules ===\"\n\n     make -j2 \\\n     O=\"${OUT_DIR}\"\
-        \ \\\n     ARCH=arm64 \\\n     LLVM=1 \\\n     LLVM_IAS=1 \\\n     CROSS_COMPILE=\"${CROSS_COMPILE}\" \\\n\
-        \n     KBUILD_SYMTYPES=1 \\\n     LOCALVERSION=\"-g39bcecd5c63d\" \\\n     modules\n\n   echo \"Kernel modules\
-        \ built successfully.\"\n\n   \n"
+      run: |
+        set -euo pipefail
+
+        echo "============================================================"
+        echo " KERNEL BUILD"
+        echo "============================================================"
+
+        EXPECTED_RELEASE="4.19.325-cip135-st19-perf-g39bcecd5c63d"
+        CONFIG="${OUT_DIR}/.config"
+
+        echo
+        echo "=== Verify build environment ==="
+
+        test -d "${LLVM_BIN}"
+        test -x "${LLVM_BIN}/clang"
+        test -x "${LLVM_BIN}/ld.lld"
+        test -x "${LLVM_BIN}/llvm-ar"
+        test -x "${LLVM_BIN}/llvm-nm"
+        test -x "${LLVM_BIN}/llvm-objcopy"
+        test -x "${LLVM_BIN}/llvm-objdump"
+        test -x "${LLVM_BIN}/llvm-strip"
+        test -x "${LLVM_BIN}/llvm-readelf"
+
+        test -f "${CONFIG}"
+        test -d "arch/arm64"
+        test -x "scripts/config"
+
+        export PATH="${LLVM_BIN}:${PATH}"
+        hash -r
+
+        echo "LLVM_BIN=${LLVM_BIN}"
+        echo "OUT_DIR=${OUT_DIR}"
+        echo "ARCH=${ARCH}"
+        echo "CROSS_COMPILE=${CROSS_COMPILE}"
+
+        echo
+        echo "=== LLVM toolchain ==="
+
+        command -v clang
+        command -v ld.lld
+        command -v llvm-ar
+        command -v llvm-nm
+        command -v llvm-objcopy
+        command -v llvm-objdump
+        command -v llvm-strip
+        command -v llvm-readelf
+
+        clang --version
+        clang --version | grep -q -F "clang version 21.0.0"
+
+        echo
+        echo "LLVM 21.0.0 verified."
+
+        echo
+        echo "=== Verify required kernel configuration ==="
+
+        grep -Fxq 'CONFIG_MODULES=y' "${CONFIG}" || {
+          echo "ERROR: CONFIG_MODULES=y is required."
+          exit 1
+        }
+
+        grep -Fxq 'CONFIG_MODVERSIONS=y' "${CONFIG}" || {
+          echo "ERROR: CONFIG_MODVERSIONS=y is required for ABI CRCs."
+          exit 1
+        }
+
+        grep -Fxq 'CONFIG_QCA_CLD_WLAN=m' "${CONFIG}" || {
+          echo "ERROR: CONFIG_QCA_CLD_WLAN=m is required."
+          exit 1
+        }
+
+        echo "PASS: CONFIG_MODULES=y"
+        echo "PASS: CONFIG_MODVERSIONS=y"
+        echo "PASS: CONFIG_QCA_CLD_WLAN=m"
+
+        echo
+        echo "=== Configure stock-compatible kernel release ==="
+
+        scripts/config \
+          --file "${CONFIG}" \
+          --disable LOCALVERSION_AUTO \
+          --set-str LOCALVERSION "-perf"
+
+        : > .scmversion
+
+        test -f .scmversion
+
+        grep -Fxq \
+          'CONFIG_LOCALVERSION="-perf"' \
+          "${CONFIG}"
+
+        grep -Fxq \
+          '# CONFIG_LOCALVERSION_AUTO is not set' \
+          "${CONFIG}"
+
+        echo "PASS: CONFIG_LOCALVERSION=-perf"
+        echo "PASS: CONFIG_LOCALVERSION_AUTO disabled"
+        echo "PASS: .scmversion exists"
+
+        echo
+        echo "=== Calculate expected kernel release ==="
+
+        RELEASE="$(
+          make -s \
+            O="${OUT_DIR}" \
+            ARCH="${ARCH}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            LOCALVERSION="-g39bcecd5c63d" \
+            kernelrelease
+        )"
+
+        echo "KERNEL_RELEASE=${RELEASE}"
+
+        if [ "${RELEASE}" != "${EXPECTED_RELEASE}" ]; then
+          echo
+          echo "ERROR: Kernel release mismatch."
+          echo "Expected: ${EXPECTED_RELEASE}"
+          echo "Actual:   ${RELEASE}"
+          exit 1
+        fi
+
+        echo
+        echo "PASS: stock-compatible kernel release confirmed."
+
+        echo
+        echo "=== Build vmlinux ==="
+
+        make -j2 \
+          O="${OUT_DIR}" \
+          ARCH="${ARCH}" \
+          LLVM=1 \
+          LLVM_IAS=1 \
+          CROSS_COMPILE="${CROSS_COMPILE}" \
+          KBUILD_SYMTYPES=1 \
+          LOCALVERSION="-g39bcecd5c63d" \
+          vmlinux
+
+        echo
+        echo "vmlinux build completed."
+
+        test -s "${OUT_DIR}/vmlinux"
+
+        echo
+        echo "=== Verify kernel release after vmlinux build ==="
+
+        ACTUAL_RELEASE="$(
+          make -s \
+            O="${OUT_DIR}" \
+            ARCH="${ARCH}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            LOCALVERSION="-g39bcecd5c63d" \
+            kernelrelease
+        )"
+
+        echo "ACTUAL_KERNEL_RELEASE=${ACTUAL_RELEASE}"
+
+        if [ "${ACTUAL_RELEASE}" != "${EXPECTED_RELEASE}" ]; then
+          echo
+          echo "ERROR: Built kernel release mismatch."
+          echo "Expected: ${EXPECTED_RELEASE}"
+          echo "Actual:   ${ACTUAL_RELEASE}"
+          exit 1
+        fi
+
+        echo
+        echo "PASS: built kernel release is correct."
+
+        echo
+        echo "=== Build all kernel modules ==="
+
+        make -j2 \
+          O="${OUT_DIR}" \
+          ARCH="${ARCH}" \
+          LLVM=1 \
+          LLVM_IAS=1 \
+          CROSS_COMPILE="${CROSS_COMPILE}" \
+          KBUILD_SYMTYPES=1 \
+          LOCALVERSION="-g39bcecd5c63d" \
+          modules
+
+        echo
+        echo "Kernel modules build completed."
+
+        echo
+        echo "=== Verify ABI artifacts ==="
+
+        test -s "${OUT_DIR}/vmlinux"
+        test -s "${OUT_DIR}/Module.symvers"
+
+        echo
+        echo "vmlinux:"
+        ls -lh "${OUT_DIR}/vmlinux"
+
+        echo
+        echo "Module.symvers:"
+        ls -lh "${OUT_DIR}/Module.symvers"
+
+        echo
+        echo "=== Verify generated WLAN module ==="
+
+        WLAN_MODULE="$(
+          find "${OUT_DIR}" \
+            -type f \
+            -name 'qca_cld3_wlan.ko' \
+            -print \
+            -quit
+        )"
+
+        if [ -z "${WLAN_MODULE}" ]; then
+          echo "ERROR: qca_cld3_wlan.ko was not generated."
+          exit 1
+        fi
+
+        echo "WLAN module:"
+        echo "${WLAN_MODULE}"
+        ls -lh "${WLAN_MODULE}"
+
+        echo
+        echo "=== Verify module vermagic ==="
+
+        MODVERMAGIC="$(
+          modinfo -F vermagic "${WLAN_MODULE}" 2>/dev/null || true
+        )"
+
+        if [ -z "${MODVERMAGIC}" ]; then
+          echo "ERROR: Could not read WLAN module vermagic."
+          exit 1
+        fi
+
+        echo "Module vermagic:"
+        echo "${MODVERMAGIC}"
+
+        case "${MODVERMAGIC}" in
+          "${EXPECTED_RELEASE}"*)
+            echo
+            echo "PASS: module vermagic matches expected kernel release."
+            ;;
+          *)
+            echo
+            echo "ERROR: module vermagic does not match expected release."
+            echo "Expected prefix: ${EXPECTED_RELEASE}"
+            exit 1
+            ;;
+        esac
+
+        echo
+        echo "============================================================"
+        echo " KERNEL BUILD PASSED"
+        echo "============================================================"
+        
     - name: Verify final injection source after build
       shell: bash
       run: |
