@@ -7073,6 +7073,133 @@ jobs:
          echo "=== PRE-BUILD POLICY SOURCE CHECK COMPLETE ==="
 
 
+    - name: Fix missing injection_ctx member in HDD adapter
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        MAIN_H="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h"
+
+        test -f "${MAIN_H}"
+
+        echo "=== FIX HDD ADAPTER INJECTION CONTEXT ==="
+
+        TMP="${MAIN_H}.tmp"
+
+        echo
+        echo "=== Remove existing injection_ctx declarations ==="
+
+        awk '
+        {
+            lines[NR] = $0
+        }
+
+        END {
+            for (i = 1; i <= NR;) {
+                if (
+                    lines[i] ~ /^[[:space:]]*#ifdef FEATURE_FRAME_INJECTION_SUPPORT[[:space:]]*$/ &&
+                    lines[i + 1] ~ /struct[[:space:]]+hdd_injection_ctx[[:space:]]*\*[[:space:]]*injection_ctx[[:space:]]*;/ &&
+                    lines[i + 2] ~ /^[[:space:]]*#endif[[:space:]]*$/
+                ) {
+                    i += 3
+                    continue
+                }
+
+                if (
+                    lines[i] ~ /struct[[:space:]]+hdd_injection_ctx[[:space:]]*\*[[:space:]]*injection_ctx[[:space:]]*;/
+                ) {
+                    i++
+                    continue
+                }
+
+                print lines[i]
+                i++
+            }
+        }
+        ' "${MAIN_H}" > "${TMP}"
+
+        mv "${TMP}" "${MAIN_H}"
+
+        echo
+        echo "=== Insert injection_ctx into struct hdd_adapter ==="
+
+        awk '
+        BEGIN {
+            in_struct = 0
+            depth = 0
+            found = 0
+            inserted = 0
+        }
+
+        !found &&
+        /^[[:space:]]*struct[[:space:]]+hdd_adapter[[:space:]]*\{/ {
+            in_struct = 1
+            found = 1
+        }
+
+        {
+            line = $0
+            brace_line = line
+
+            if (in_struct) {
+                gsub(/\/\*.*\*\//, "", brace_line)
+
+                opens = gsub(/\{/, "{", brace_line)
+                closes = gsub(/\}/, "}", brace_line)
+
+                depth += opens - closes
+
+                if (
+                    depth == 0 &&
+                    brace_line ~ /^[[:space:]]*};[[:space:]]*$/
+                ) {
+                    print "\tstruct hdd_injection_ctx *injection_ctx;"
+                    inserted = 1
+                    in_struct = 0
+                }
+            }
+
+            print
+        }
+
+        END {
+            if (!found) {
+                print "ERROR: struct hdd_adapter was not found." > "/dev/stderr"
+                exit 1
+            }
+
+            if (!inserted) {
+                print "ERROR: Could not locate the end of struct hdd_adapter." > "/dev/stderr"
+                exit 1
+            }
+        }
+        ' "${MAIN_H}" > "${TMP}"
+
+        mv "${TMP}" "${MAIN_H}"
+
+        echo
+        echo "=== Verify injection_ctx declaration ==="
+
+        COUNT="$(
+          grep -Ec \
+            'struct[[:space:]]+hdd_injection_ctx[[:space:]]*\*[[:space:]]*injection_ctx[[:space:]]*;' \
+            "${MAIN_H}"
+        )"
+
+        if [ "${COUNT}" -ne 1 ]; then
+          echo "ERROR: Expected exactly one injection_ctx member; found ${COUNT}."
+          exit 1
+        fi
+
+        grep -n -B5 -A5 \
+          'struct hdd_injection_ctx \*injection_ctx;' \
+          "${MAIN_H}"
+
+        echo
+        echo "PASS: injection_ctx exists exactly once in wlan_hdd_main.h."
+
+
        
     - name: Build kernel
       working-directory: kernel
