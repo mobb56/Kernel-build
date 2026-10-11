@@ -3640,7 +3640,7 @@ jobs:
         echo
         echo "=== Current WMA_INC definition ==="
 
-        grep -n -A6 \
+        grep -n -A8 \
           '^WMA_INC[[:space:]]*:=' \
           "${KBUILD_FILE}" \
           || true
@@ -3676,6 +3676,71 @@ jobs:
 
         echo
         echo "WMA injection include path fixed."
+
+
+    - name: Fix WMA HDD injection include path
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        KBUILD_FILE="drivers/staging/qcacld-3.0/Kbuild"
+        HDD_INC='ccflags-y += -I$(srctree)/$(WLAN_ROOT)/core/hdd/inc'
+
+        test -f "${KBUILD_FILE}"
+        test -f "drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h"
+
+        echo "=== FIX WMA HDD INJECTION INCLUDE PATH ==="
+
+        echo
+        echo "=== Ensure WMA include flag exists ==="
+
+        if ! grep -Fqx \
+          'ccflags-y += $(WMA_INC)' \
+          "${KBUILD_FILE}"
+        then
+          printf '%s\n' \
+            'ccflags-y += $(WMA_INC)' \
+            >> "${KBUILD_FILE}"
+        fi
+
+        echo
+        echo "=== Ensure HDD injection include flag exists ==="
+
+        if grep -Fqx "${HDD_INC}" "${KBUILD_FILE}"; then
+          echo "PASS: HDD injection include flag already exists."
+        else
+          printf '%s\n' "${HDD_INC}" >> "${KBUILD_FILE}"
+          echo "PASS: HDD injection include flag added."
+        fi
+
+        echo
+        echo "=== Verify WMA include flag ==="
+
+        grep -Fqx \
+          'ccflags-y += $(WMA_INC)' \
+          "${KBUILD_FILE}"
+
+        echo "PASS: WMA_INC compiler flag present."
+
+        echo
+        echo "=== Verify HDD include flag ==="
+
+        grep -Fqx \
+          "${HDD_INC}" \
+          "${KBUILD_FILE}"
+
+        echo "PASS: HDD injection include flag present."
+
+        echo
+        echo "=== Final include configuration ==="
+
+        grep -n -E \
+          'WMA_INC|core/hdd/inc' \
+          "${KBUILD_FILE}"
+
+        echo
+        echo "WMA/HDD injection include paths fixed."
         
     - name: Verify monitor callback lifecycle
       working-directory: kernel
@@ -3927,8 +3992,8 @@ jobs:
         STOCK="${GITHUB_WORKSPACE}/cebu-stock.config"
         FINAL="${OUT_DIR}/.config"
 
-        STOCK_OUT="${GITHUB_WORKSPACE}/artifacts/source-audit/stock-normalized.config"
-        FINAL_OUT="${GITHUB_WORKSPACE}/artifacts/source-audit/final-normalized.config"
+        STOCK_NORMALIZED="${GITHUB_WORKSPACE}/artifacts/source-audit/stock-normalized.config"
+        FINAL_NORMALIZED="${GITHUB_WORKSPACE}/artifacts/source-audit/final-normalized.config"
 
         test -s "${STOCK}"
         test -s "${FINAL}"
@@ -3936,69 +4001,52 @@ jobs:
         mkdir -p \
           "${GITHUB_WORKSPACE}/artifacts/source-audit"
 
-        echo "============================================================"
-        echo " NORMALIZE CONFIGURATION FILES"
-        echo "============================================================"
-
-        echo
-        echo "=== Normalize stock configuration ==="
+        echo "=== NORMALIZE STOCK CONFIG ==="
 
         awk '
-          /^CONFIG_[A-Za-z0-9_]+=/ {
-            print
-            next
-          }
-
+          /^CONFIG_[A-Za-z0-9_]+=/ ||
           /^# CONFIG_[A-Za-z0-9_]+ is not set$/ {
             print
-            next
           }
         ' "${STOCK}" |
-        sort -u > "${STOCK_OUT}"
+          LC_ALL=C sort \
+          > "${STOCK_NORMALIZED}"
 
-        echo
-        echo "=== Normalize final configuration ==="
+        echo "=== NORMALIZE FINAL CONFIG ==="
 
         awk '
-          /^CONFIG_[A-Za-z0-9_]+=/ {
-            print
-            next
-          }
-
+          /^CONFIG_[A-Za-z0-9_]+=/ ||
           /^# CONFIG_[A-Za-z0-9_]+ is not set$/ {
             print
-            next
           }
         ' "${FINAL}" |
-        sort -u > "${FINAL_OUT}"
+          LC_ALL=C sort \
+          > "${FINAL_NORMALIZED}"
 
         echo
         echo "=== Verify normalized files ==="
 
-        test -s "${STOCK_OUT}"
-        test -s "${FINAL_OUT}"
+        test -s "${STOCK_NORMALIZED}"
+        test -s "${FINAL_NORMALIZED}"
 
         echo
         echo "Stock configuration entries:"
-        wc -l "${STOCK_OUT}"
+        wc -l "${STOCK_NORMALIZED}"
 
         echo
         echo "Final configuration entries:"
-        wc -l "${FINAL_OUT}"
+        wc -l "${FINAL_NORMALIZED}"
 
         echo
-        echo "Stock normalized SHA256:"
-        sha256sum "${STOCK_OUT}"
+        echo "=== Normalized configuration files created ==="
 
-        echo
-        echo "Final normalized SHA256:"
-        sha256sum "${FINAL_OUT}"
+        ls -lh \
+          "${STOCK_NORMALIZED}" \
+          "${FINAL_NORMALIZED}"
 
-        echo
-        echo "============================================================"
-        echo " CONFIGURATION NORMALIZATION: PASSED"
-        echo "============================================================"
+        
 
+        
 
 
     
