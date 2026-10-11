@@ -2175,12 +2175,12 @@ jobs:
         import sys
         from pathlib import Path
 
-        path = Path(sys.argv[1])
-        text = path.read_text()
+          path = Path(sys.argv[1])
+          text = path.read_text()
 
-                def function_body(name):
-            needle = name + "("
-            start = text.find(needle)
+          def function_body(name):
+              needle = name + "("
+              start = text.find(needle)
 
             if start < 0:
                 return None
