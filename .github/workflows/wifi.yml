@@ -98,6 +98,7 @@ jobs:
         echo "=== Selecting LLVM toolchain ==="
 
         LLVM_SOURCE="${NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64"
+
                 test -d "${LLVM_SOURCE}"
 
         cp -a "${LLVM_SOURCE}" "${ANDROID_LLVM_DIR}"
@@ -277,6 +278,7 @@ jobs:
         echo
         echo "Current 12-character commit:"
         echo "${CURRENT_SHORT}"
+
                 test -n "${CURRENT_COMMIT}"
         test -n "${CURRENT_SHORT}"
 
@@ -287,8 +289,8 @@ jobs:
       shell: bash
       run: "set -euo pipefail\n\necho \"============================================================\"\necho \"\
         CEBU KERNEL SOURCE VERIFIED\"\necho \"============================================================\"\n\n\
-       \  EXPECTED_COMMIT=\"39bcecd5c63df849923b1faadc9cde482648a1a1\"\n  \
-        CURRENT_BRANCH=\"$(git branch --show-current)\"\
+        \  EXPECTED_COMMIT=\"39bcecd5c63df849923b1faadc9cde482648a1a1\"\n  \
+           CURRENT_BRANCH=\"$(git branch --show-current)\"\
         \n CURRENT_COMMIT=\"$(git rev-parse HEAD)\"\n CURRENT_SHORT=\"$(git rev-parse --short=12 HEAD)\"\n\n  echo\n\
         \  echo \"Branch:\"\n  echo \"${CURRENT_BRANCH}\"\n\n  echo\n  echo \"Commit:\"\n  echo \"${CURRENT_COMMIT}\"\
         \n\n  echo\n  echo \"12-character commit:\"\n  echo \"${CURRENT_SHORT}\"\n\n  echo\n  echo \"Expected stock\
@@ -296,7 +298,6 @@ jobs:
         \n\n  test -f Makefile\n  test -d arch/arm64\n  test -d drivers\n test -f arch/arm64/configs/vendor/bengal-perf_defconfig\n\
         \n  echo\n  echo \"Defconfig:\"\n  echo \"arch/arm64/configs/vendor/bengal-perf_defconfig\"\n\n  echo\n\
         \  echo \"Correct cebu kernel source verified.\"\n"
-        
     - name: Verify QCACLD3 source tree
       working-directory: kernel
       shell: bash
@@ -351,7 +352,6 @@ jobs:
         } > ../artifacts/source-audit/qcacld3-paths.txt
 
         echo "QCACLD3 source tree verified."
-        
     - name: Clone NetHunter reference
       shell: bash
       run: |
@@ -910,7 +910,7 @@ jobs:
             line=$0
             sub(/^CONFIG_/, "", line)
 
-                        split(line, a, "=")
+                      split(line, a, "=")
             print "CONFIG_" a[1] "=" a[2]
           }
         ' "${PREMERGE_CONFIG}" | sort > "${OUT_DIR}/premerge.normalized"
@@ -1120,6 +1120,8 @@ jobs:
         DIFFERENCES="${TMP_DIR}/unexpected-differences"
 
         echo
+
+
                 echo "=== Normalize stock configuration ==="
 
         awk '
@@ -1751,20 +1753,850 @@ jobs:
         echo
         echo "=== REMOVING ONLY ethtool ASSIGNMENT FROM hdd_set_station_ops ==="
 
-                if ! grep -Fq '#include "wma_frame_inject.h"' "$WMA_MGMT"; then
+                awk '
+        BEGIN {
+            in_func = 0
+            depth = 0
+        }
 
+        /(^|[[:space:]])void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
+            in_func = 1
+        }
+
+        in_func {
+            if ($0 ~ /dev->[[:space:]]*ethtool_ops[[:space:]]*=/) {
+                print "Removed ethtool assignment at line " NR > "/dev/stderr"
+                next
+            }
+
+            print
+
+            opens = gsub(/\{/, "{")
+            closes = gsub(/\}/, "}")
+
+            depth += opens - closes
+
+            if (depth > 0 && $0 ~ /\{/)
+                started = 1
+
+            if (started && depth == 0) {
+                in_func = 0
+                started = 0
+                depth = 0
+            }
+
+            next
+        }
+
+        {
+            print
+        }
+        ' "$MAIN" > "$MAIN.tmp"
+
+        mv "$MAIN.tmp" "$MAIN"
+
+        echo
+        echo "=== COUNTING DEFINITIONS ==="
+
+        COUNT="$(
           awk '
+          /(^|[[:space:]])void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
+              count++
+          }
+          END {
+              print count + 0
+          }
+          ' "$MAIN"
+        )"
+
+        echo "Definitions found: $COUNT"
+
+        if [ "$COUNT" -lt 1 ]; then
+            echo "ERROR: hdd_set_station_ops() disappeared."
+            exit 1
+        fi
+
+        echo
+        echo "=== VERIFYING NO STATIC DEFINITION ==="
+
+        if grep -Eq \
+          '^[[:space:]]*static[[:space:]]+void[[:space:]]+hdd_set_station_ops[[:space:]]*\(' \
+          "$MAIN"
+        then
+            echo "ERROR: static hdd_set_station_ops() remains."
+            exit 1
+        fi
+
+        echo "External linkage: PASS"
+
+        echo
+        echo "=== VERIFYING MONITOR ROUTING ==="
+
+        grep -Fq 'wlan_mon_drv_ops' "$MAIN"
+        grep -Fq 'wlan_drv_ops' "$MAIN"
+        grep -Fq 'QDF_GLOBAL_MONITOR_MODE' "$MAIN"
+        grep -Fq 'QDF_MONITOR_MODE' "$MAIN"
+
+        echo "wlan_mon_drv_ops: PASS"
+        echo "wlan_drv_ops: PASS"
+        echo "QDF_GLOBAL_MONITOR_MODE: PASS"
+        echo "QDF_MONITOR_MODE: PASS"
+
+        echo
+        echo "=== VERIFYING ethtool REFERENCE IS GONE FROM THIS FUNCTION ==="
+
+        if awk '
+        /(^|[[:space:]])void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
+            in_func=1
+            depth=0
+            started=0
+        }
+
+        in_func {
+            if ($0 ~ /ethtool_ops/) {
+                found=1
+            }
+
+            opens=gsub(/\{/, "{")
+            closes=gsub(/\}/, "}")
+
+            depth += opens-closes
+
+            if (depth > 0)
+                started=1
+
+            if (started && depth == 0) {
+                in_func=0
+            }
+        }
+
+        END {
+            exit found ? 0 : 1
+        }
+        ' "$MAIN"
+        then
+            echo "ERROR: ethtool_ops still referenced inside hdd_set_station_ops()."
+            exit 1
+        fi
+
+        echo "ethtool reference: CLEAN"
+
+        echo
+        echo "=== SOURCE SYNTAX SANITY CHECK ==="
+
+        awk '
+        BEGIN {
+            braces=0
+        }
+
+        {
+            opens=gsub(/\{/, "{")
+            closes=gsub(/\}/, "}")
+
+            braces += opens-closes
+
+            if (braces < 0) {
+                print "ERROR: closing brace underflow at line " NR
+                exit 1
+            }
+        }
+
+        END {
+            if (braces != 0) {
+                print "ERROR: unmatched braces. Balance =", braces
+                exit 1
+            }
+
+            print "Brace balance: PASS"
+        }
+        ' "$MAIN"
+
+        echo
+        echo "=== FINAL hdd_set_station_ops LOCATIONS ==="
+
+        grep -n \
+          -E '^[[:space:]]*(static[[:space:]]+)?void[[:space:]]+hdd_set_station_ops[[:space:]]*\(' \
+          "$MAIN"
+
+        echo
+        echo "=========================================="
+        echo "hdd_set_station_ops LINKAGE: PASS"
+        echo "MONITOR NETDEV ROUTING: PASS"
+        echo "NO ethtool_ops DEPENDENCY: PASS"
+        echo "SOURCE BRACE BALANCE: PASS"
+        echo "=========================================="
+
+        exit 0
+
+
+
+
+    - name: Verify monitor and injection completion integration
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -uo pipefail
+             
+        HDD_MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+        HDD_CFG="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c"
+        WMA_MGMT="drivers/staging/qcacld-3.0/core/wma/src/wma_mgmt.c"
+        WMA_INJECT="drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c"
+        WMA_INJECT_H="drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h"
+
+        fail=0
+
+        check_file() {
+          local file="$1"
+
+          if [ -f "$file" ]; then
+            echo "PASS: file exists: $file"
+          else
+            echo "FAIL: missing file: $file"
+            fail=1
+          fi
+        }
+
+        check_grep() {
+          local pattern="$1"
+          shift
+          local found=0
+          local file
+
+                      if grep -Fq -- "$pattern" "$file" 2>/dev/null; then
+              echo "PASS: [$pattern] found in $file"
+              found=1
+              break
+            fi
+          done
+
+          if [ "$found" -eq 0 ]; then
+            echo "FAIL: [$pattern] not found in:"
+            for file in "$@"; do
+              echo "      $file"
+            done
+            fail=1
+          fi
+        }
+
+        echo
+        echo "=========================================="
+        echo "VERIFY MONITOR + INJECTION INTEGRATION"
+        echo "=========================================="
+
+        echo
+        echo "=== SOURCE FILE CHECKS ==="
+
+        check_file "$HDD_MAIN"
+        check_file "$HDD_CFG"
+        check_file "$WMA_MGMT"
+        check_file "$WMA_INJECT"
+        check_file "$WMA_INJECT_H"
+
+        if [ "$fail" -ne 0 ]; then
+          echo
+          echo "ERROR: Required source file is missing."
+          exit 1
+        fi
+
+        echo
+        echo "=== MONITOR CHECKS ==="
+
+        # Monitor mode symbol must exist somewhere in the HDD implementation.
+        check_grep \
+          "QDF_MONITOR_MODE" \
+          "$HDD_MAIN" "$HDD_CFG"
+
+        # Monitor netdev operations must be present.
+        check_grep \
+          "wlan_mon_drv_ops" \
+          "$HDD_MAIN" "$HDD_CFG"
+
+        # Monitor open handler must exist if used by the monitor netdev ops.
+        check_grep \
+          "hdd_mon_open" \
+          "$HDD_MAIN" "$HDD_CFG"
+
+        # Do not assume which HDD source file owns the device_mode assignment.
+        check_grep \
+          "adapter->device_mode = QDF_MONITOR_MODE" \
+          "$HDD_MAIN" "$HDD_CFG"
+
+        # Do not assume which HDD source file owns the nl80211 monitor
+        # interface assignment.
+        check_grep \
+          "NL80211_IFTYPE_MONITOR" \
+          "$HDD_MAIN" "$HDD_CFG"
+
+        echo
+        echo "=== MONITOR SYMBOL LOCATION DEBUG ==="
+
+        grep -nE \
+          'QDF_MONITOR_MODE|wlan_mon_drv_ops|hdd_mon_open|device_mode[[:space:]]*=[[:space:]]*QDF_MONITOR_MODE|NL80211_IFTYPE_MONITOR' \
+          "$HDD_MAIN" "$HDD_CFG" || true
+
+        echo
+        echo "=== INJECTION COMPLETION CHECKS ==="
+
+        check_grep \
+          '#include "wma_frame_inject.h"' \
+          "$WMA_MGMT"
+
+        check_grep \
+          "WMA_IS_INJECTION_DESC_ID(desc_id)" \
+          "$WMA_MGMT"
+
+        check_grep \
+          "WMA_IS_INJECTION_DESC_ID(injection_desc_id)" \
+          "$WMA_MGMT"
+
+        check_grep \
+          "wma_handle_injection_fw_response" \
+          "$WMA_MGMT" "$WMA_INJECT"
+
+        check_grep \
+          "WMA_INJECTION_DESC_ID_BASE 0x2000" \
+          "$WMA_INJECT_H"
+
+        echo
+        echo "=== INJECTION SYMBOL LOCATION DEBUG ==="
+
+        grep -nE \
+          'WMA_IS_INJECTION_DESC_ID|wma_handle_injection_fw_response|WMA_INJECTION_DESC_ID_BASE' \
+          "$WMA_MGMT" "$WMA_INJECT" "$WMA_INJECT_H" || true
+
+        echo
+        echo "=== FORBIDDEN DEBUG CONFIG CHECK ==="
+
+        if [ -f "${OUT_DIR}/.config" ]; then
+          if grep -Eq '^CONFIG_DEBUG_FS=y' "${OUT_DIR}/.config"; then
+            echo "FAIL: CONFIG_DEBUG_FS=y is forbidden."
+            fail=1
+          else
+            echo "PASS: CONFIG_DEBUG_FS is not enabled."
+          fi
+        else
+          echo "FAIL: ${OUT_DIR}/.config does not exist."
+          fail=1
+        fi
+
+        echo
+        echo "=========================================="
+
+        if [ "$fail" -ne 0 ]; then
+          echo "MONITOR + INJECTION PRE-BUILD INTEGRATION: FAILED"
+          echo "=========================================="
+          exit 1
+        fi
+
+        echo "MONITOR + INJECTION PRE-BUILD INTEGRATION: PASSED"
+        echo "=========================================="
+    - name: Safely wire QCACLD3 frame injection ioctl
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        IOCTL_SRC="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_ioctl.c"
+        INJECT_HDR="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h"
+
+        echo "=================================================="
+        echo "QCACLD3 FRAME-INJECTION DISPATCH PREFLIGHT"
+        echo "=================================================="
+
+        test -f "$IOCTL_SRC"
+        test -f "$INJECT_HDR"
+
+        echo
+        echo "=== Injection handler declarations ==="
+        grep -Rni \
+          'hdd_frame_inject_ioctl' \
+          drivers/staging/qcacld-3.0/core/hdd/inc \
+          drivers/staging/qcacld-3.0/core/hdd/src
+
+        echo
+        echo "=== Locating ioctl functions ==="
+
+        grep -nE \
+          '(^|[[:space:]])(static[[:space:]]+)?int[[:space:]]+(__)?hdd_ioctl[[:space:]]*\(' \
+          "$IOCTL_SRC"
+
+        echo
+        echo "=== Relevant dispatcher references ==="
+
+        grep -nE \
+          '__hdd_ioctl|hdd_driver_ioctl|hdd_frame_inject_ioctl|switch[[:space:]]*\([[:space:]]*cmd[[:space:]]*\)|SIOCDEVPRIVATE' \
+          "$IOCTL_SRC" | head -250
+
+        echo
+        echo "=== Adding injection header if necessary ==="
+
+        python3 - "$IOCTL_SRC" <<'PY'
+        import sys
+        from pathlib import Path
+
+        path = Path(sys.argv[1])
+        text = path.read_text()
+
+        inc = '#include "../inc/wlan_hdd_frame_inject.h"'
+
+        if inc not in text:
+            lines = text.splitlines(True)
+
+            positions = [
+                i for i, line in enumerate(lines)
+                if line.startswith("#include")
+            ]
+
+            if not positions:
+                raise SystemExit(
+                    "FATAL: wlan_hdd_ioctl.c has no include section"
+                )
+
+            lines.insert(positions[-1] + 1, inc + "\n")
+            path.write_text("".join(lines))
+
+            print("Injection header inserted.")
+        else:
+            print("Injection header already present.")
+        PY
+
+        echo
+        echo "=================================================="
+        echo "ANALYZING ACTUAL DISPATCH TOPOLOGY"
+        echo "=================================================="
+
+        python3 - "$IOCTL_SRC" <<'PY'
+        import sys
+        from pathlib import Path
+
+        path = Path(sys.argv[1])
+        text = path.read_text()
+
+                def function_body(name):
+            needle = name + "("
+            start = text.find(needle)
+
+            if start < 0:
+                return None
+
+            brace = text.find("{", start)
+            if brace < 0:
+                return None
+
+            depth = 0
+
+            for i in range(brace, len(text)):
+                c = text[i]
+
+                if c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+
+                    if depth == 0:
+                        return text[start:i + 1]
+
+            return None
+
+        outer = function_body("hdd_ioctl")
+        inner = function_body("__hdd_ioctl")
+
+        if outer is None:
+            raise SystemExit(
+                "FATAL: Could not locate hdd_ioctl()."
+            )
+
+        if inner is None:
+            raise SystemExit(
+                "FATAL: Could not locate __hdd_ioctl()."
+            )
+
+        print("hdd_ioctl() found.")
+        print("__hdd_ioctl() found.")
+
+        print()
+        print("=== hdd_ioctl() relevant lines ===")
+
+        for n, line in enumerate(outer.splitlines(), 1):
+            if any(x in line for x in (
+                "__hdd_ioctl",
+                "hdd_driver_ioctl",
+                "switch",
+                "SIOCDEVPRIVATE",
+                "hdd_frame_inject_ioctl"
+            )):
+                print(f"{n:5}: {line}")
+
+        print()
+        print("=== __hdd_ioctl() relevant lines ===")
+
+        for n, line in enumerate(inner.splitlines(), 1):
+            if any(x in line for x in (
+                "switch",
+                "SIOCDEVPRIVATE",
+                "hdd_frame_inject_ioctl"
+            )):
+                print(f"{n:5}: {line}")
+
+        has_inner_switch = (
+            "switch (cmd)" in inner or
+            "switch(cmd)" in inner
+        )
+
+        has_outer_switch = (
+            "switch (cmd)" in outer or
+            "switch(cmd)" in outer
+        )
+
+        if not has_inner_switch:
+            raise SystemExit(
+                "FATAL: __hdd_ioctl() does not contain switch(cmd). "
+                "Refusing to guess where to patch."
+            )
+
+        if not has_outer_switch:
+            print(
+                "NOTE: outer hdd_ioctl() has no switch(cmd)."
+            )
+
+        print()
+        print("DISPATCH PREFLIGHT PASSED.")
+        PY
+
+        echo
+        echo "=================================================="
+        echo "PATCHING THE VERIFIED INNER DISPATCHER"
+        echo "=================================================="
+
+        python3 - "$IOCTL_SRC" <<'PY'
+        import sys
+        from pathlib import Path
+
+        path = Path(sys.argv[1])
+        text = path.read_text()
+
+        CASE = """    case (SIOCDEVPRIVATE + 10):
+            ret = hdd_frame_inject_ioctl(dev, ifr, cmd);
+            break;
+        """
+
+        def locate_function(text, name):
+            needle = name + "("
+            start = text.find(needle)
+
+            if start < 0:
+                raise SystemExit(
+                    f"FATAL: {name}() not found"
+                )
+
+            brace = text.find("{", start)
+
+            if brace < 0:
+                raise SystemExit(
+                    f"FATAL: opening brace for {name}() not found"
+                )
+
+            depth = 0
+
+            for i in range(brace, len(text)):
+                if text[i] == "{":
+                    depth += 1
+                elif text[i] == "}":
+                    depth -= 1
+
+                    if depth == 0:
+                        return start, i + 1
+
+            raise SystemExit(
+                f"FATAL: could not determine end of {name}()"
+            )
+
+        start, end = locate_function(
+            text,
+            "__hdd_ioctl"
+        )
+
+        block = text[start:end]
+
+        if "switch (cmd)" not in block and \
+           "switch(cmd)" not in block:
+            raise SystemExit(
+                "FATAL: verified __hdd_ioctl() no longer "
+                "contains switch(cmd)."
+            )
+
+        if "case (SIOCDEVPRIVATE + 10):" in block:
+            print(
+                "0x89FA already present in __hdd_ioctl(); "
+                "no duplicate inserted."
+            )
+            raise SystemExit(0)
+
+        markers = [
+            "\n\tdefault:",
+            "\n    default:",
+            "\ndefault:"
+        ]
+
+        marker = next(
+            (m for m in markers if m in block),
+            None
+        )
+
+        if marker is None:
+            raise SystemExit(
+                "FATAL: __hdd_ioctl() default case not found. "
+                "Refusing to guess."
+            )
+
+        block = block.replace(
+            marker,
+            "\n" + CASE + marker,
+            1
+        )
+
+        text = text[:start] + block + text[end:]
+        path.write_text(text)
+
+        print(
+            "SUCCESS: 0x89FA wired into verified "
+            "__hdd_ioctl() switch."
+        )
+        PY
+
+        echo
+        echo "=================================================="
+        echo "POST-PATCH SOURCE VERIFICATION"
+        echo "=================================================="
+
+        COUNT="$(
+          grep -c \
+            'case (SIOCDEVPRIVATE + 10):' \
+            "$IOCTL_SRC" || true
+        )"
+
+        echo "0x89FA case count: $COUNT"
+
+        if [ "$COUNT" -ne 1 ]; then
+          echo "FATAL: Expected exactly one 0x89FA case."
+          exit 1
+        fi
+
+                grep -n -A6 -B6 \
+          'case (SIOCDEVPRIVATE + 10):' \
+          "$IOCTL_SRC"
+
+        echo
+        echo "=== Handler call verification ==="
+
+        grep -n \
+          'hdd_frame_inject_ioctl(dev, ifr, cmd)' \
+          "$IOCTL_SRC"
+
+        echo
+        echo "=================================================="
+        echo "FRAME-INJECTION IOCTL SOURCE PATCH PASSED"
+        echo "=================================================="
+    - name: Remove duplicate injection helper definitions
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        FRAME_H="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h"
+        SECURITY_H="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_inject_security.h"
+
+        test -f "${FRAME_H}"
+        test -f "${SECURITY_H}"
+
+        echo "=== Verifying expected duplicate helper locations ==="
+
+        sed -n '682,691p' "${FRAME_H}"
+
+        grep -q \
+          'static inline QDF_STATUS hdd_get_injection_stats' \
+          "${FRAME_H}"
+
+        grep -q \
+          'static inline QDF_STATUS hdd_reset_injection_stats' \
+          "${FRAME_H}"
+
+        echo
+        echo "=== Removing ONLY duplicate helper lines 682-691 ==="
+
+        sed -i '682,691d' "${FRAME_H}"
+
+        echo
+        echo "=== Verifying duplicates were removed ==="
+
+        if grep -q \
+          'static inline QDF_STATUS hdd_get_injection_stats' \
+          "${FRAME_H}"; then
+          echo "ERROR: hdd_get_injection_stats still exists in frame_inject.h"
+          exit 1
+        fi
+
+        if grep -q \
+          'static inline QDF_STATUS hdd_reset_injection_stats' \
+          "${FRAME_H}"; then
+          echo "ERROR: hdd_reset_injection_stats still exists in frame_inject.h"
+          exit 1
+        fi
+
+        echo
+        echo "=== Verifying security header still contains the helpers ==="
+
+        grep -n \
+          'static inline QDF_STATUS hdd_get_injection_stats\|static inline QDF_STATUS hdd_reset_injection_stats' \
+          "${SECURITY_H}"
+
+        echo
+        echo "=== Verifying frame header preprocessor balance ==="
+
+        grep -n \
+          '#if\|#ifdef\|#ifndef\|#else\|#elif\|#endif' \
+          "${FRAME_H}" | tail -10
+
+        echo
+        echo "=== Duplicate injection helper fix passed ==="
+    - name: Integrate injection context into HDD
+      working-directory: kernel
+      shell: bash
+      run: "set -euo pipefail\n\nMAIN_H=\"drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h\"\n\ntest -f \"${MAIN_H}\"\n\necho \"=== Integrating injection context into struct hdd_adapter ===\"\n\n# Remove any previous injection_ctx member from this header.\nsed -i \\\n  '/^[[:space:]]*#ifdef FEATURE_FRAME_INJECTION_SUPPORT[[:space:]]*$/{\n    N\n    /^[[:space:]]*#ifdef FEATURE_FRAME_INJECTION_SUPPORT[[:space:]]*\\n[[:space:]]*struct hdd_injection_ctx\\ *injection_ctx;[[:space:]]*$/{\n      d\n    }\n  }' \\\n  \"${MAIN_H}\"\n\necho\necho \"=== Locate hdd_adapter structure ===\"\n\nSTART_LINE=\"$(\n  grep -n -m1 \\\n    -E '^[[:space:]]*struct hdd_adapter[[:space:]]*\\{' \\\n    \"${MAIN_H}\" |\n  cut -d: -f1\n)\"\n\nif [ -z \"${START_LINE}\" ]; then\n  echo \"ERROR: struct hdd_adapter definition was not found.\"\n  exit 1\nfi\n\necho \"struct hdd_adapter starts at line ${START_LINE}\"\n\n# Find the closing brace of the struct by walking forward\n# from the actual struct definition.\nEND_LINE=\"$(\n  awk -v start=\"${START_LINE}\" '\n    NR < start { next }\n\n    {\n      line = $0\n\n      # Remove simple C comments before counting braces.\n      gsub(/\\/\\*.*\\*\\//, \"\", line)\n\n      opens = gsub(/\\{/, \"{\", line)\n      closes = gsub(/\\}/, \"}\", line)\n\n      depth += opens\n      depth -= closes\n\n      if (NR > start && depth == 0 && line ~ /^[[:space:]]*};[[:space:]]*$/) {\n        print NR\n        exit\n      }\n    }\n  ' \"${MAIN_H}\"\n)\"\n\nif [ -z \"${END_LINE}\" ]; then\n  echo \"ERROR: Could not locate end of struct hdd_adapter.\"\n  exit 1\nfi\n\necho \"struct hdd_adapter ends at line ${END_LINE}\"\n\necho\necho \"=== Structure ending before modification ===\"\nsed -n \"$((END_LINE - 12)),$((END_LINE + 3))p\" \"${MAIN_H}\"\n\n# Insert immediately before the actual closing brace.\nsed -i \"${END_LINE}i\\\\\n #ifdef FEATURE_FRAME_INJECTION_SUPPORT\\\\\n      \\t  struct hdd_injection_ctx *injection_ctx;\\\\\n #endif\" \"${MAIN_H}\"\n\necho\necho \"=== Verify injection context member ===\"\n\nCOUNT=\"$(\n  grep -Fc \\\n    'struct hdd_injection_ctx *injection_ctx;' \\\n    \"${MAIN_H}\"\n)\"\n\nif [ \"${COUNT}\" -ne 1 ]; then\n  echo \"ERROR: Expected exactly one injection_ctx member; found ${COUNT}.\"\n  grep -n -B5 -A5 \\\n    -F 'injection_ctx' \\\n    \"${MAIN_H}\" || true\n  exit 1\nfi\n\necho\necho \"=== Final struct ending ===\"\n\n# Recalculate the end after insertion.\nNEW_END_LINE=\"$(\n  awk -v start=\"${START_LINE}\" \\\n  '\n    NR < start { next }\n\n    {\n      line = $0\n      gsub(/\\/\\*.*\\*\\//, \"\", line)\n\n      opens = gsub(/\\{/, \"{\", line)\n      closes = gsub(/\\}/, \"}\", line)\n\n      depth += opens\n      depth -= closes\n\n      if (NR > start && depth == 0 && line ~ /^[[:space:]]*};[[:space:]]*$/) {\n        print NR\n        exit\n      }\n    }\n  ' \"${MAIN_H}\"\n)\"\n\nsed -n \"$((NEW_END_LINE - 8)),$((NEW_END_LINE + 2))p\" \"${MAIN_H}\"\n\necho\necho \"HDD adapter injection context integrated correctly.\"\n    - name: Integrate injection API into HDD main
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        MAIN_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+        INJECT_H="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h"
+
+        test -f "${MAIN_C}"
+        test -f "${INJECT_H}"
+
+        echo "=== Normalizing HDD injection header include ==="
+
+        sed -i \
+          '/wlan_hdd_frame_inject\.h/d' \
+          "${MAIN_C}"
+
+        TMP_C="${MAIN_C}.tmp"
+
+        awk '
           BEGIN {
-              inserted = 0
+            inserted = 0
           }
 
-          /^#include/ {
+          {
+            if (!inserted && $0 ~ /^#include[[:space:]]+/) {
+              print "#include \"../inc/wlan_hdd_frame_inject.h\""
+              inserted = 1
+            }
+
+            print
+          }
+
+          END {
+            if (!inserted) {
+              exit 1
+            }
+          }
+        ' "${MAIN_C}" > "${TMP_C}"
+
+        test -s "${TMP_C}"
+        mv "${TMP_C}" "${MAIN_C}"
+
+        echo
+        echo "=== Verifying HDD injection API include ==="
+
+        grep -n -F \
+          '#include "../inc/wlan_hdd_frame_inject.h"' \
+          "${MAIN_C}"
+
+        echo
+        echo "=== HDD injection API integration passed ==="
+    - name: Integrate frame-injection initialization
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        HDD_SRC="drivers/staging/qcacld-3.0/core/hdd/src"
+
+        echo "=== FRAME-INJECTION INITIALIZATION ==="
+
+        test -d "$HDD_SRC"
+
+        echo
+        echo "=== LOCATING PERIODIC STA STATS INITIALIZATION ==="
+
+        STATS_MATCHES="$(grep -RIn \
+          'hdd_periodic_sta_stats_init' \
+          "$HDD_SRC" 2>/dev/null || true)"
+
+        if [ -z "$STATS_MATCHES" ]; then
+          echo "Periodic STA stats symbol not found."
+          echo
+          echo "Searching related initialization symbols:"
+          grep -RInE \
+            'periodic.*stats|stats.*init|sta.*stats|adapter.*init' \
+            "$HDD_SRC" 2>/dev/null | head -n100 || true
+        else
+          echo "$STATS_MATCHES"
+        fi
+
+        echo
+        echo "=== LOCATING FRAME-INJECTION INITIALIZATION ==="
+
+        INJECT_MATCHES="$(grep -RInE \
+          'inject.*init|init.*inject|frame.*inject|inject.*frame|wma.*inject' \
+          "$HDD_SRC" 2>/dev/null || true)"
+
+        if [ -n "$INJECT_MATCHES" ]; then
+          echo "$INJECT_MATCHES" | head -n150
+        else
+          echo "No existing HDD frame-injection initialization symbol found."
+        fi
+
+        echo
+        echo "=== LOCATING ADAPTER INITIALIZATION PATHS ==="
+
+        grep -RInE \
+          'hdd_init_adapter|hdd_start_adapter|hdd_set_station_ops|hdd_open|adapter.*init' \
+          "$HDD_SRC" 2>/dev/null | head -n150 || true
+
+                echo
+        echo "=== INITIALIZATION SOURCE DISCOVERY COMPLETE ==="
+    - name: Remove duplicate QCACLD3 WMA injection stubs
+      shell: bash
+      run: "set -euxo pipefail\n\nWMA_SRC=\"${GITHUB_WORKSPACE}/kernel/drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c\"\n\ntest -f \"$WMA_SRC\"\n\necho \"=== Before cleanup ===\"\ngrep -n -E \\\n  'QDF_STATUS wma_(init|deinit)_injection_queue|wma_queue_injection_frame|wma_injection_pre_stop_cleanup' \\\n  \"$WMA_SRC\" || true\n\npython3 - \"$WMA_SRC\" <<'PY'\nfrom pathlib import Path\nimport re\nimport sys\n\npath = Path(sys.argv[1])\ntext = path.read_text()\n\n# Remove the known trailing stub block only.\npattern = re.compile(\n    r'''\n    QDF_STATUS\\s+wma_init_injection_queue\\s*\n    \\(\\s*tp_wma_handle\\s+wma_handle\\s*\\)\\s*\n    \\{\\s*\n    return\\s+QDF_STATUS_SUCCESS\\s*;\\s*\n    \\}\\s*\n\n    QDF_STATUS\\s+wma_deinit_injection_queue\\s*\n    \\(\\s*tp_wma_handle\\s+wma_handle\\s*\\)\\s*\n    \\{\\s*\n    return\\s+QDF_STATUS_SUCCESS\\s*;\\s*\n    \\}\\s*\n\n    void\\s+wma_injection_pre_stop_cleanup\\s*\n    \\(\\s*tp_wma_handle\\s+wma_handle\\s*\\)\\s*\n    \\{\\s*\\}\\s*\n\n    QDF_STATUS\\s+wma_queue_injection_frame\\s*\n    \\(\\s*\n    tp_wma_handle\\s+wma_handle\\s*,\\s*\n    struct\\s+inject_frame_req\\s*\\*req\\s*,\\s*\n    uint8_t\\s+vdev_id\\s*\n    \\)\\s*\n    \\{\\s*\n    return\\s+QDF_STATUS_E_NOSUPPORT\\s*;\\s*\n    \\}\n    ''',\n    re.X | re.S\n)\n\nnew_text, count = pattern.subn('', text)\n\nif count != 1:\n    raise SystemExit(\n        f\"Expected exactly one duplicate WMA injection stub block, found {count}\"\n    )\n\npath.write_text(new_text)\n\nprint(\"Removed exactly one duplicate WMA injection stub block.\")\nPY\n\necho \"=== After cleanup ===\"\ngrep -n -E \\\n  'QDF_STATUS wma_(init|deinit)_injection_queue|wma_queue_injection_frame|wma_injection_pre_stop_cleanup' \\\n  \"$WMA_SRC\" || true\n"
+    - name: Initialize WMA frame-injection queue
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        WMA_MAIN="drivers/staging/qcacld-3.0/core/wma/src/wma_main.c"
+        WMA_HEADER="drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h"
+
+        test -f "$WMA_MAIN"
+        test -f "$WMA_HEADER"
+
+        echo "=== Ensuring WMA injection prototype is visible ==="
+
+        if ! grep -Fq 'wma_init_injection_queue(tp_wma_handle wma_handle)' "$WMA_MAIN"; then
+          awk '
+          BEGIN { inserted = 0 }
+
+          /^#include/ && !inserted {
               print
-              if (!inserted &&
-                  $0 ~ /#include "wma\.h"/) {
-                  print "#include \"wma_frame_inject.h\""
-                  inserted = 1
-              }
+              next
+          }
+
+          /^$/ && !inserted {
+              print "#include \"wma_frame_inject.h\""
+              print
+              inserted = 1
               next
           }
 
@@ -1774,43 +2606,99 @@ jobs:
 
           END {
               if (!inserted) {
-                  print "ERROR: Could not insert wma_frame_inject.h"
+                  print "ERROR: Could not insert WMA injection header"
                   exit 2
               }
           }
-          ' "$WMA_MGMT" > "${WMA_MGMT}.new"
+          ' "$WMA_MAIN" > "${WMA_MAIN}.new"
 
-          mv "${WMA_MGMT}.new" "$WMA_MGMT"
+          mv "${WMA_MAIN}.new" "$WMA_MAIN"
         fi
 
-        echo
-        echo "=== Patching single management-TX completion ==="
+        echo "=== Removing previous broken WMA initialization block ==="
 
         awk '
         BEGIN {
-            patched = 0
+            skip = 0
         }
 
-        !patched && /mgmt_txrx_get_nbuf[[:space:]]*\(/ {
-            print "        /* NETHUNTER_INJECTION_COMPLETION_BRIDGE */"
-            print "#ifdef FEATURE_FRAME_INJECTION_SUPPORT"
-            print "        if (WMA_IS_INJECTION_DESC_ID(desc_id)) {"
-            print "                QDF_STATUS injection_status;"
-            print ""
-            print "                injection_status ="
-            print "                        wma_handle_injection_fw_response("
-            print "                                wma_handle, desc_id, status);"
-            print ""
-            print "                if (injection_status != QDF_STATUS_SUCCESS)"
-            print "                        wma_err(\"Failed to process injection completion: %d\","
-            print "                                injection_status);"
-            print ""
-            print "                return 0;"
-            print "        }"
-            print "#endif"
-            print ""
+        /#ifdef FEATURE_FRAME_INJECTION_SUPPORT/ {
+            save = $0
+            getline nextline
+
+            if (nextline ~ /QDF_STATUS injection_queue_status/) {
+                skip = 1
+                next
+            }
+
+            print save
+            print nextline
+            next
+        }
+
+        skip {
+            if ($0 ~ /^#endif/) {
+                skip = 0
+            }
+            next
+        }
+
+        {
             print
-            patched = 1
+        }
+        ' "$WMA_MAIN" > "${WMA_MAIN}.new"
+
+        mv "${WMA_MAIN}.new" "$WMA_MAIN"
+
+        echo "=== Finding wma_start() ==="
+
+        awk '
+        /QDF_STATUS wma_start\(void\)/ {
+            print NR ":" $0
+            found = 1
+        }
+        END {
+            if (!found) exit 2
+        }
+        ' "$WMA_MAIN"
+
+        echo "=== Inserting queue initialization using a local status variable ==="
+
+        awk '
+        BEGIN {
+            in_start = 0
+            inserted = 0
+            brace_depth = 0
+        }
+
+        /QDF_STATUS wma_start\(void\)/ {
+            in_start = 1
+        }
+
+        in_start && !inserted &&
+        /wma_handle = cds_get_context\(QDF_MODULE_ID_WMA\);/ {
+
+            print
+
+            print ""
+            print "#ifdef FEATURE_FRAME_INJECTION_SUPPORT"
+            print "{"
+            print "        QDF_STATUS injection_queue_status;"
+            print ""
+            print "        injection_queue_status ="
+            print "                wma_init_injection_queue(wma_handle);"
+            print ""
+            print "        if (injection_queue_status != QDF_STATUS_SUCCESS) {"
+            print "                wma_err(\"Failed to initialize frame injection queue: %d\","
+            print "                        injection_queue_status);"
+            print "                return injection_queue_status;"
+            print "        }"
+            print ""
+            print "        wma_info(\"Frame injection queue initialized\");"
+            print "}"
+            print "#endif"
+
+            inserted = 1
             next
         }
 
@@ -1819,105 +2707,2207 @@ jobs:
         }
 
         END {
-            if (!patched) {
-                print "ERROR: Could not find normal MGMT TX descriptor lookup."
-                exit 3
+            if (!inserted) {
+                print "ERROR: Could not find wma_handle context assignment"
+                exit 2
             }
         }
-        ' "$WMA_MGMT" > "${WMA_MGMT}.new"
+        ' "$WMA_MAIN" > "${WMA_MAIN}.new"
 
-        mv "${WMA_MGMT}.new" "$WMA_MGMT"
+        mv "${WMA_MAIN}.new" "$WMA_MAIN"
 
-        echo
-        echo "=== Patching bundled management-TX completion ==="
+        echo "=== Verify WMA initialization ==="
 
-        awk '
-        BEGIN {
-            patched = 0
-        }
+        grep -n -B 8 -A 25 \
+          'wma_init_injection_queue(wma_handle)' \
+          "$WMA_MAIN"
 
-        !patched &&
-        /for \(i = 0; i < num_reports; i\+\+\)/ {
-
-            print
-            print "        {"
-            print "                uint32_t injection_desc_id = desc_ids[i];"
-            print ""
-            print "#ifdef FEATURE_FRAME_INJECTION_SUPPORT"
-            print "                if (WMA_IS_INJECTION_DESC_ID(injection_desc_id)) {"
-            print "                        QDF_STATUS injection_status;"
-            print ""
-            print "                        injection_status ="
-            print "                                wma_handle_injection_fw_response("
-            print "                                        wma_handle,"
-            print "                                        injection_desc_id,"
-            print "                                        status[i]);"
-            print ""
-            print "                        if (injection_status != QDF_STATUS_SUCCESS)"
-            print "                                wma_err(\"Failed to process bundled injection completion: %d\","
-            print "                                        injection_status);"
-            print ""
-            print "                        continue;"
-            print "                }"
-            print "#endif"
-            print "        }"
-
-            patched = 1
-            next
-        }
-
-        {
-            print
-        }
-
-        END {
-            if (!patched) {
-                print "ERROR: Could not find management bundle completion loop."
-                exit 4
-            }
-        }
-        ' "$WMA_MGMT" > "${WMA_MGMT}.new"
-
-        mv "${WMA_MGMT}.new" "$WMA_MGMT"
-
-        echo
-        echo "=== Verifying injection completion API ==="
+        echo "=== Verify WMA header include ==="
 
         grep -n \
-          'wma_handle_injection_fw_response' \
-          "$WMA_MGMT"
+          '#include "wma_frame_inject.h"' \
+          "$WMA_MAIN"
 
-        echo
-        echo "Injection completion routing patch completed successfully."
-    - name: Inspect hdd_set_station_ops
+        echo "WMA frame-injection queue initialization patched successfully."
+    - name: Enable QCACLD3 monitor interface lifecycle
       working-directory: kernel
       shell: bash
       run: |
         set -euo pipefail
 
-        HDD_MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+        HDD_CFG="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c"
+
+        echo "=== QCACLD3 MONITOR INTERFACE LIFECYCLE ==="
+        echo "Target: $HDD_CFG"
+        echo
+
+        test -f "$HDD_CFG"
+
+        echo "=== CHANGE-IFACE IMPLEMENTATION ==="
+
+        START="$(grep -n -m1 \
+          'static int __wlan_hdd_cfg80211_change_iface' \
+          "$HDD_CFG" | cut -d: -f1 || true)"
+
+        if [ -z "$START" ]; then
+          echo "ERROR: __wlan_hdd_cfg80211_change_iface() not found"
+          exit 1
+        fi
+
+        echo "Found implementation at line: $START"
+        echo
+
+        END=$((START + 260))
+
+                sed -n "${START},${END}p" "$HDD_CFG"
+
+        echo
+        echo "=== MONITOR TRANSITION REFERENCES INSIDE CHANGE-IFACE ==="
+
+        sed -n "${START},${END}p" "$HDD_CFG" | \
+          grep -nE \
+          'NL80211_IFTYPE_MONITOR|QDF_MONITOR_MODE|QDF_GLOBAL_MONITOR_MODE|device_mode|vdev|monitor|start_adapter|stop_adapter|deinit_adapter' \
+          || true
+
+        echo
+        echo "=== WRAPPER FUNCTION ==="
+
+        WRAPPER="$(grep -n -m1 \
+          'static int wlan_hdd_cfg80211_change_iface' \
+          "$HDD_CFG" | cut -d: -f1 || true)"
+
+        if [ -n "$WRAPPER" ]; then
+          sed -n "${WRAPPER},$((WRAPPER + 70))p" "$HDD_CFG"
+        fi
+
+        echo
+        echo "=== CFG80211 REGISTRATION ==="
+
+        grep -n -A4 -B4 \
+          'change_virtual_intf.*wlan_hdd_cfg80211_change_iface' \
+          "$HDD_CFG" || true
+
+        echo
+        echo "=== EXISTING MONITOR LIFECYCLE ==="
+
+        grep -nE \
+          'FEATURE_MONITOR_MODE_SUPPORT|QDF_GLOBAL_MONITOR_MODE|QDF_MONITOR_MODE|NL80211_IFTYPE_MONITOR|monitor_mode_vdev|wlan_hdd_cfg80211_set_mon_ch' \
+          "$HDD_CFG" || true
+
+        echo
+        echo "=== MONITOR LIFECYCLE SOURCE DISCOVERY COMPLETE ==="
+    - name: Route per-interface monitor netdev ops
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        HDD_SRC="drivers/staging/qcacld-3.0/core/hdd/src"
+
+        echo "=== ROUTING PER-INTERFACE MONITOR NETDEV OPS ==="
+
+        TARGET="$(grep -RIl \
+          'hdd_set_station_ops[[:space:]]*(struct net_device' \
+          "$HDD_SRC" 2>/dev/null | head -n1 || true)"
+
+        if [ -z "$TARGET" ]; then
+          echo "ERROR: hdd_set_station_ops() not found."
+          grep -RInE \
+            'hdd_set_station_ops|wlan_mon_drv_ops|wlan_drv_ops' \
+            "$HDD_SRC" 2>/dev/null || true
+          exit 1
+        fi
+
+        echo "Target: $TARGET"
+
+        echo
+        echo "=== NORMALIZING hdd_set_station_ops() ==="
 
         awk '
-        /void hdd_set_station_ops\(struct net_device \*dev\)/ {
-            found = 1
+        BEGIN {
+            in_func = 0
             depth = 0
+            found = 0
         }
 
-        found {
+        !in_func &&
+        /hdd_set_station_ops[[:space:]]*\(struct net_device[[:space:]]*\*dev\)/ {
+
+            if (found == 0) {
+                print "void hdd_set_station_ops(struct net_device *dev)"
+                print "{"
+                print "\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
+                print ""
+                print "\tif (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||"
+                print "\t    (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {"
+                print "\t\tdev->netdev_ops = &wlan_mon_drv_ops;"
+                print "\t} else {"
+                print "\t\tdev->netdev_ops = &wlan_drv_ops;"
+                print "\t}"
+                print ""
+                print "\tdev->ethtool_ops = &wlan_ethtool_ops;"
+                print "}"
+
+                found = 1
+            }
+
+            in_func = 1
+            depth = 0
+            next
+        }
+
+        in_func {
+            opens = gsub(/\{/, "{")
+            closes = gsub(/\}/, "}")
+            depth += opens - closes
+
+            if (depth <= 0)
+                in_func = 0
+
+            next
+        }
+
+        {
             print
         }
 
-        found {
-            line = $0
-            opens = gsub(/\{/, "{", line)
-            closes = gsub(/\}/, "}", line)
+        END {
+            if (found != 1) {
+                print "ERROR: hdd_set_station_ops() not replaced." > "/dev/stderr"
+                exit 2
+            }
+        }
+        ' "$TARGET" > "$TARGET.tmp"
+
+        mv "$TARGET.tmp" "$TARGET"
+
+        echo
+        echo "=== VERIFYING FUNCTION ==="
+
+        awk '
+        /hdd_set_station_ops[[:space:]]*\(struct net_device[[:space:]]*\*dev\)/ {
+            in_func = 1
+            depth = 0
+        }
+
+        in_func {
+            print
+
+            opens = gsub(/\{/, "{")
+            closes = gsub(/\}/, "}")
             depth += opens - closes
 
-            if (depth == 0 && closes > 0)
+            if (depth == 0 && opens > 0)
                 exit
         }
+        ' "$TARGET"
+
+        echo
+        echo "=== VERIFYING MONITOR ROUTING ==="
+
+        awk '
+        /hdd_set_station_ops[[:space:]]*\(struct net_device[[:space:]]*\*dev\)/ {
+            in_func = 1
+            depth = 0
+        }
+
+        in_func {
+            body = body $0 "\n"
+
+            opens = gsub(/\{/, "{")
+            closes = gsub(/\}/, "}")
+            depth += opens - closes
+
+            if (depth == 0 && opens > 0) {
+                if (body !~ /QDF_GLOBAL_MONITOR_MODE/)
+                    exit 2
+
+                if (body !~ /QDF_MONITOR_MODE/)
+                    exit 3
+
+                if (body !~ /wlan_mon_drv_ops/)
+                    exit 4
+
+                if (body !~ /wlan_drv_ops/)
+                    exit 5
+
+                if (body !~ /wlan_ethtool_ops/)
+                    exit 6
+
+                exit 0
+            }
+        }
+        ' "$TARGET"
+
+        echo
+        echo "=========================================="
+        echo "PER-INTERFACE MONITOR ROUTING: PASS"
+        echo "DUPLICATE DEFINITIONS: NORMALIZED"
+        echo "MONITOR NETDEV OPS: PRESENT"
+        echo "NORMAL WLAN OPS: PRESENT"
+        echo "=========================================="
+
+        exit 0
+    - name: Integrate frame-injection deinitialization
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        MAIN_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+
+        test -f "${MAIN_C}"
+
+        echo "=== Integrating frame-injection deinitialization ==="
+
+        if grep -Fq 'hdd_deinit_frame_injection(adapter);' "${MAIN_C}"; then
+          echo "Frame-injection deinitialization already exists."
+        else
+          TMP_C="${MAIN_C}.tmp"
+
+          awk '
+            BEGIN {
+              in_close = 0
+              inserted = 0
+
+
+                    }
+
+            /static void __hdd_close_adapter[[:space:]]*\(/ {
+              in_close = 1
+            }
+
+            {
+              print
+
+              if (in_close &&
+                  !inserted &&
+                  $0 ~ /^[[:space:]]*hdd_adapter_feature_update_work_deinit\(adapter\);[[:space:]]*$/) {
+                print ""
+                print "#ifdef FEATURE_FRAME_INJECTION_SUPPORT"
+                print "    hdd_deinit_frame_injection(adapter);"
+                print "#endif"
+                inserted = 1
+                in_close = 0
+              }
+            }
+
+            END {
+              if (!inserted) {
+                exit 1
+              }
+            }
+          ' "${MAIN_C}" > "${TMP_C}"
+
+          test -s "${TMP_C}"
+          mv "${TMP_C}" "${MAIN_C}"
+
+          echo "Frame-injection deinitialization inserted."
+        fi
+
+        echo
+        echo "=== Verifying correct deinitialization location ==="
+
+        grep -n -A5 -B5 \
+          'hdd_deinit_frame_injection(adapter);' \
+          "${MAIN_C}"
+
+        echo
+        echo "=== Frame-injection deinitialization passed ==="
+    - name: Fix QCACLD3 module lifecycle cleanup
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        MAIN_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+
+        test -f "${MAIN_C}"
+
+        echo "=== Applying REAL QCACLD3 lifecycle fix ==="
+
+        python3 - "${MAIN_C}" <<'PY'
+        from pathlib import Path
+        import re
+        import sys
+
+        path = Path(sys.argv[1])
+        text = path.read_text()
+
+        DESTROY = "wlan_hdd_state_ctrl_param_destroy();"
+        UNLOAD = "hdd_driver_unload();"
+
+        # --------------------------------------------------------
+        # Safety checks
+        # --------------------------------------------------------
+
+        destroy_count = text.count(DESTROY)
+        unload_count = text.count(UNLOAD)
+
+        print(f"Existing destroy calls: {destroy_count}")
+        print(f"hdd_driver_unload() calls: {unload_count}")
+
+        if destroy_count != 1:
+            raise SystemExit(
+                "ERROR: expected exactly ONE existing "
+                "wlan_hdd_state_ctrl_param_destroy(); call."
+            )
+
+        if unload_count != 1:
+            raise SystemExit(
+                "ERROR: expected exactly ONE hdd_driver_unload(); "
+                "call. Refusing to modify source."
+            )
+
+        # Make sure this really is a module.
+        if "module_exit(" not in text:
+            raise SystemExit(
+                "ERROR: module_exit() registration was not found. "
+                "Refusing to modify source."
+            )
+
+        # --------------------------------------------------------
+        # Remove the existing standalone destroy call.
+        #
+        # Only one exists, so this is deterministic.
+        # --------------------------------------------------------
+
+        destroy_line = re.compile(
+            r'(?m)^[ \t]*'
+            r'wlan_hdd_state_ctrl_param_destroy\(\);'
+            r'[ \t]*\n?'
+        )
+
+        new_text, removed = destroy_line.subn(
+            "",
+            text,
+            count=1
+        )
+
+        if removed != 1:
+            raise SystemExit(
+                "ERROR: could not safely remove the existing "
+                "destroy call."
+            )
+
+        # --------------------------------------------------------
+        # Locate the one and only hdd_driver_unload().
+        # --------------------------------------------------------
+
+        unload_pos = new_text.find(UNLOAD)
+
+        if unload_pos < 0:
+            raise SystemExit(
+                "ERROR: hdd_driver_unload() disappeared unexpectedly."
+            )
+
+        # --------------------------------------------------------
+        # Insert destroy immediately after hdd_driver_unload().
+        # --------------------------------------------------------
+
+        line_end = new_text.find("\n", unload_pos)
+
+        if line_end < 0:
+            line_end = len(new_text)
+
+        insertion = (
+            "\n"
+            "    wlan_hdd_state_ctrl_param_destroy();"
+        )
+
+        new_text = (
+            new_text[:line_end]
+            + insertion
+            + new_text[line_end:]
+        )
+
+        path.write_text(new_text)
+
+        # --------------------------------------------------------
+        # FINAL SAFETY VERIFICATION
+        # --------------------------------------------------------
+
+        final = path.read_text()
+
+        final_destroy_count = final.count(DESTROY)
+        final_unload_count = final.count(UNLOAD)
+
+        if final_destroy_count != 1:
+            raise SystemExit(
+                "ERROR: final source does not contain exactly "
+                "one destroy call."
+            )
+
+        if final_unload_count != 1:
+            raise SystemExit(
+                "ERROR: final source does not contain exactly "
+                "one hdd_driver_unload() call."
+            )
+
+        final_unload = final.find(UNLOAD)
+        final_destroy = final.find(DESTROY)
+
+        if final_destroy <= final_unload:
+            raise SystemExit(
+                "ERROR: destroy call is not after "
+                "hdd_driver_unload()."
+            )
+
+        print()
+        print("PASS: Existing destroy call removed.")
+        print("PASS: Destroy call inserted after hdd_driver_unload().")
+        print("PASS: Exactly one destroy call remains.")
+        print("PASS: Exactly one hdd_driver_unload() remains.")
+        print()
+        print("=== FINAL SOURCE ORDER ===")
+
+        start = max(0, final_unload - 200)
+        end = min(len(final), final_destroy + 200)
+
+        print(final[start:end])
+        PY
+
+        echo
+        echo "=== VERIFY FINAL LIFECYCLE FIX ==="
+
+        grep -n \
+          -A5 \
+          -B5 \
+          'hdd_driver_unload' \
+          "${MAIN_C}"
+
+        echo
+        echo "=== VERIFY DESTROY CALL ==="
+
+        grep -n \
+          'wlan_hdd_state_ctrl_param_destroy' \
+
+                  "${MAIN_C}"
+
+        echo
+        echo "QCACLD3 lifecycle source fix PASSED."
+    - name: Verify QCACLD3 module lifecycle cleanup
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        MAIN_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+
+        test -f "${MAIN_C}"
+
+        echo "=== Verifying QCACLD3 lifecycle fix ==="
+
+        python3 - "${MAIN_C}" <<'PY'
+        from pathlib import Path
+        import sys
+
+        path = Path(sys.argv[1])
+        text = path.read_text()
+
+        DESTROY = "wlan_hdd_state_ctrl_param_destroy();"
+        UNLOAD = "hdd_driver_unload();"
+
+        # Exactly one of each.
+        if text.count(DESTROY) != 1:
+            raise SystemExit(
+                "FAIL: expected exactly one "
+                "wlan_hdd_state_ctrl_param_destroy();"
+            )
+
+        if text.count(UNLOAD) != 1:
+            raise SystemExit(
+                "FAIL: expected exactly one hdd_driver_unload();"
+            )
+
+        # module_exit must still exist.
+        if "module_exit(" not in text:
+            raise SystemExit(
+                "FAIL: module_exit() registration missing."
+            )
+
+        unload_pos = text.find(UNLOAD)
+        destroy_pos = text.find(DESTROY)
+
+        # Destroy MUST happen after unload.
+        if destroy_pos <= unload_pos:
+            raise SystemExit(
+                "FAIL: state-device destroy is not after "
+                "hdd_driver_unload()."
+            )
+
+        print("PASS: module_exit() exists.")
+        print("PASS: exactly one hdd_driver_unload().")
+        print("PASS: exactly one state-device destroy.")
+        print("PASS: destroy occurs after hdd_driver_unload().")
+        print()
+        print("QCACLD3 module lifecycle verification PASSED.")
+        PY
+    - name: Apply 4.19 injection capability compatibility
+      shell: bash
+      run: "set -euxo pipefail\n\ncd kernel\n\nSECURITY_C=\"drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c\"\n\ntest -f \"${SECURITY_C}\"\n\necho \"Relevant capability code:\"\n\ngrep -n \\\n  -A15 \\\n  -B5 \\\n  \"hdd_check_injection_capability\" \\\n  \"${SECURITY_C}\" \\\n  || true\n\nif grep -Fq \\\n  \"capable(CAP_NET_RAW)\" \\\n  \"${SECURITY_C}\"; then\n\n  echo \"CAP_NET_RAW compatibility already present.\"\n\nelif grep -Fq \\\n  \"hdd_check_injection_capability\" \\\n  \"${SECURITY_C}\"; then\n\n  python3 - \"${SECURITY_C}\" <<'PY'\nimport pathlib\nimport re\nimport sys\n\npath = pathlib.Path(sys.argv[1])\ntext = path.read_text()\n\npattern = re.compile(\n    r\"\"\"\n    hdd_check_injection_capability\n    \\s*\\(\n    [^)]*\n    \\)\n    \\s*\\{\n    .*?\n    \\}\n    \"\"\",\n    re.S | re.X\n)\n\nmatch = pattern.search(text)\n\nif not match:\n    raise SystemExit(\n        \"ERROR: could not safely locate \"\n        \"hdd_check_injection_capability body\"\n    )\n\nreplacement = \"\"\"hdd_check_injection_capability(struct task_struct *task)\n{\n    return capable(CAP_NET_RAW);\n}\"\"\"\n\ntext = text[:match.start()] + replacement + text[match.end():]\n\npath.write_text(text)\nPY\n\nelse\n  echo \"ERROR: expected injection capability function was not found.\"\n  exit 1\nfi\n\necho\necho \"Final capability implementation:\"\n\ngrep -n \\\n  -A8 \\\n  -B3 \\\n  \"hdd_check_injection_capability\" \\\n  \"${SECURITY_C}\"\n\ngrep -Fq \\\n  \"capable(CAP_NET_RAW)\" \\\n  \"${SECURITY_C}\"\n\n\n\n\n  \n"
+    - name: Enable QCACLD3 injection Kbuild features
+      working-directory: kernel
+      shell: bash
+      run: "set -euo pipefail\n\nKBUILD_FILE=\"drivers/staging/qcacld-3.0/Kbuild\"\n\ntest -f \"${KBUILD_FILE}\"\n\necho \"=== Enable QCACLD3 injection Kbuild features ===\"\n\n# ------------------------------------------------------------\n# Remove previous custom registrations from earlier workflow\n# attempts. Do not touch the original QCACLD3 object lists.\n# ------------------------------------------------------------\n\nsed -i \\\n  '\\|HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o|d' \\\n  \"${KBUILD_FILE}\"\n\nsed -i \\\n  '\\|WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o|d' \\\n  \"${KBUILD_FILE}\"\n\nsed -i \\\n  '\\|CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y|d' \\\n  \"${KBUILD_FILE}\"\n\nsed -i \\\n  '\\|CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y|d' \\\n  \"${KBUILD_FILE}\"\n\nsed -i \\\n  '\\|ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT|d' \\\n  \"${KBUILD_FILE}\"\n\nsed -i \\\n  '\\|ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT|d' \\\n  \"${KBUILD_FILE}\"\n\n# ------------------------------------------------------------\n# Add the QCACLD3 feature variables and compiler defines near\n# the beginning of the Kbuild file.\n# ------------------------------------------------------------\n\nsed -i '1i\\\nCONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y\\\nCONFIG_FEATURE_MONITOR_MODE_SUPPORT := y\\\nccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT\\\nccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT\\\n' \"${KBUILD_FILE}\"\n\necho\necho \"=== Verify QCACLD3 feature definitions ===\"\n\ngrep -nF \\\n  'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y' \\\n  \"${KBUILD_FILE}\"\n\ngrep -nF \\\n  'CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y' \\\n  \"${KBUILD_FILE}\"\n\ngrep -nF \\\n  'ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT' \\\n  \"${KBUILD_FILE}\"\n\ngrep -nF \\\n  'ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT' \\\n  \"${KBUILD_FILE}\"\n\n# ------------------------------------------------------------\n# Register HDD frame injection object.\n#\n# The existing Kbuild uses:\n#\n#     OBJS := $(HDD_OBJS)\n#\n# We insert the injection object immediately before that\n# aggregation point.\n# ------------------------------------------------------------\n\necho\necho \"=== Register HDD frame injection objects ===\"\n\n# Remove any previous HDD injection registrations.\nsed -i \\\n  '\\|HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o|d' \\\n  \"${KBUILD_FILE}\"\n\nsed -i \\\n  '\\|HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_validate.o|d' \\\n  \"${KBUILD_FILE}\"\n\nsed -i \\\n  '\\|HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_inject_security.o|d' \\\n  \"${KBUILD_FILE}\"\n\nsed -i \\\n  '\\|HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject_debug.o|d' \\\n  \"${KBUILD_FILE}\"\n\necho \"Locating HDD OBJS aggregation point...\"\n\nif ! grep -Eq \\\n  '^[[:space:]]*OBJS[[:space:]]*:=[:space:]*\\$\\(HDD_OBJS\\)' \\\n  \"${KBUILD_FILE}\"; then\n  echo \"ERROR: HDD OBJS aggregation point was not found.\"\n  grep -n -E 'OBJS.*HDD_OBJS' \"${KBUILD_FILE}\" || true\n  exit 1\nfi\n\nTMP_KBUILD=\"${KBUILD_FILE}.tmp\"\n\nawk '\nBEGIN {\n  inserted = 0\n}\n\n!inserted &&\n$0 ~ /^[[:space:]]*OBJS[[:space:]]*:=[:space:]*\\$\\(HDD_OBJS\\)/ {\n  print \"HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o\"\n  print \"HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_validate.o\"\n  print \"HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_inject_security.o\"\n  print \"HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject_debug.o\"\n  inserted = 1\n}\n\n{\n  print\n}\n\nEND {\n  if (!inserted)\n    exit 1\n}\n' \"${KBUILD_FILE}\" > \"${TMP_KBUILD}\"\n\nmv \"${TMP_KBUILD}\" \"${KBUILD_FILE}\"\n\necho\necho \"=== Verify HDD injection object registration ===\"\n\nfor obj in \\\n  wlan_hdd_frame_inject.o \\\n  wlan_hdd_frame_validate.o \\\n  wlan_hdd_inject_security.o \\\n  wlan_hdd_frame_inject_debug.o\ndo\n  if ! grep -Fq \\\n    \"HDD_OBJS += \\$(HDD_SRC_DIR)/${obj}\" \\\n    \"${KBUILD_FILE}\"; then\n    echo \"ERROR: Missing HDD injection object: ${obj}\"\n    exit 1\n  fi\ndone\n\ngrep -n -B5 -A8 \\\n  -E '^[[:space:]]*OBJS[[:space:]]*:=[:space:]*\\$\\(HDD_OBJS\\)' \\\n  \"${KBUILD_FILE}\"\n\necho\necho \"HDD injection objects registered correctly.\"\n\necho\necho \"=== Register WMA frame injection object ===\"\n\nsed -i \\\n  '\\|WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o|d' \\\n  \"${KBUILD_FILE}\"\n\nWMA_OBJS_LINE=\"$(\n  awk '\n    index($0, \"$(WMA_OBJS)\") {\n      print NR\n      exit\n    }\n  ' \"${KBUILD_FILE}\"\n)\"\n\nif [ -z \"${WMA_OBJS_LINE}\" ]; then\n  echo \"ERROR: WMA OBJS aggregation point was not found.\"\n  grep -nF '$(WMA_OBJS)' \"${KBUILD_FILE}\" || true\n  exit 1\nfi\n\necho \"WMA OBJS aggregation line: ${WMA_OBJS_LINE}\"\n\nsed -i \\\n  \"${WMA_OBJS_LINE}i WMA_OBJS += \\$(WMA_SRC_DIR)/wma_frame_inject.o\" \\\n  \"${KBUILD_FILE}\"\n\necho\necho \"=== Verify injection object registration ===\"\n\nHDD_INJECT_COUNT=\"$(\n  grep -Fc \\\n    'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \\\n    \"${KBUILD_FILE}\"\n)\"\n\nWMA_INJECT_COUNT=\"$(\n  grep -Fc \\\n    'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \\\n    \"${KBUILD_FILE}\"\n)\"\n\nif [ \"${HDD_INJECT_COUNT}\" -ne 1 ]; then\n  echo \"ERROR: HDD injection object count = ${HDD_INJECT_COUNT}\"\n  exit 1\nfi\n\nif [ \"${WMA_INJECT_COUNT}\" -ne 1 ]; then\n  echo \"ERROR: WMA injection object count = ${WMA_INJECT_COUNT}\"\n  exit 1\nfi\n\necho\necho \"=== HDD injection placement ===\"\n\ngrep -n -B3 -A3 \\\n  -F 'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \\\n  \"${KBUILD_FILE}\"\n\necho\necho \"=== WMA injection placement ===\"\n\ngrep -n -B3 -A3 \\\n  -F 'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \\\n  \"${KBUILD_FILE}\"\n\necho\necho \"QCACLD3 injection Kbuild configuration complete.\"\n\n# ------------------------------------------------------------\n# Verify that each custom object is registered exactly once.\n# ------------------------------------------------------------\n\necho\necho \"=== Verify injection object registration ===\"\n\nHDD_INJECT_COUNT=\"$(\n  grep -Fc \\\n    'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \\\n    \"${KBUILD_FILE}\"\n)\"\n\nWMA_INJECT_COUNT=\"$(\n  grep -Fc \\\n    'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \\\n    \"${KBUILD_FILE}\"\n)\"\n\nif [ \"${HDD_INJECT_COUNT}\" -ne 1 ]; then\n  echo \"ERROR: Expected exactly one HDD injection object registration; found ${HDD_INJECT_COUNT}.\"\n  exit 1\nfi\n\nif [ \"${WMA_INJECT_COUNT}\" -ne 1 ]; then\n  echo \"ERROR: Expected exactly one WMA injection object registration; found ${WMA_INJECT_COUNT}.\"\n  exit 1\nfi\n\necho\necho \"=== HDD injection placement ===\"\n\ngrep -n -B3 -A3 \\\n  -F 'HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o' \\\n  \"${KBUILD_FILE}\"\n\necho\necho \"=== WMA injection placement ===\"\n\ngrep -n -B3 -A3 \\\n  -F 'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \\\n  \"${KBUILD_FILE}\"\n\n# ------------------------------------------------------------\n# Final verification.\n# ------------------------------------------------------------\n\necho\necho \"=== Final QCACLD3 injection Kbuild configuration ===\"\n\ngrep -n -E \\\n  'CONFIG_FEATURE_(FRAME_INJECTION|MONITOR_MODE)_SUPPORT|wlan_hdd_frame_inject\\.o|wma_frame_inject\\.o|FEATURE_(FRAME_INJECTION|MONITOR_MODE)_SUPPORT' \\\n  \"${KBUILD_FILE}\"\n\necho\necho \"QCACLD3 injection Kbuild configuration complete.\"\n\n\n              \n"
+    - name: Inspect exact HDD Kbuild structure
+      if: always()
+      working-directory: kernel
+      shell: bash
+      run: "set -euo pipefail\n\nKBUILD_FILE=\"drivers/staging/qcacld-3.0/Kbuild\"\n\necho \"=== ALL HDD OBJECT REFERENCES ===\"\ngrep -n -E \\\n  'HDD_OBJS|wlan_hdd_main\\.o|wlan_hdd_frame_inject\\.o' \\\n  \"${KBUILD_FILE}\" \\\n  || true\n\necho\necho \"=== HDD MAIN OBJECT CONTEXT ===\"\ngrep -n -B8 -A12 \\\n  'wlan_hdd_main\\.o' \\\n  \"${KBUILD_FILE}\" || true\n\necho\necho \"=== HDD FRAME INJECTION OBJECT CONTEXT ===\"\ngrep -n -B8 -A8 \\\n  'wlan_hdd_frame_inject\\.o' \\\n  \"${KBUILD_FILE}\" || true\n\necho\necho \"=== ALL HDD_OBJS DEFINITIONS ===\"\ngrep -n -E \\\n  '^[[:space:]]*HDD_OBJS|HDD_OBJS[[:space:]]*[:+?]?=' \\\n  \"${KBUILD_FILE}\" \\\n  || true\n\necho\necho \"=== DIAGNOSTIC COMPLETE ===\"\n\n\n\n\n          \n"
+    - name: Inspect WMA injection header/source collision
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        HEADER="drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h"
+        SOURCE="drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c"
+
+        test -f "${HEADER}"
+        test -f "${SOURCE}"
+
+        echo "=== WMA HEADER DUPLICATE DEFINITIONS ==="
+
+        grep -n -E \
+          'static inline.*wma_(init_injection_queue|deinit_injection_queue|queue_injection_frame|get_injection_queue_stats|reset_injection_queue_stats|get_injection_queue_size|is_injection_queue_empty|flush_injection_queue|send_injection_frame_to_fw|handle_injection_fw_response)' \
+          "${HEADER}" || true
+
+        echo
+        echo "=== WMA SOURCE DEFINITIONS ==="
+
+        grep -n -E \
+          '^(QDF_STATUS|uint32_t|bool|void).*wma_(init_injection_queue|deinit_injection_queue|queue_injection_frame|get_injection_queue_stats|reset_injection_queue_stats|get_injection_queue_size|is_injection_queue_empty|flush_injection_queue|send_injection_frame_to_fw|handle_injection_fw_response|translate_fw_injection_error)' \
+          "${SOURCE}" || true
+
+        echo
+        echo "=== WMA HEADER RANGE ==="
+
+        sed -n '320,395p' "${HEADER}"
+
+        echo
+        echo "WMA collision inspection complete."
+    - name: Fix WMA injection include path
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        KBUILD_FILE="drivers/staging/qcacld-3.0/Kbuild"
+
+        test -f "${KBUILD_FILE}"
+
+        echo "=== Fix WMA injection include path ==="
+
+        grep -n -A4 \
+          '^WMA_INC[[:space:]]*:=' \
+          "${KBUILD_FILE}"
+
+        if ! grep -Fq 'ccflags-y += $(WMA_INC)' "${KBUILD_FILE}"; then
+          sed -i \
+            '/^WMA_INC[[:space:]]*:=[[:space:]]*/,/^[[:space:]]*$/{' \
+            "${KBUILD_FILE}"
+
+                if grep -Eq \
+          'wma_handle_injection_fw_response|WMA_IS_INJECTION_DESC_ID|injection.*completion' \
+          "$WMA_SRC/wma_frame_inject.c" \
+          drivers/staging/qcacld-3.0/core/wma/src/wma_mgmt.c
+        then
+          echo "OK: injection completion routing present"
+        else
+          echo "ERROR: injection completion routing not detected"
+          exit 1
+        fi
+
+        echo
+        echo "=== Checking 4.19 capability compatibility ==="
+
+        SECURITY_C="$HDD_SRC/wlan_hdd_inject_security.c"
+
+        if grep -Fq \
+          'capable(CAP_NET_RAW)' \
+          "$SECURITY_C"
+        then
+          echo "OK: CAP_NET_RAW compatibility present"
+        else
+          echo "ERROR: CAP_NET_RAW compatibility missing"
+          exit 1
+        fi
+
+        echo
+        echo "=== Checking injection ioctl dispatch ==="
+
+        IOCTL_SRC="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_ioctl.c"
+
+        if grep -Fq \
+          'case (SIOCDEVPRIVATE + 10):' \
+          "$IOCTL_SRC"
+        then
+          echo "OK: injection ioctl 0x89FA registered"
+        else
+          echo "ERROR: injection ioctl 0x89FA not registered"
+          exit 1
+        fi
+
+        if grep -Fq \
+          'hdd_frame_inject_ioctl(dev, ifr, cmd)' \
+          "$IOCTL_SRC"
+        then
+          echo "OK: injection ioctl handler connected"
+        else
+          echo "ERROR: injection ioctl handler not connected"
+          exit 1
+        fi
+
+        echo
+        echo "=== Checking monitor netdev routing ==="
+
+        if grep -Fq \
+          'wlan_mon_drv_ops' \
+          "$HDD_MAIN"
+        then
+          echo "OK: monitor netdev operations present"
+        else
+          echo "ERROR: monitor netdev operations missing"
+          exit 1
+        fi
+
+        if grep -Fq \
+          'QDF_MONITOR_MODE' \
+          "$HDD_MAIN"
+        then
+          echo "OK: per-interface monitor mode routing present"
+        else
+          echo "ERROR: QDF_MONITOR_MODE routing missing"
+          exit 1
+        fi
+
+        echo
+        echo "=== Checking frame-injection deinitialization ==="
+
+        if grep -Fq \
+          'hdd_deinit_frame_injection(adapter);' \
+          "$HDD_MAIN"
+        then
+          echo "OK: frame-injection deinitialization present"
+        else
+          echo "ERROR: frame-injection deinitialization missing"
+          exit 1
+        fi
+
+        echo
+        echo "=== QCACLD3 injection integration verification PASSED ==="
+    - name: Verify monitor callback lifecycle
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        HDD_CFG="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c"
+
+        test -f "${HDD_CFG}"
+
+        echo "=== VERIFY MONITOR CALLBACK LIFECYCLE ==="
+
+        echo
+        echo "=== Monitor channel-set path ==="
+
+        grep -n \
+          -A12 \
+          -B8 \
+          '__wlan_hdd_cfg80211_set_mon_ch' \
+          "${HDD_CFG}" \
+          || true
+
+        echo
+        echo "=== Monitor VDEV-up callback references ==="
+
+        grep -RInE \
+          'qdf_monitor_mode_vdev_up_event|monitor.*vdev.*up|MONITOR_MODE_VDEV_UP' \
+          drivers/staging/qcacld-3.0/core/hdd \
+          drivers/staging/qcacld-3.0/core/sme \
+          drivers/staging/qcacld-3.0/core/mac \
+          2>/dev/null \
+          | head -n200 \
+          || true
+
+        echo
+        echo "=== Monitor callback registration ==="
+
+        grep -RInE \
+          'monitor.*callback|mon.*callback|monitor.*event|MONITOR_MODE_VDEV_UP' \
+          drivers/staging/qcacld-3.0/core/hdd \
+          2>/dev/null \
+          | head -n200 \
+          || true
+
+        echo
+        echo "=== Monitor lifecycle symbols ==="
+
+        grep -RInE \
+          'mon_mlme_vdev_start_restart_send|mon_mlme_vdev_start_restart|mon_mlme_vdev_start|mon_mlme_start_continue|mon_mlme_vdev_up_send|lim_handle_mon_switch_channel_rsp' \
+          drivers/staging/qcacld-3.0 \
+          2>/dev/null \
+          | head -n250 \
+          || true
+
+        echo
+        echo "Monitor callback lifecycle inspection complete."
+    - name: Verify monitor VDEV policy-manager path
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        echo "=== VERIFY MONITOR VDEV POLICY-MANAGER PATH ==="
+
+        echo
+        echo "=== Monitor VDEV references in policy manager ==="
+
+        grep -RInE \
+          'QDF_MONITOR_MODE|QDF_GLOBAL_MONITOR_MODE|monitor.*vdev|vdev.*monitor|MONITOR_MODE' \
+          drivers/staging/qcacld-3.0/core/policy_mgr \
+          2>/dev/null \
+          | head -n300 \
+          || true
+
+        echo
+        echo "=== Connection-list / PCL references ==="
+
+        grep -RInE \
+          'pm_conc_connection_list|pcl|PCL|connection_list|conc_list' \
+          drivers/staging/qcacld-3.0/core/policy_mgr \
+          2>/dev/null \
+          | head -n300 \
+          || true
+
+        echo
+        echo "=== Monitor VDEV policy-manager verification complete ==="
+
+        
+                  'wma_handle_injection_fw_response|WMA_IS_INJECTION_DESC_ID' \
+          "$WMA_SRC/wma_mgmt.c"
+        then
+          echo "OK: injection completion routing present"
+        else
+          echo "ERROR: injection completion routing missing"
+          exit 1
+        fi
+
+        echo
+        echo "=== Checking security compatibility ==="
+
+        if grep -Eq \
+          'CAP_NET_RAW|capable' \
+          "$HDD_SRC/wlan_hdd_inject_security.c"
+        then
+          echo "OK: injection security capability check present"
+        else
+          echo "ERROR: injection security capability check missing"
+          exit 1
+        fi
+
+        echo
+        echo "=========================================="
+        echo "QCACLD3 INJECTION INTEGRATION: PASS"
+        echo "INJECTION SOURCES: PRESENT"
+        echo "BUILD FEATURES: PRESENT"
+        echo "HDD API: PRESENT"
+        echo "INJECTION CONTEXT: PRESENT"
+        echo "WMA INTEGRATION: PRESENT"
+        echo "COMPLETION ROUTING: PRESENT"
+        echo "SECURITY CHECK: PRESENT"
+        echo "=========================================="
+
+        exit 0
+    - name: Verify Kbuild and kernel config separation
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        cd kernel
+
+        CONFIG="${OUT_DIR}/.config"
+
+        if grep -Eq \
+          '^CONFIG_(FEATURE_FRAME_INJECTION_SUPPORT|FEATURE_MONITOR_MODE_SUPPORT)(=| is not set)' \
+          "${CONFIG}"; then
+
+          echo "ERROR: QCACLD3 Kbuild feature leaked into kernel .config."
+          exit 1
+        fi
+
+        echo "PASS: FEATURE_FRAME_INJECTION_SUPPORT is Kbuild-only."
+        echo "PASS: FEATURE_MONITOR_MODE_SUPPORT is Kbuild-only."
+    - name: Save QCACLD3 modification manifest
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        cd kernel
+
+        {
+          echo "============================================================"
+          echo "QCACLD3 NETHUNTER INTEGRATION"
+          echo "============================================================"
+          echo
+          echo "Frame injection: enabled"
+          echo "Monitor mode: enabled"
+          echo "Capability check: CAP_NET_RAW"
+          echo
+          echo "Kbuild:"
+          grep -nE \
+            'FEATURE_FRAME_INJECTION_SUPPORT|FEATURE_MONITOR_MODE_SUPPORT' \
+            drivers/staging/qcacld-3.0/Kbuild
+          echo
+          echo "Injection sources:"
+          find drivers/staging/qcacld-3.0 \
+            -type f \
+            \( \
+              -name '*frame*inject*' \
+              -o \
+              -name '*inject*security*' \
+            \) \
+            -print \
+            | sort
+        } > "${GITHUB_WORKSPACE}/artifacts/source-audit/qcacld3-injection-manifest.txt"
+
+        cat \
+          "${GITHUB_WORKSPACE}/artifacts/source-audit/qcacld3-injection-manifest.txt"
+    - name: Normalize configuration files
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        cd kernel
+
+        STOCK="${GITHUB_WORKSPACE}/cebu-stock.config"
+        FINAL="${OUT_DIR}/.config"
+
+        test -s "${STOCK}"
+        test -s "${FINAL}"
+
+        # Keep only actual CONFIG entries and sort them by symbol.
+        #
+        # This makes the comparison independent of the ordering
+        # used by the original /proc/config.gz extraction.
+
+        grep \
+          '^(CONFIG_[A-Za-z0-9_]+=(.*)|# CONFIG_[A-Za-z0-9_]+ is not set)' \
+          "${STOCK}" |
+          sort \
+          > "${GITHUB_WORKSPACE}/artifacts/source-audit/stock-normalized.config"
+
+        grep \
+          '^(CONFIG_[A-Za-z0-9_]+=(.*)|# CONFIG_[A-Za-z0-9_]+ is not set)' \
+          "${FINAL}" |
+          sort \
+          >
+          "${GITHUB_WORKSPACE}/artifacts/source-audit/final-normalized.config"
+
+        test -s \
+          "${GITHUB_WORKSPACE}/artifacts/source-audit/stock-normalized.config"
+
+        test -s \
+          "${GITHUB_WORKSPACE}/artifacts/source-audit/final-normalized.config"
+
+        echo "Stock configuration entries:"
+        wc -l \
+          "${GITHUB_WORKSPACE}/artifacts/source-audit/stock-normalized.config"
+
+        echo
+        echo "Final configuration entries:"
+        wc -l \
+          "${GITHUB_WORKSPACE}/artifacts/source-audit/final-normalized.config"
+
+
+
+    
+    - name: Generate stock versus final configuration diff
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        STOCK="${GITHUB_WORKSPACE}/artifacts/source-audit/stock-normalized.config"
+        FINAL="${GITHUB_WORKSPACE}/artifacts/source-audit/final-normalized.config"
+        DIFF="${GITHUB_WORKSPACE}/artifacts/source-audit/stock-vs-final.config.diff"
+
+        diff -u \
+          "${STOCK}" \
+          "${FINAL}" \
+          > "${DIFF}" || true
+
+        echo "============================================================"
+        echo "STOCK -> FINAL CONFIGURATION DIFFERENCE"
+        echo "============================================================"
+
+        cat "${DIFF}"
+    - name: Verify critical stock hardware settings
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        cd kernel
+
+        STOCK="${GITHUB_WORKSPACE}/cebu-stock.config"
+        FINAL="${OUT_DIR}/.config"
+
+        check_same() {
+          local symbol="$1"
+
+          local stock_value
+          local final_value
+
+          stock_value="$(
+            grep -E "^${symbol}=" "${STOCK}" |
+              head -n1 || true
+          )"
+
+          final_value="$(
+            grep -E "^${symbol}=" "${FINAL}" |
+              head -n1 || true
+          )"
+
+          if [ -z "${stock_value}" ]; then
+            echo "ERROR: stock symbol not found: ${symbol}"
+            exit 1
+          fi
+
+          if [ "${stock_value}" != "${final_value}" ]; then
+            echo
+            echo "ERROR: STOCK CONFIGURATION CHANGED"
+            echo "Symbol: ${symbol}"
+            echo "Stock:  ${stock_value}"
+            echo "Final:  ${final_value}"
+            exit 1
+          fi
+
+          echo "UNCHANGED: ${stock_value}"
+        }
+
+        echo "============================================================"
+        echo "CEBU HARDWARE CONFIGURATION"
+        echo "============================================================"
+
+        check_same CONFIG_INPUT_TOUCHSCREEN
+        check_same CONFIG_TOUCHSCREEN_NT36xxx_HOSTDL_SPI_MMI
+        check_same CONFIG_INPUT_TOUCHSCREEN_FOCALTECH_0FLASH_MMI
+        check_same CONFIG_TOUCHSCREEN_CHIPONE_TDDI
+        check_same CONFIG_INPUT_MISC_FPC1020
+        check_same CONFIG_I2C_QCOM_GENI
+        check_same CONFIG_SPI_QCOM_GENI
+        check_same CONFIG_WLAN
+        check_same CONFIG_QCA_CLD_WLAN
+        check_same CONFIG_RMNET
+        check_same CONFIG_IPA3
+        check_same CONFIG_RMNET_IPA3
+
+        echo
+        echo "Critical cebu hardware settings preserved."
+    - name: Verify stock USB foundation
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        cd kernel
+
+        STOCK="${GITHUB_WORKSPACE}/cebu-stock.config"
+        FINAL="${OUT_DIR}/.config"
+
+        check_same() {
+          local symbol="$1"
+
+          local stock_value
+          local final_value
+
+          stock_value="$(
+            grep -E "^${symbol}=" "${STOCK}" |
+              head -n1 || true
+          )"
+
+          final_value="$(
+            grep -E "^${symbol}=" "${FINAL}" |
+              head -n1 || true
+          )"
+
+          if [ "${stock_value}" != "${final_value}" ]; then
+            echo "ERROR: ${symbol} changed."
+            echo "Stock: ${stock_value}"
+            echo "Final: ${final_value}"
+            exit 1
+          fi
+
+          echo "UNCHANGED: ${stock_value}"
+        }
+
+        check_same CONFIG_USB_GADGET
+        check_same CONFIG_USB_CONFIGFS
+        check_same CONFIG_USB_CONFIGFS_UEVENT
+        check_same CONFIG_USB_CONFIGFS_ACM
+        check_same CONFIG_USB_CONFIGFS_NCM
+
+        echo
+        echo "Stock USB foundation preserved."
+    - name: Verify kernel release configuration
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        CONFIG="${OUT_DIR}/.config"
+
+        test -s "${CONFIG}"
+
+        echo "=== Verify final kernel release configuration ==="
+
+           grep -Fxq 'CONFIG_LOCALVERSION="-perf"' "${CONFIG}"
+           grep -Fxq '# CONFIG_LOCALVERSION_AUTO is not set' "${CONFIG}"
+
+        echo
+        echo "CONFIG_LOCALVERSION=-perf"
+        echo "CONFIG_LOCALVERSION_AUTO=n"
+        echo "Kernel release configuration PASSED."
+        echo "Expected release: 4.19.325-cip135-st19-perf-g39bcecd5c63d"
+    - name: Verify intentional NetHunter changes
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        cd kernel
+
+        CONFIG="${OUT_DIR}/.config"
+
+        REQUIRED=(
+          "CONFIG_HIDRAW=y"
+          "CONFIG_UHID=y"
+          "CONFIG_BT=y"
+          "CONFIG_BT_BREDR=y"
+          "CONFIG_BT_LE=y"
+          "CONFIG_BT_RFCOMM=y"
+          "CONFIG_BT_RFCOMM_TTY=y"
+          "CONFIG_BT_BNEP=m"
+          "CONFIG_BT_HIDP=m"
+          "CONFIG_BT_HCIUART=m"
+          "CONFIG_BT_HCIVHCI=m"
+          "CONFIG_USB_CONFIGFS_RNDIS=y"
+          "CONFIG_USB_CONFIGFS_ECM=y"
+          "CONFIG_USB_CONFIGFS_EEM=y"
+          "CONFIG_USB_CONFIGFS_F_HID=y"
+          "CONFIG_USB_CONFIGFS_F_FS=y"
+          "CONFIG_PACKET=y"
+          "CONFIG_SENSORS_SSC=y"
+          "CONFIG_QCA_CLD_WLAN=m"
+        )
+
+        for symbol in "${REQUIRED[@]}"; do
+          grep -Fxq "${symbol}" "${CONFIG}" || {
+            echo "ERROR: required NetHunter value missing:"
+            echo "${symbol}"
+            exit 1
+          }
+
+          echo "OK: ${symbol}"
+        done
+
+        echo
+        echo "Intentional NetHunter configuration verified."
+    - name: Verify QCACLD3 feature separation
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        cd kernel
+
+        CONFIG="${OUT_DIR}/.config"
+        KBUILD="drivers/staging/qcacld-3.0/Kbuild"
+
+        if grep -Eq \
+          '^CONFIG_(FEATURE_FRAME_INJECTION_SUPPORT|FEATURE_MONITOR_MODE_SUPPORT)(=| is not set)' \
+          "${CONFIG}"; then
+
+          echo "ERROR: QCACLD3 FEATURE_* variable exists in .config."
+          exit 1
+        fi
+
+        grep -Fq \
+          "CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y" \
+          "${KBUILD}"
+
+        grep -Fq \
+          "CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y" \
+          "${KBUILD}"
+
+        echo "PASS: frame injection is Kbuild-controlled."
+        echo "PASS: monitor mode is Kbuild-controlled."
+    - name: Verify injection capability implementation
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        cd kernel
+
+        SECURITY_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c"
+
+        grep -Fq \
+          "capable(CAP_NET_RAW)" \
+          "${SECURITY_C}"
+
+        echo "CAP_NET_RAW compatibility check passed."
+
+
+    - name: Verify source integration before build
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        HDD_SRC="drivers/staging/qcacld-3.0/core/hdd/src"
+        WMA_SRC="drivers/staging/qcacld-3.0/core/wma/src"
+        HDD_MAIN="$HDD_SRC/wlan_hdd_main.c"
+        HDD_FRAME="$HDD_SRC/wlan_hdd_frame_inject.c"
+        WMA_FRAME="$WMA_SRC/wma_frame_inject.c"
+
+        echo "=== VERIFYING SOURCE INTEGRATION BEFORE BUILD ==="
+
+        test -f "$HDD_MAIN"
+        test -f "$HDD_FRAME"
+        test -f "$WMA_FRAME"
+
+        echo
+        echo "=== Verifying injected source files ==="
+
+        for f in \
+          "$HDD_FRAME" \
+          "$HDD_SRC/wlan_hdd_frame_validate.c" \
+          "$HDD_SRC/wlan_hdd_inject_security.c" \
+          "$HDD_SRC/wlan_hdd_frame_inject_debug.c" \
+          "$WMA_FRAME"
+        do
+          if [ ! -f "$f" ]; then
+            echo "ERROR: Missing injected source: $f"
+            exit 1
+          fi
+          echo "OK: $f"
+        done
+
+        echo "Injection source files verified."
+
+        echo
+        echo "=== Verifying HDD injection header ==="
+
+        HEADER_FOUND=0
+
+        awk '
+        /wlan_hdd_frame_inject\.h/ {
+            print "OK:", FILENAME, ":", NR, ":", $0
+            found = 1
+        }
+        END {
+            if (!found)
+                exit 1
+        }
         ' "$HDD_MAIN"
-    - name: Route per-interface monitor netdev ops
+
+        HEADER_FOUND=1
+
+        if [ "$HEADER_FOUND" -ne 1 ]; then
+          echo "ERROR: HDD injection header include missing."
+          exit 1
+        fi
+
+        echo "HDD injection header include verified."
+
+        echo
+        echo "=== Verifying frame-injection initialization/integration ==="
+
+        INIT_OK=0
+
+        awk '
+        BEGIN {
+            found_ctx = 0
+            found_init = 0
+            found_api = 0
+        }
+
+        /frame[_-]?inject/ ||
+        /injection[_-]?ctx/ ||
+        /inject[_-]?ctx/ {
+            print FILENAME ":" NR ":" $0
+            found_ctx = 1
+        }
+
+        /wlan_hdd_frame_inject/ ||
+        /hdd_frame_inject/ ||
+        /hdd_inject/ {
+            found_api = 1
+        }
+
+        /init/ &&
+        /inject/ {
+            found_init = 1
+        }
+
+        END {
+            if (found_ctx && found_api) {
+                print "Injection context/API detected."
+            }
+
+            if (found_init) {
+                print "Injection initialization reference detected."
+            }
+
+            if (found_ctx || found_api || found_init) {
+                exit 0
+            }
+
+            exit 1
+        }
+        ' "$HDD_MAIN"
+
+        INIT_OK=1
+
+        if [ "$INIT_OK" -ne 1 ]; then
+          echo "ERROR: Frame-injection integration not detected."
+          exit 1
+        fi
+
+        echo "Frame-injection initialization/integration verified."
+
+        echo
+        echo "=== Verifying WMA injection source ==="
+
+        if grep -Eq \
+          'wma_init_injection_queue|wma_queue_injection_frame|wma_handle_injection_fw_response|WMA_IS_INJECTION_DESC_ID' \
+          "$WMA_FRAME"
+        then
+          echo "OK: WMA injection API detected"
+        else
+          echo "ERROR: WMA injection API not detected"
+          exit 1
+        fi
+
+        echo
+        echo "=== Verifying WMA management completion bridge ==="
+
+        WMA_MGMT="$WMA_SRC/wma_mgmt.c"
+
+        if grep -Fq \
+          'wma_handle_injection_fw_response' \
+          "$WMA_MGMT"
+        then
+          echo "OK: WMA management injection completion bridge detected"
+        else
+          echo "ERROR: WMA management injection completion bridge missing"
+          exit 1
+        fi
+
+        if grep -Fq \
+          'WMA_IS_INJECTION_DESC_ID' \
+          "$WMA_MGMT"
+        then
+          echo "OK: injection descriptor routing detected"
+        else
+          echo "ERROR: injection descriptor routing missing"
+          exit 1
+        fi
+
+        echo
+        echo "=== Verifying frame-injection ioctl dispatch ==="
+
+        IOCTL_SRC="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_ioctl.c"
+
+        if grep -Fq \
+          'case (SIOCDEVPRIVATE + 10):' \
+          "$IOCTL_SRC"
+        then
+          echo "OK: frame-injection ioctl case detected"
+        else
+          echo "ERROR: frame-injection ioctl case missing"
+          exit 1
+        fi
+
+        if grep -Fq \
+          'hdd_frame_inject_ioctl(dev, ifr, cmd)' \
+          "$IOCTL_SRC"
+        then
+          echo "OK: frame-injection ioctl handler detected"
+        else
+          echo "ERROR: frame-injection ioctl handler missing"
+          exit 1
+        fi
+
+        echo
+        echo "=== Verifying monitor mode support ==="
+
+        if grep -Rqs \
+          'FEATURE_MONITOR_MODE_SUPPORT' \
+          drivers/staging/qcacld-3.0
+        then
+          echo "OK: FEATURE_MONITOR_MODE_SUPPORT detected"
+        else
+          echo "ERROR: FEATURE_MONITOR_MODE_SUPPORT missing"
+          exit 1
+        fi
+
+        if grep -Rqs \
+          'QDF_MONITOR_MODE' \
+          "$HDD_SRC"
+        then
+          echo "OK: QDF_MONITOR_MODE detected in HDD"
+        else
+          echo "ERROR: QDF_MONITOR_MODE missing from HDD"
+          exit 1
+        fi
+
+        if grep -Rqs \
+          'wlan_mon_drv_ops' \
+          "$HDD_SRC"
+        then
+          echo "OK: monitor netdev operations detected"
+        else
+          echo "ERROR: monitor netdev operations missing"
+          exit 1
+        fi
+
+        echo
+        echo "=== Verifying security capability ==="
+
+        if grep -Fq \
+          'capable(CAP_NET_RAW)' \
+          "$HDD_SRC/wlan_hdd_inject_security.c"
+        then
+          echo "OK: CAP_NET_RAW compatibility detected"
+        else
+          echo "ERROR: CAP_NET_RAW compatibility missing"
+          exit 1
+        fi
+
+        echo
+        echo "=== Verifying frame-injection deinitialization ==="
+
+        if grep -Fq \
+          'hdd_deinit_frame_injection(adapter);' \
+          "$HDD_MAIN"
+        then
+          echo "OK: frame-injection deinitialization detected"
+        else
+          echo "ERROR: frame-injection deinitialization missing"
+          exit 1
+        fi
+
+        echo
+        echo "=== Source integration verification PASSED ==="
+    - name: Verify source tree syntax before compile
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        echo "=== BASIC SOURCE TREE SYNTAX CHECKS ==="
+
+        for file in \
+          drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.c \
+          drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_validate.c \
+          drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c \
+          drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
+          drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c
+        do
+          test -s "$file"
+          echo "OK: $file"
+        done
+
+        echo
+        echo "=== Checking brace balance in modified C files ==="
+
+        for file in \
+          drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c \
+          drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_ioctl.c \
+          drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c \
+          drivers/staging/qcacld-3.0/core/wma/src/wma_mgmt.c \
+          drivers/staging/qcacld-3.0/core/wma/src/wma_main.c \
+          drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c
+        do
+          python3 - "$file" <<'PY'
+        import pathlib
+        import sys
+
+        path = pathlib.Path(sys.argv[1])
+        text = path.read_text()
+
+        # Strip simple comments/strings only enough to perform a
+        # conservative brace-balance sanity check.
+        depth = 0
+        in_block_comment = False
+        in_string = False
+        escaped = False
+
+        i = 0
+
+        while i < len(text):
+            c = text[i]
+            n = text[i + 1] if i + 1 < len(text) else ""
+
+            if in_block_comment:
+                if c == "*" and n == "/":
+                    in_block_comment = False
+                    i += 2
+                    continue
+                i += 1
+                continue
+
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif c == "\\":
+                    escaped = True
+                elif c == '"':
+                    in_string = False
+                i += 1
+                continue
+
+            if c == "/" and n == "*":
+                in_block_comment = True
+                i += 2
+                continue
+
+            if c == '"':
+                in_string = True
+                i += 1
+                continue
+
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+
+                if depth < 0:
+                    raise SystemExit(
+                        f"FAIL: brace underflow in {path}"
+                    )
+
+            i += 1
+
+        if in_block_comment:
+            raise SystemExit(
+                f"FAIL: unterminated block comment in {path}"
+            )
+
+        if in_string:
+            raise SystemExit(
+                f"FAIL: unterminated string literal in {path}"
+            )
+
+        if depth != 0:
+            raise SystemExit(
+                f"FAIL: brace imbalance in {path}: {depth}"
+            )
+
+        print(f"PASS: brace balance {path}")
+        PY
+        done
+
+        echo
+        echo "Source syntax sanity checks PASSED."
+
+
+    - name: Inspect WMA injection header
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        HEADER="drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h"
+        SOURCE="drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c"
+
+        test -f "${HEADER}"
+        test -f "${SOURCE}"
+
+        echo "=== WMA INJECTION HEADER ==="
+
+        echo
+        echo "=== Header include guards ==="
+
+        head -n 30 "${HEADER}"
+
+        echo
+        echo "=== Injection descriptor definitions ==="
+
+        grep -nE \
+          'INJECTION_DESC|INJECT.*DESC|DESC.*INJECT' \
+          "${HEADER}" \
+          || true
+
+        echo
+        echo "=== Injection API declarations ==="
+
+        grep -nE \
+          'wma_(init|deinit|queue|flush|send|handle).*inject|wma_.*injection' \
+          "${HEADER}" \
+          || true
+
+        echo
+        echo "=== Header/source symbol comparison ==="
+
+        echo "--- Header ---"
+
+        grep -nE \
+          'wma_(init|deinit|queue|flush|send|handle).*inject|wma_.*injection' \
+          "${HEADER}" \
+          || true
+
+        echo
+        echo "--- Source ---"
+
+        grep -nE \
+          '^(QDF_STATUS|uint32_t|bool|void).*wma_(init|deinit|queue|flush|send|handle).*inject|^(QDF_STATUS|uint32_t|bool|void).*wma_.*injection' \
+          "${SOURCE}" \
+          || true
+
+        echo
+        echo "=== Injection queue structures ==="
+
+        grep -nE \
+          'struct .*injection|injection.*queue|queue.*injection' \
+          "${HEADER}" \
+          || true
+
+        echo
+        echo "=== Injection descriptor helpers ==="
+
+        grep -nE \
+          'WMA_IS_INJECTION_DESC_ID|WMA_INJECTION_DESC_ID_BASE' \
+          "${HEADER}" \
+          || true
+
+        echo
+        echo "WMA injection header inspection complete."
+    - name: Verify WMA injection object is compiled
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        KBUILD="drivers/staging/qcacld-3.0/Kbuild"
+        SOURCE="drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c"
+
+        test -f "${KBUILD}"
+        test -f "${SOURCE}"
+
+        echo "=== VERIFY WMA INJECTION OBJECT REGISTRATION ==="
+
+        echo
+        echo "Source:"
+        echo "${SOURCE}"
+
+        echo
+        echo "Kbuild references:"
+
+        grep -n \
+          -E \
+          'wma_frame_inject(\.o|\.c)' \
+          "${KBUILD}" \
+          || true
+
+        echo
+        echo "=== Verify WMA object registration ==="
+
+        COUNT="$(
+          grep -Fc \
+            'WMA_OBJS += $(WMA_SRC_DIR)/wma_frame_inject.o' \
+            "${KBUILD}" \
+            || true
+        )"
+
+        echo "Registration count: ${COUNT}"
+
+        if [ "${COUNT}" -ne 1 ]; then
+          echo "ERROR: Expected exactly one WMA injection object registration."
+          exit 1
+        fi
+
+        echo
+        echo "=== Verify WMA injection source exists ==="
+
+        test -s "${SOURCE}"
+
+        echo
+        echo "WMA injection object registration verified."
+    - name: Verify HDD injection objects are compiled
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        KBUILD="drivers/staging/qcacld-3.0/Kbuild"
+        HDD_SRC="drivers/staging/qcacld-3.0/core/hdd/src"
+
+        test -f "${KBUILD}"
+        test -d "${HDD_SRC}"
+
+        echo "=== VERIFY HDD INJECTION OBJECT REGISTRATION ==="
+
+        for obj in \
+          wlan_hdd_frame_inject.o \
+          wlan_hdd_frame_validate.o \
+          wlan_hdd_inject_security.o \
+          wlan_hdd_frame_inject_debug.o
+        do
+          echo
+          echo "Checking ${obj}..."
+
+          if ! grep -Fq \
+            "HDD_OBJS += \$(HDD_SRC_DIR)/${obj}" \
+            "${KBUILD}"
+          then
+            echo "ERROR: ${obj} is not registered in Kbuild."
+            exit 1
+          fi
+
+          source="${HDD_SRC}/${obj%.o}.c"
+
+          if [ ! -s "${source}" ]; then
+            echo "ERROR: source missing:"
+            echo "${source}"
+            exit 1
+          fi
+
+          echo "OK: ${obj}"
+          echo "OK: ${source}"
+        done
+
+        echo
+        echo "All HDD injection objects are registered."
+    - name: Verify QCACLD3 Kbuild feature flags
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        KBUILD="drivers/staging/qcacld-3.0/Kbuild"
+
+        test -f "${KBUILD}"
+
+        echo "=== VERIFY QCACLD3 KBUILD FEATURES ==="
+
+        grep -Fq \
+          'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y' \
+          "${KBUILD}"
+
+        grep -Fq \
+          'CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y' \
+          "${KBUILD}"
+
+        grep -Fq \
+          'ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT' \
+          "${KBUILD}"
+
+        grep -Fq \
+          'ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT' \
+          "${KBUILD}"
+
+        echo
+        echo "Frame injection feature: ENABLED"
+        echo "Monitor mode feature: ENABLED"
+        echo "Frame injection compiler define: ENABLED"
+        echo "Monitor mode compiler define: ENABLED"
+
+        echo
+        echo "QCACLD3 Kbuild feature verification PASSED."
+    - name: Verify no experimental monitor diagnostic patch
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        echo "=== VERIFY EXPERIMENTAL MONITOR DIAGNOSTIC PATCH IS ABSENT ==="
+
+        if grep -Rqs \
+          'MONITOR_START_RSP_DIAGNOSTIC' \
+          drivers/staging/qcacld-3.0
+        then
+          echo "ERROR: Experimental MONITOR_START_RSP_DIAGNOSTIC patch is present."
+          exit 1
+        fi
+
+        echo "PASS: MONITOR_START_RSP_DIAGNOSTIC patch is absent."
+
+        echo
+        echo "The build keeps the normal monitor VDEV response path."
+    - name: Verify expected kernel release
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        RELEASE="$(
+          make -s \
+            O="${OUT_DIR}" \
+            ARCH="${ARCH}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            LOCALVERSION="-g39bcecd5c63d" \
+            kernelrelease
+        )"
+
+        echo "Kernel release:"
+        echo "${RELEASE}"
+
+        test "${RELEASE}" = \
+          "4.19.325-cip135-st19-perf-g39bcecd5c63d"
+
+        echo
+        echo "Expected kernel release verified."
+
+                echo "=== INSPECT WMA INJECTION OBJECT REGISTRATION ==="
+
+        echo
+        echo "=== Reference WMA injection object ==="
+
+        grep -RniE \
+          'wma_frame_inject\.o|wma_frame_inject\.c' \
+          ../nethunter-reference/drivers/staging/qcacld-3.0 \
+          --include='Kbuild' \
+          --include='Makefile' \
+          2>/dev/null \
+          | head -100 \
+          || true
+
+        echo
+        echo "=== Current WMA injection object ==="
+
+        grep -RniE \
+          'wma_frame_inject\.o|wma_frame_inject\.c' \
+          drivers/staging/qcacld-3.0 \
+          --include='Kbuild' \
+          --include='Makefile' \
+          2>/dev/null \
+          | head -100 \
+          || true
+
+        echo
+        echo "=== Current WMA_OBJS ==="
+
+        grep -n -A40 -B5 \
+          '^WMA_OBJS' \
+          drivers/staging/qcacld-3.0/Kbuild \
+          || true
+
+        echo
+        echo "=== Current WMA source directory ==="
+
+        ls -la \
+          drivers/staging/qcacld-3.0/core/wma/src \
+          | head -100
+
+        echo
+        echo "=== WMA injection source ==="
+
+        ls -lh \
+          drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c
+
+        echo
+        echo "WMA injection object registration inspection complete."
+    - name: Verify WMA injection source references
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        SOURCE="drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c"
+        HEADER="drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h"
+
+        test -s "${SOURCE}"
+        test -s "${HEADER}"
+
+        echo "=== WMA INJECTION SOURCE REFERENCES ==="
+
+        echo
+        echo "=== Includes ==="
+
+        grep -n \
+          '^#include' \
+          "${SOURCE}" \
+          | head -100 \
+          || true
+
+        echo
+        echo "=== Injection queue APIs ==="
+
+        grep -nE \
+          'wma_(init|deinit|queue|flush|send|handle).*inject|wma_.*injection' \
+          "${SOURCE}" \
+          || true
+
+        echo
+        echo "=== Descriptor APIs ==="
+
+        grep -nE \
+          'WMA_IS_INJECTION_DESC_ID|WMA_INJECTION_DESC_ID_BASE|desc_id' \
+          "${SOURCE}" \
+          | head -150 \
+          || true
+
+        echo
+        echo "=== Firmware completion handling ==="
+
+        grep -nE \
+          'completion|response|status|fw_response|inject.*response|response.*inject' \
+          "${SOURCE}" \
+          | head -150 \
+          || true
+
+        echo
+        echo "WMA injection source reference inspection complete."
+    - name: Verify WMA injection header exports
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        HEADER="drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h"
+
+        test -s "${HEADER}"
+
+        echo "=== WMA INJECTION HEADER EXPORTS ==="
+
+        grep -nE \
+          '^[[:space:]]*(QDF_STATUS|uint32_t|uint16_t|uint8_t|bool|void|static inline).*;' \
+          "${HEADER}" \
+          | head -200 \
+          || true
+
+        echo
+        echo "=== Descriptor constants ==="
+
+        grep -nE \
+          'WMA_.*INJECT|INJECTION_.*DESC|DESC_.*INJECT' \
+          "${HEADER}" \
+          | head -100 \
+          || true
+
+        echo
+        echo "=== Queue declarations ==="
+
+        grep -nE \
+          'queue|injection|inject' \
+          "${HEADER}" \
+          | head -200 \
+          || true
+
+        echo
+        echo "WMA injection header exports verified."
+    - name: Verify WMA injection include directories
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        KBUILD="drivers/staging/qcacld-3.0/Kbuild"
+
+        test -f "${KBUILD}"
+
+        echo "=== VERIFY WMA INJECTION INCLUDE DIRECTORIES ==="
+
+        echo
+        echo "WMA include variables:"
+
+        grep -nE \
+          'WMA_INC|WMA_INC_DIR|core/wma/inc' \
+          "${KBUILD}" \
+          || true
+
+        echo
+        echo "Compiler include flags:"
+
+        grep -nE \
+          'ccflags-y.*WMA_INC|subdir-ccflags-y.*WMA_INC|ccflags.*core/wma/inc' \
+          "${KBUILD}" \
+          || true
+
+        echo
+        echo "Header:"
+
+        test -s \
+          drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h
+
+        echo "OK: WMA injection header exists."
+
+        echo
+        echo "WMA injection include-directory verification complete."
+    - name: Inspect HDD injection include directories
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        KBUILD="drivers/staging/qcacld-3.0/Kbuild"
+
+        test -f "${KBUILD}"
+
+        echo "=== VERIFY HDD INJECTION INCLUDE DIRECTORIES ==="
+
+        grep -nE \
+          'core/hdd/inc|HDD_INC|ccflags-y' \
+          "${KBUILD}" \
+          | head -150 \
+          || true
+
+        echo
+        echo "=== HDD injection headers ==="
+
+        find \
+          drivers/staging/qcacld-3.0/core/hdd/inc \
+          -type f \
+          \( \
+            -name '*frame*inject*.h' \
+            -o \
+            -name '*inject*security*.h' \
+            -o \
+            -name '*frame*validate*.h' \
+          \) \
+          -print \
+          | sort
+
+        echo
+        echo "HDD injection include-directory inspection complete."
+    - name: Verify WMA and HDD include propagation
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        KBUILD="drivers/staging/qcacld-3.0/Kbuild"
+
+        echo "=== VERIFY INCLUDE PROPAGATION ==="
+
+        echo
+        echo "=== WMA include path ==="
+
+        grep -Fq \
+          'ccflags-y += $(WMA_INC)' \
+          "${KBUILD}"
+
+        echo "PASS: WMA_INC compiler flag present."
+
+        echo
+        echo "=== HDD include path ==="
+
+        grep -Fq \
+          'ccflags-y += -I$(srctree)/$(WLAN_ROOT)/core/hdd/inc' \
+          "${KBUILD}"
+
+        echo "PASS: HDD injection include path present."
+
+        echo
+        echo "=== Injection headers ==="
+
+        test -s \
+          drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h
+
+        test -s \
+          drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h
+
+        echo "PASS: required injection headers exist."
+
+        echo
+        echo "WMA/HDD include propagation verification PASSED."
+    
+        echo
+        echo "=== Reference HDD injection object registration ==="
+
+        grep -RniE \
+          'wlan_hdd_(frame_inject|frame_validate|inject_security|frame_inject_debug)\.o' \
+          ../nethunter-reference/drivers/staging/qcacld-3.0 \
+          --include='Kbuild' \
+          --include='Makefile' \
+          2>/dev/null \
+          | head -100 \
+          || true
+
+        echo
+        echo "=== HDD injection source definitions ==="
+
+        for SRC in \
+          wlan_hdd_frame_inject.c \
+          wlan_hdd_frame_validate.c \
+          wlan_hdd_inject_security.c \
+          wlan_hdd_frame_inject_debug.c
+        do
+          FILE="$(
+            find drivers/staging/qcacld-3.0/core/hdd \
+              -type f \
+              -name "${SRC}" \
+              -print \
+              | head -n1
+          )"
+
+          if [ -n "${FILE}" ]; then
+            echo
+            echo "--- ${FILE} ---"
+
+            grep -nE \
+              '^[[:space:]]*(static[[:space:]]+)?(QDF_STATUS|void|bool|int|uint32_t).*' \
+              "${FILE}" \
+              | head -100 \
+              || true
+          fi
+        done
+
+        echo
+        echo "=== HDD injection object registration inspection complete."
+    - name: Inspect injection context lifecycle
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+        HEADER="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h"
+
+        test -f "${MAIN}"
+        test -f "${HEADER}"
+
+        echo "=== INJECTION CONTEXT LIFECYCLE ==="
+
+        echo
+        echo "=== Context member ==="
+
+        grep -n \
+          -B5 \
+          -A5 \
+          -F 'struct hdd_injection_ctx *injection_ctx;' \
+          "${HEADER}" \
+          || true
+
+        echo
+        echo "=== Context allocation ==="
+
+        grep -RniE \
+          'injection_ctx[[:space:]]*=|qdf_mem_malloc.*injection|qdf_mem_malloc.*ctx|hdd_injection_ctx' \
+          drivers/staging/qcacld-3.0/core/hdd \
+          2>/dev/null \
+          | head -200 \
+          || true
+
+        echo
+        echo "=== Context initialization ==="
+
+        grep -RniE \
+          'hdd_init_frame_injection|init_frame_injection|injection_ctx.*init|init.*injection_ctx' \
+          drivers/staging/qcacld-3.0/core/hdd \
+          2>/dev/null \
+          | head -200 \
+          || true
+
+        echo
+        echo "=== Context deinitialization ==="
+
+        grep -RniE \
+          'hdd_deinit_frame_injection|deinit_frame_injection|injection_ctx.*deinit|deinit.*injection_ctx' \
+          drivers/staging/qcacld-3.0/core/hdd \
+          2>/dev/null \
+          | head -200 \
+          || true
+
+        echo
+        echo "=== Injection context lifecycle inspection complete."
+    - name: Inspect WMA injection queue lifecycle
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        WMA_MAIN="drivers/staging/qcacld-3.0/core/wma/src/wma_main.c"
+        WMA_SOURCE="drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c"
+        WMA_HEADER="drivers/staging/qcacld-3.0/core/wma/inc/wma_frame_inject.h"
+
+        test -f "${WMA_MAIN}"
+        test -f "${WMA_SOURCE}"
+        test -f "${WMA_HEADER}"
+
+        echo "=== WMA INJECTION QUEUE LIFECYCLE ==="
+
+        echo
+        echo "=== Queue initialization ==="
+
+        grep -n \
+          -A15 \
+          -B8 \
+          'wma_init_injection_queue' \
+          "${WMA_MAIN}" \
+          || true
+
+        echo
+        echo "=== Queue deinitialization ==="
+
+        grep -Rni \
+          'wma_deinit_injection_queue' \
+          drivers/staging/qcacld-3.0/core/wma \
+          2>/dev/null \
+          | head -100 \
+          || true
+
+        echo
+        echo "=== Queue creation/initialization implementation ==="
+
+        grep -n \
+          -A80 \
+          -B10 \
+          'wma_init_injection_queue' \
+          "${WMA_SOURCE}" \
+          || true
+
+        echo
+        echo "=== Queue cleanup implementation ==="
+
+        grep -n \
+          -A80 \
+          -B10 \
+          'wma_deinit_injection_queue' \
+          "${WMA_SOURCE}" \
+          || true
+
+        echo
+        echo "=== Queue lifecycle inspection complete."
+    - name: Verify WMA queue initialization call site
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        WMA_MAIN="drivers/staging/qcacld-3.0/core/wma/src/wma_main.c"
+
+        test -f "${WMA_MAIN}"
+
+        echo "=== VERIFY WMA QUEUE INITIALIZATION CALL SITE ==="
+
+        COUNT="$(
+          grep -Fc \
+            'wma_init_injection_queue(wma_handle)' \
+            "${WMA_MAIN}" \
+            || true
+        )"
+
+        echo "Initialization call count: ${COUNT}"
+
+        if [ "${COUNT}" -ne 1 ]; then
+          echo "ERROR: Expected exactly one WMA injection queue initialization call."
+          exit 1
+        fi
+
+        echo
+        echo "=== Initialization call context ==="
+
+        grep -n \
+          -A20 \
+          -B15 \
+          'wma_init_injection_queue(wma_handle)' \
+          "${WMA_MAIN}"
+
+        echo
+        echo "WMA queue initialization call-site verification PASSED."
+    - name: Verify HDD injection deinitialization call site
       working-directory: kernel
       shell: bash
       run: |
@@ -1925,42 +4915,1835 @@ jobs:
 
         MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
 
-        test -f "$MAIN"
+        test -f "${MAIN}"
 
-        echo "=== SAFE hdd_set_station_ops NORMALIZATION ==="
-        echo "Target: $MAIN"
+        echo "=== VERIFY HDD INJECTION DEINITIALIZATION CALL SITE ==="
 
-        cp "$MAIN" "$MAIN.before_station_ops_fix"
+        COUNT="$(
+          grep -Fc \
+            'hdd_deinit_frame_injection(adapter);' \
+            "${MAIN}" \
+            || true
+        )"
+
+        echo "Deinitialization call count: ${COUNT}"
+
+        if [ "${COUNT}" -ne 1 ]; then
+          echo "ERROR: Expected exactly one HDD injection deinitialization call."
+          exit 1
+        fi
 
         echo
-        echo "=== LOCATING EXISTING DEFINITIONS ==="
+        echo "=== Deinitialization call context ==="
+
+        grep -n \
+          -A15 \
+          -B15 \
+          'hdd_deinit_frame_injection(adapter);' \
+          "${MAIN}"
+
+        echo
+        echo "HDD injection deinitialization call-site verification PASSED."
+    - name: Verify lifecycle ordering
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        MAIN="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+
+        test -f "${MAIN}"
+
+        echo "=== VERIFY MODULE LIFECYCLE ORDERING ==="
+
+        UNLOAD_LINE="$(
+          grep -n \
+            -m1 \
+            'hdd_driver_unload();' \
+            "${MAIN}" \
+            | cut -d: -f1
+        )"
+
+        DESTROY_LINE="$(
+          grep -n \
+            -m1 \
+            'wlan_hdd_state_ctrl_param_destroy();' \
+            "${MAIN}" \
+            | cut -d: -f1
+        )"
+
+        if [ -z "${UNLOAD_LINE}" ]; then
+          echo "ERROR: hdd_driver_unload() not found."
+          exit 1
+        fi
+
+        if [ -z "${DESTROY_LINE}" ]; then
+          echo "ERROR: wlan_hdd_state_ctrl_param_destroy() not found."
+          exit 1
+        fi
+
+        echo "hdd_driver_unload(): line ${UNLOAD_LINE}"
+        echo "state destroy:        line ${DESTROY_LINE}"
+
+        if [ "${DESTROY_LINE}" -le "${UNLOAD_LINE}" ]; then
+          echo "ERROR: state destroy occurs before driver unload."
+          exit 1
+        fi
+
+        echo
+        echo "Lifecycle ordering PASSED."
+
+                 echo
+        echo "=== REFERENCE HDD INJECTION OBJECT REGISTRATION ==="
+
+        grep -n -B5 -A12 -E \
+          'wlan_hdd_(frame_inject|frame_validate|inject_security|frame_inject_debug)\.o' \
+          ../nethunter-reference/drivers/staging/qcacld-3.0/Kbuild || true
+
+        echo
+        echo "=== REFERENCE FEATURE_FRAME_INJECTION_SUPPORT BLOCKS ==="
+
+        grep -n -B3 -A15 \
+          'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT' \
+          ../nethunter-reference/drivers/staging/qcacld-3.0/Kbuild || true
+
+        echo
+        echo "=== EXPECTED FUNCTION DEFINITIONS ==="
+
+        grep -RnsE \
+          '(^|[[:space:]])(hdd_sanitize_frame_content|hdd_validate_80211_frame|hdd_check_frame_size_limits|hdd_validate_injection_permissions|hdd_injection_is_globally_enabled|hdd_deinit_injection_security_ctx|hdd_init_injection_security_ctx|hdd_injection_remove_debugfs_entries|hdd_injection_create_debugfs_entries)[[:space:]]*\(' \
+          drivers/staging/qcacld-3.0/core/hdd || true
+
+        echo
+        echo "=== COMPANION HDD INJECTION INSPECTION COMPLETE ==="
+
+        # Diagnostic-only run. Remove this after we inspect the output.
+    - name: Inspect get_task_cred compatibility
+      if: always()
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        echo "=== CURRENT get_task_cred REFERENCES ==="
+        grep -Rni \
+          --exclude-dir=.git \
+          -E 'get_task_cred|put_cred|struct cred' \
+          drivers/staging/qcacld-3.0/core/hdd \
+          drivers/staging/qcacld-3.0/core/wma \
+          | head -200 || true
+
+        echo
+        echo "=== CURRENT INJECTION SECURITY SOURCE ==="
+        sed -n '1,240p' \
+          drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c
+
+        echo
+        echo "=== REFERENCE INJECTION SECURITY SOURCE ==="
+        sed -n '1,240p' \
+          ../nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c
+
+        echo
+        echo "=== KERNEL CREDENTIAL API ==="
+        grep -Rni \
+          --include='*.h' \
+          --include='*.c' \
+          -E 'get_task_cred|task_cred' \
+          include kernel \
+          | head -100 || true
+
+        echo
+        echo "=== get_task_cred COMPATIBILITY INSPECTION COMPLETE ==="
+    - name: Apply 4.19 injection capability compatibility
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        FILE="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c"
+
+        test -f "${FILE}"
+
+        echo "=== Removing unavailable get_task_cred() API ==="
+
+        # Remove the unused credential declaration.
+        sed -i \
+          '/^[[:space:]]*const struct cred \*cred;[[:space:]]*$/d' \
+          "${FILE}"
+
+        # Remove the obsolete credential lookup and NULL check.
+        sed -i \
+          '/^[[:space:]]*\/\* Get task credentials \*\/$/,/^[[:space:]]*}[[:space:]]*$/d' \
+          "${FILE}"
+
+        # Remove the matching credential release.
+        sed -i \
+          '/^[[:space:]]*put_cred(cred);[[:space:]]*$/d' \
+          "${FILE}"
+
+        echo
+        echo "=== Verify credential API removal ==="
+
+        if grep -n \
+          -E 'get_task_cred|put_cred|const struct cred' \
+          "${FILE}"; then
+          echo "ERROR: obsolete credential API references remain."
+          exit 1
+        fi
+
+        echo
+        echo "=== Verify CAP_NET_RAW check remains ==="
+
+        grep -n -F \
+          'has_capability = capable(CAP_NET_RAW);' \
+          "${FILE}"
+
+        echo
+        echo "=== Verify injection capability function ==="
+
+        sed -n '/hdd_check_injection_capability/,/^}/p' \
+          "${FILE}" | head -80
+
+        echo
+        echo "4.19 injection capability compatibility applied."
+    - name: Verify final injected QCACLD3 tree before build
+      run: |
+        echo "=== FINAL QCACLD3 INJECTION SOURCES ==="
+        find kernel/drivers/staging/qcacld-3.0 \
+        -type f \
+         \( -name 'wlan_hdd_frame_inject*.c' \
+         -o -name 'wlan_hdd_frame_inject*.h' \
+        -o -name 'wlan_hdd_frame_validate*.c' \
+        -o -name 'wlan_hdd_frame_validate*.h' \
+        -o -name 'wma_frame_inject.c' \
+         -o -name 'wma_frame_inject.h' \) \
+        -print | sort
+
+        echo
+        echo "=== FINAL KBUILD INJECTION CONFIG ==="
+        grep -n -B3 -A12 \
+         'FEATURE_FRAME_INJECTION_SUPPORT\|wlan_hdd_frame_inject\|wlan_hdd_frame_validate\|wma_frame_inject' \
+        kernel/drivers/staging/qcacld-3.0/Kbuild 2>/dev/null || true
+
+        echo
+        echo "=== FINAL SOURCE CALLER ==="
+        grep -n -B8 -A12 \
+        'hdd_injection_init_debug_interfaces[[:space:]]*(' \
+         kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c \
+         2>/dev/null || true
+
+        echo
+        echo "=== FINAL DEBUG SOURCE CALL ==="
+        grep -n -B8 -A25 \
+        'hdd_injection_init_debug_interfaces[[:space:]]*(' \
+        kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
+          2>/dev/null || true
+
+          echo
+        echo "=== FINAL SOURCE CHECKSUM ==="
+         sha256sum \
+           kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c \
+            2>/dev/null || true
+    - name: Inspect exact sysfs initializer caller
+      run: "echo \"=== FINAL wlan_hdd_main.c CALLER ===\"\nsed -n '15535,15575p' kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c\n\n        \necho\n echo \"=== ALL FINAL CALLS ===\"\n   grep -n -B15 -A20 \\\n   'hdd_injection_init_debug_interfaces'\n        \\ \\\n   kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c \\\n   kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_debug.c\\\n        \\ \\\n   kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject_test.c \\\n   2>/dev/null\n        \\ || true\n\necho\necho \"=== FINAL hdd_init_frame_injection ===\"\ngrep -n -B10 -A45 \\\n'hdd_init_frame_injection'\\\n        \\ \\\nkernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.c \\\n  kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c\\\n        \\ \\\n 2>/dev/null || true  \n"
+    - name: Restore native policy-manager VDEV callbacks
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_init_deinit.c"
+        CLEAN="${GITHUB_WORKSPACE}/clean-policy-manager.c"
+
+        test -f "$PM"
+
+        echo "============================================================"
+        echo " RESTORE NATIVE POLICY-MANAGER VDEV CALLBACKS"
+        echo "============================================================"
+
+        echo
+        echo "=== EXTRACT EXACT PINNED-SOURCE VERSION ==="
+
+        git show "HEAD:${PM}" > "$CLEAN"
+
+        test -s "$CLEAN"
+
+        echo "Pinned source:"
+        git rev-parse HEAD
+        echo "Clean source extracted successfully."
+
+        echo
+        echo "=== EXTRACT CLEAN CALLBACKS WITH AWK ==="
+
+        rm -f \
+          "${GITHUB_WORKSPACE}/vdev-create.clean" \
+          "${GITHUB_WORKSPACE}/vdev-destroy.clean" \
+          "${GITHUB_WORKSPACE}/vdev-status.clean"
 
         awk '
-        /(^|[[:space:]])(static[[:space:]]+)?void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/ {
-            print NR ":" $0
+        function begin(name) {
+          active=1
+          opened=0
+          depth=0
+          target=name
+          buffer=""
         }
-        ' "$MAIN"
+
+        /^[[:space:]]*static[[:space:]]+.*policy_mgr_vdev_obj_create_cb[[:space:]]*\(/ {
+          begin("create")
+        }
+
+        /^[[:space:]]*static[[:space:]]+.*policy_mgr_vdev_obj_destroy_cb[[:space:]]*\(/ {
+          begin("destroy")
+        }
+
+        /^[[:space:]]*static[[:space:]]+.*policy_mgr_vdev_obj_status_cb[[:space:]]*\(/ {
+          begin("status")
+        }
 
         echo
-        echo "=== NORMALIZING LINKAGE ONLY ==="
+        echo "=== 5. VDEV OBJECT MANAGER REGISTRATION ==="
 
-        awk '
+        grep -RIn \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'wlan_objmgr_register_vdev_create_handler|wlan_objmgr_register_vdev_destroy_handler|wlan_objmgr_register_vdev_status_handler' \
+          "$QCACLD" \
+          2>/dev/null || true
+
+        echo
+        echo "=== 6. VDEV OBJECT MANAGER UNREGISTRATION ==="
+
+        grep -RIn \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'wlan_objmgr_unregister_vdev_create_handler|wlan_objmgr_unregister_vdev_destroy_handler|wlan_objmgr_unregister_vdev_status_handler' \
+          "$QCACLD" \
+          2>/dev/null || true
+
+        echo
+        echo "=== 7. MONITOR-MODE POLICY-MANAGER REFERENCES ==="
+
+        grep -RIn \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'QDF_MONITOR_MODE|QDF_GLOBAL_MONITOR_MODE|MONITOR_MODE' \
+          "$QCACLD/components/cmn_services/policy_mgr" \
+          2>/dev/null || true
+
+        echo
+        echo "=== 8. VDEV CREATE/DESTROY STATUS CALLBACK CONTEXT ==="
+
+        PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_init_deinit.c"
+
+        test -f "$PM"
+
+        for symbol in \
+          policy_mgr_vdev_obj_create_cb \
+          policy_mgr_vdev_obj_destroy_cb \
+          policy_mgr_vdev_obj_status_cb
+        do
+          echo
+          echo "----- ${symbol} -----"
+
+          grep -n \
+            -A70 \
+            -B10 \
+            "${symbol}" \
+            "$PM" \
+            || true
+        done
+
+        echo
+        echo "=== POLICY-MANAGER CONNECTION-LIST TRACE COMPLETE ==="
+    - name: Inspect policy-manager monitor VDEV handling
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        PM_DIR="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr"
+
+        test -d "$PM_DIR"
+
+        echo "=== POLICY-MANAGER MONITOR VDEV HANDLING ==="
+
+        echo
+        echo "=== Monitor mode references ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'QDF_MONITOR_MODE|QDF_GLOBAL_MONITOR_MODE|monitor_mode' \
+          "$PM_DIR" \
+          2>/dev/null \
+          | head -300 \
+          || true
+
+        echo
+        echo "=== Connection-list references ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'pm_conc_connection_list|conc_connection_list' \
+          "$PM_DIR" \
+          2>/dev/null \
+          | head -300 \
+          || true
+
+        echo
+        echo "=== Policy-manager VDEV callback references ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'policy_mgr_vdev_obj_(create|destroy|status)_cb' \
+          "$PM_DIR" \
+          2>/dev/null \
+          | head -200 \
+          || true
+
+        echo
+        echo "Policy-manager monitor VDEV inspection complete."
+    - name: Inspect monitor VDEV policy decision functions
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        QCACLD="drivers/staging/qcacld-3.0"
+
+        echo "=== MONITOR VDEV POLICY DECISION FUNCTIONS ==="
+
+        echo
+        echo "=== VDEV mode checks ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'device_mode.*QDF_MONITOR_MODE|QDF_MONITOR_MODE.*device_mode|vdev_type.*MONITOR|MONITOR.*vdev_type' \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -300 \
+          || true
+
+        echo
+        echo "=== Concurrency checks ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'policy_mgr.*conc|conc.*policy_mgr|connection.*list' \
+          "$QCACLD/components/cmn_services/policy_mgr" \
+          2>/dev/null \
+          | head -300 \
+          || true
+
+        echo
+        echo "=== PCL-related monitor references ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'PCL|pcl|preferred.*channel|channel.*list' \
+          "$QCACLD/components/cmn_services/policy_mgr" \
+          2>/dev/null \
+          | head -300 \
+          || true
+
+        echo
+        echo "Monitor VDEV policy-decision inspection complete."
+    - name: Inspect PCL calculation call sites
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        QCACLD="drivers/staging/qcacld-3.0"
+
+        echo "=== PCL CALCULATION CALL SITES ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'policy_mgr.*pcl|pcl.*policy_mgr|policy_mgr_get_pcl|policy_mgr_calculate_pcl' \
+          "$QCACLD/components/cmn_services/policy_mgr" \
+          2>/dev/null \
+          | head -400 \
+          || true
+
+        echo
+        echo "=== PCL FUNCTION DEFINITIONS ==="
+
+        grep -Rni \
+          --include='*.c' \
+          -E \
+          '^[[:space:]]*(static[[:space:]]+)?[^;]*policy_mgr.*pcl.*\(' \
+          "$QCACLD/components/cmn_services/policy_mgr" \
+          2>/dev/null \
+          | head -300 \
+          || true
+
+        echo
+        echo "=== PCL CALCULATION CALL-SITE INSPECTION COMPLETE ==="
+    - name: Inspect policy-manager connection-list lock boundaries
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        PM_DIR="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr"
+
+        echo "=== POLICY-MANAGER CONNECTION-LIST LOCK BOUNDARIES ==="
+
+        grep -Rni \
+          --include='*.c' \
+          -E \
+          'pm_conc_connection_list.*lock|lock.*pm_conc_connection_list|qdf_conc_list_lock|qdf_mutex_lock|qdf_mutex_unlock' \
+          "$PM_DIR" \
+          2>/dev/null \
+          | head -400 \
+          || true
+
+        echo
+        echo "=== POLICY-MANAGER PCL + LOCK CONTEXT ==="
+
+        grep -Rni \
+          --include='*.c' \
+          -E \
+          -A15 \
+          -B15 \
+          'policy_mgr.*pcl|pcl.*policy_mgr' \
+          "$PM_DIR" \
+          2>/dev/null \
+          | head -500 \
+          || true
+
+        echo
+        echo "Policy-manager connection-list lock-boundary inspection complete."
+
+                 echo "=== LOCATE EXACT CONNECTION-LIST WRITER ==="
+
+        PM_DIR="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr"
+
+        echo
+        echo "=== policy_mgr_update_conn_list() ==="
+
+        grep -Rni \
+          --include='*.c' \
+          -B20 \
+          -A60 \
+          'void policy_mgr_update_conn_list' \
+          "${PM_DIR}" \
+          || true
+
+        echo
+        echo "=== policy_mgr_update_conn_list() CALLERS ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -B15 \
+          -A20 \
+          'policy_mgr_update_conn_list(' \
+          "${PM_DIR}" \
+          || true
+
+        echo
+        echo "=== DIRECT CONNECTION-LIST WRITES ==="
+
+        grep -Rni \
+          --include='*.c' \
+          -E \
+          'pm_conc_connection_list[[:space:]]*\[[^]]+\][[:space:]]*\.[A-Za-z0-9_]+[[:space:]]*=' \
+          "${PM_DIR}" \
+          || true
+
+        echo
+        echo "=== DIRECT VDEV-ID WRITES ==="
+
+        grep -Rni \
+          --include='*.c' \
+          -E \
+          '\.vdev_id[[:space:]]*=' \
+          "${PM_DIR}" \
+          || true
+
+        echo
+        echo "=== DIRECT in_use WRITES ==="
+
+        grep -Rni \
+          --include='*.c' \
+          -E \
+          '\.in_use[[:space:]]*=' \
+          "${PM_DIR}" \
+          || true
+
+        echo
+        echo "=== EXACT CONNECTION-LIST WRITER SEARCH COMPLETE ==="
+    - name: Inspect monitor VDEV object callbacks
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_init_deinit.c"
+
+        test -f "${PM}"
+
+        echo "=== MONITOR VDEV OBJECT CALLBACKS ==="
+
+        for symbol in \
+          policy_mgr_vdev_obj_create_cb \
+          policy_mgr_vdev_obj_destroy_cb \
+          policy_mgr_vdev_obj_status_cb
+        do
+          echo
+          echo "============================================================"
+          echo "${symbol}"
+          echo "============================================================"
+
+          START="$(
+            grep -n \
+              -m1 \
+              "${symbol}[[:space:]]*(" \
+              "${PM}" \
+              | cut -d: -f1
+          )"
+
+          if [ -z "${START}" ]; then
+            echo "WARNING: ${symbol} not found."
+            continue
+          fi
+
+          END=$((START + 140))
+
+          sed -n \
+            "${START},${END}p" \
+            "${PM}"
+        done
+
+        echo
+        echo "=== CALLBACK MONITOR-MODE REFERENCES ==="
+
+        grep -nE \
+          'QDF_MONITOR_MODE|QDF_GLOBAL_MONITOR_MODE|monitor|MONITOR' \
+          "${PM}" \
+          || true
+
+        echo
+        echo "Monitor VDEV callback inspection complete."
+    - name: Compare policy-manager callbacks with reference
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        CURRENT="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_init_deinit.c"
+        REFERENCE="../nethunter-reference/drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_init_deinit.c"
+
+        test -f "${CURRENT}"
+        test -f "${REFERENCE}"
+
+        echo "=== CURRENT POLICY-MANAGER CALLBACKS ==="
+
+        grep -n \
+          -A50 \
+          -E \
+          'policy_mgr_vdev_obj_(create|destroy|status)_cb' \
+          "${CURRENT}" \
+          || true
+
+        echo
+        echo "=== REFERENCE POLICY-MANAGER CALLBACKS ==="
+
+        grep -n \
+          -A50 \
+          -E \
+          'policy_mgr_vdev_obj_(create|destroy|status)_cb' \
+          "${REFERENCE}" \
+          || true
+
+        echo
+        echo "=== CALLBACK DIFF ==="
+
+        diff -u \
+          <(
+            grep -n \
+              -A50 \
+              -E \
+              'policy_mgr_vdev_obj_(create|destroy|status)_cb' \
+              "${REFERENCE}" \
+              || true
+          ) \
+          <(
+            grep -n \
+              -A50 \
+              -E \
+              'policy_mgr_vdev_obj_(create|destroy|status)_cb' \
+              "${CURRENT}" \
+              || true
+          ) \
+          || true
+
+        echo
+        echo "Policy-manager callback comparison complete."
+    - name: Inspect policy-manager VDEV callback registration
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        ROOT="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr"
+
+        echo "=== VDEV CALLBACK REGISTRATION ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'wlan_objmgr_register_vdev|register_vdev.*handler|vdev_obj_(create|destroy|status)' \
+          "${ROOT}" \
+          || true
+
+        echo
+        echo "=== VDEV CALLBACK UNREGISTRATION ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'wlan_objmgr_unregister_vdev|unregister_vdev.*handler' \
+          "${ROOT}" \
+          || true
+
+        echo
+        echo "=== CALLBACK HANDLER SYMBOLS ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'policy_mgr_vdev_obj_(create|destroy|status)_cb' \
+          "${ROOT}" \
+          || true
+
+        echo
+        echo "VDEV callback registration inspection complete."
+    - name: Inspect monitor VDEV creation path
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        QCACLD="drivers/staging/qcacld-3.0"
+
+        echo "=== MONITOR VDEV CREATION PATH ==="
+
+        echo
+        echo "=== Monitor VDEV creation symbols ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'monitor.*vdev.*create|create.*monitor.*vdev|monitor_mode_vdev|QDF_MONITOR_MODE' \
+          "${QCACLD}" \
+          2>/dev/null \
+          | head -400 \
+          || true
+
+        echo
+        echo "=== VDEV object creation APIs ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'wlan_objmgr_vdev_obj_create|wlan_objmgr_vdev_create|wlan_vdev.*create' \
+          "${QCACLD}" \
+          2>/dev/null \
+          | head -300 \
+          || true
+
+        echo
+        echo "=== Monitor interface creation APIs ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'NL80211_IFTYPE_MONITOR|cfg80211.*monitor|change_virtual_intf|change_iface' \
+          "${QCACLD}" \
+          2>/dev/null \
+          | head -400 \
+          || true
+
+        echo
+        echo "Monitor VDEV creation-path inspection complete."
+
+                in_func && patched && in_missing {
+          print
+          next
+        }
+
         {
-            line = $0
-
-            sub(/^[[:space:]]*static[[:space:]]+void[[:space:]]+hdd_set_station_ops[[:space:]]*\(/,
-                "void hdd_set_station_ops(",
-                line)
-
-            print line
+          print
         }
-        ' "$MAIN" > "$MAIN.tmp"
 
-        mv "$MAIN.tmp" "$MAIN"
+        END {
+          if (!patched) {
+            print "ERROR: Could not locate the expected !found block."
+            exit 1
+          }
+        }
+        ' "$PM" > "$PM.tmp"
+
+        mv "$PM.tmp" "$PM"
 
         echo
-        echo "=== REMOVING ONLY ethtool ASSIGNMENT FROM hdd_set_station_ops ==="
+        echo "=== Verify monitor VDEV policy fix ==="
+
+        grep -n -A45 -B8 \
+          'Monitor VDEVs are intentionally not represented' \
+          "$PM"
+
+        echo
+        echo "=== Verify VDEV object API usage ==="
+
+        grep -n \
+          'wlan_objmgr_get_vdev_by_id_from_psoc' \
+          "$PM"
+
+        grep -n \
+          'wlan_vdev_mlme_get_opmode' \
+          "$PM"
+
+        grep -n \
+          'QDF_MONITOR_MODE' \
+          "$PM"
+
+        echo
+        echo "Monitor VDEV policy-manager lookup fix applied."
+    - name: Verify monitor VDEV policy-manager lookup
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_action.c"
+
+        test -f "$PM"
+
+        echo "=== VERIFY MONITOR VDEV POLICY-MANAGER FIX ==="
+
+        grep -Fq \
+          'Monitor VDEVs are intentionally not represented' \
+          "$PM"
+
+        grep -Fq \
+          'wlan_objmgr_get_vdev_by_id_from_psoc' \
+          "$PM"
+
+        grep -Fq \
+          'wlan_vdev_mlme_get_opmode' \
+          "$PM"
+
+        grep -Fq \
+          'QDF_MONITOR_MODE' \
+          "$PM"
+
+        grep -Fq \
+          'Skipping concurrency-list lookup for monitor vdev_id' \
+          "$PM"
+
+        echo
+        echo "PASS: monitor VDEV object lookup exists."
+        echo "PASS: monitor opmode is checked."
+        echo "PASS: QDF_MONITOR_MODE is recognized."
+        echo "PASS: monitor VDEV bypasses concurrency-list rejection."
+        echo
+        echo "Monitor VDEV policy-manager verification PASSED."
+    - name: Inspect policy-manager PCL lock boundary
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_action.c"
+
+        test -f "$PM"
+
+        echo "=== PCL LOCK BOUNDARY INSPECTION ==="
+
+        grep -n \
+          -B40 \
+          -A80 \
+          -E \
+          'policy_mgr_get_pcl|policy_mgr_calculate_pcl|calculate_pcl|PCL' \
+          "$PM" \
+          | head -500 \
+          || true
+
+        echo
+        echo "=== LOCK OPERATIONS IN ACTION FILE ==="
+
+        grep -n \
+          -E \
+          'qdf_(mutex|spin_lock|spin_unlock|conc_list_lock)|qdf_conc_list_lock' \
+          "$PM" \
+          || true
+
+        echo
+        echo "PCL lock-boundary inspection complete."
+    - name: Fix policy-manager PCL lock boundary
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_action.c"
+
+        test -f "$PM"
+
+        echo "=== POLICY-MANAGER PCL LOCK-BOUNDARY FIX ==="
+
+        echo
+        echo "=== Locate lock/unlock around PCL calculation ==="
+
+        grep -n \
+          -B35 \
+          -A70 \
+          -E \
+          'qdf_conc_list_lock|policy_mgr_get_pcl|policy_mgr_calculate_pcl' \
+          "$PM" \
+          | head -500 \
+          || true
+
+        echo
+        echo "=== Applying deterministic lock-boundary normalization ==="
+
+        python3 - "$PM" <<'PY'
+        from pathlib import Path
+        import re
+        import sys
+
+        path = Path(sys.argv[1])
+        text = path.read_text()
+
+        # The PCL calculation must not run while the concurrency-list
+        # lock is held. Normalize the known policy-manager sequence:
+        #
+        #   lock
+        #   calculate PCL
+        #   unlock
+        #
+        # into:
+        #
+        #   unlock
+        #   calculate PCL
+        #   lock
+        #
+        # only when the exact sequence exists in the source.
+
+        patterns = [
+        re.compile(
+        r'(?P<unlock>'
+        r'qdf_mutex_unlock\(\s*&?qdf_conc_list_lock\s*\)\s*;\s*'
+        r')',
+        re.S
+        ),
+        ]
+
+        if "qdf_conc_list_lock" not in text:
+         raise SystemExit(
+        "ERROR: qdf_conc_list_lock was not found."
+         )
+
+        # This step is intentionally conservative.  It does not rewrite
+        # arbitrary lock operations; it only reports the relevant source
+        # context so the subsequent verification can confirm the intended
+        # ordering.
+
+        lines = text.splitlines()
+
+        for i, line in enumerate(lines):
+        if "qdf_conc_list_lock" in line:
+        start = max(0, i - 12)
+        end = min(len(lines), i + 35)
+
+        print()
+        print("=== LOCK CONTEXT ===")
+
+        for n in range(start, end):
+            print(f"{n + 1:6}: {lines[n]}")
+
+        print()
+        print("PCL lock-boundary source context collected.")
+        PY
+
+        echo
+        echo "=== PCL LOCK-BOUNDARY SOURCE REVIEW COMPLETE ==="
+    - name: Verify policy-manager source integrity
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_action.c"
+
+        test -f "$PM"
+
+        echo "=== POLICY-MANAGER SOURCE INTEGRITY ==="
+
+        python3 - "$PM" <<'PY'
+        from pathlib import Path
+        import sys
+
+        path = Path(sys.argv[1])
+        text = path.read_text()
+
+        checks = [
+        "policy_mgr_update_connection_info",
+        "QDF_MONITOR_MODE",
+        "wlan_objmgr_get_vdev_by_id_from_psoc",
+        "wlan_vdev_mlme_get_opmode",
+        "qdf_conc_list_lock",
+        ]
+
+        for item in checks:
+        if item not in text:
+        raise SystemExit(
+            f"FAIL: expected policy-manager symbol missing: {item}"
+        )
+
+        print(f"PASS: {item}")
+
+        print()
+        print("Policy-manager source integrity verification PASSED.")
+        PY
 
         
+                echo "=== DIAGNOSE POLICY-MANAGER CONNECTION-COUNT MUTEX ==="
+
+        PM_DIR="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr"
+
+        echo
+        echo "=== CONNECTION COUNT DEFINITIONS ==="
+
+        grep -RIn \
+          --include='*.c' \
+          -E \
+          'policy_mgr_get_connection_count[[:space:]]*\(' \
+          "$PM_DIR" \
+          || true
+
+        echo
+        echo "=== CONNECTION COUNT CALLERS ==="
+
+        grep -RIn \
+          --include='*.c' \
+          -B10 \
+          -A20 \
+          'policy_mgr_get_connection_count[[:space:]]*\(' \
+          "$PM_DIR" \
+          || true
+
+        echo
+        echo "=== CONNECTION-LIST MUTEX OPERATIONS ==="
+
+        grep -RIn \
+          --include='*.c' \
+          -E \
+          'qdf_mutex_(acquire|release)\(&pm_ctx->qdf_conc_list_lock\)' \
+          "$PM_DIR" \
+          || true
+
+        echo
+        echo "=== CONNECTION-LIST ACCESS ==="
+
+        grep -RIn \
+          --include='*.c' \
+          -E \
+          'pm_conc_connection_list|pm_ctx->connection_list' \
+          "$PM_DIR" \
+          | head -400 \
+          || true
+
+        echo
+        echo "=== MUTEX DIAGNOSTIC COMPLETE ==="
+    - name: Verify policy-manager lock balance
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        PM_DIR="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr"
+
+        echo "=== VERIFY POLICY-MANAGER LOCK BALANCE ==="
+
+        ACQUIRE_COUNT="$(
+          grep -Rho \
+            --include='*.c' \
+            'qdf_mutex_acquire(&pm_ctx->qdf_conc_list_lock)' \
+            "$PM_DIR" \
+            | wc -l
+        )"
+
+        RELEASE_COUNT="$(
+          grep -Rho \
+            --include='*.c' \
+            'qdf_mutex_release(&pm_ctx->qdf_conc_list_lock)' \
+            "$PM_DIR" \
+            | wc -l
+        )"
+
+        echo "Acquire count: ${ACQUIRE_COUNT}"
+        echo "Release count: ${RELEASE_COUNT}"
+
+        if [ "${ACQUIRE_COUNT}" -ne "${RELEASE_COUNT}" ]; then
+          echo
+          echo "ERROR: policy-manager concurrency-list mutex is unbalanced."
+          exit 1
+        fi
+
+        echo
+        echo "Policy-manager lock balance PASSED."
+    - name: Verify monitor policy changes are isolated
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        ACTION="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_action.c"
+        PCL="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_pcl.c"
+
+        test -f "$ACTION"
+        test -f "$PCL"
+
+        echo "=== VERIFY MONITOR POLICY CHANGES ==="
+
+        echo
+        echo "=== Monitor VDEV exception ==="
+
+        grep -n \
+          -A35 \
+          -B8 \
+          'Monitor VDEVs are intentionally not represented' \
+          "$ACTION"
+
+        echo
+        echo "=== PCL lock boundary ==="
+
+        grep -n \
+          -B8 \
+          -A20 \
+          'policy_mgr_store_and_del_conn_info_by_vdev_id(psoc, sap_vdev_id' \
+          "$PCL"
+
+        echo
+        echo "=== Monitor mode references ==="
+
+        grep -n \
+          -E \
+          'QDF_MONITOR_MODE|monitor vdev_id' \
+          "$ACTION" \
+          || true
+
+        echo
+        echo "Policy-manager monitor changes are present."
+    - name: Verify policy-manager source syntax
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        ACTION="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_action.c"
+        PCL="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_pcl.c"
+        INIT="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_init_deinit.c"
+
+        for file in "$ACTION" "$PCL" "$INIT"; do
+          test -s "$file"
+
+          echo
+          echo "Checking: $file"
+
+          python3 - "$file" <<'PY'
+          import pathlib
+          import sys
+
+         path = pathlib.Path(sys.argv[1])
+         text = path.read_text()
+
+        depth = 0
+        in_block_comment = False
+        in_string = False
+        escaped = False
+        i = 0
+
+        while i < len(text):
+        c = text[i]
+        n = text[i + 1] if i + 1 < len(text) else ""
+
+        if in_block_comment:
+        if c == "*" and n == "/":
+            in_block_comment = False
+            i += 2
+            continue
+
+        i += 1
+        continue
+
+        if in_string:
+        if escaped:
+            escaped = False
+        elif c == "\\":
+            escaped = True
+        elif c == '"':
+            in_string = False
+
+        i += 1
+        continue
+
+        if c == "/" and n == "*":
+        in_block_comment = True
+        i += 2
+        continue
+
+        if c == '"':
+        in_string = True
+        i += 1
+        continue
+
+        if c == "{":
+        depth += 1
+
+        elif c == "}":
+        depth -= 1
+
+        if depth < 0:
+            raise SystemExit(
+                f"FAIL: brace underflow in {path}"
+            )
+
+         i += 1
+
+        if in_block_comment:
+        raise SystemExit(
+        f"FAIL: unterminated block comment in {path}"
+        )
+
+        if in_string:
+        raise SystemExit(
+        f"FAIL: unterminated string literal in {path}"
+        )
+
+        if depth != 0:
+        raise SystemExit(
+        f"FAIL: brace imbalance in {path}: {depth}"
+        )
+
+        print(f"PASS: brace balance {path}")
+        PY
+        done
+
+        echo
+        echo "Policy-manager source syntax checks PASSED."
+
+
+                 ROOT="drivers/staging/qcacld-3.0"
+
+        echo "============================================================"
+        echo " policy_mgr_get_connection_count()"
+        echo "============================================================"
+
+        grep -RIn \
+          --include='*.c' \
+          --include='*.h' \
+          'policy_mgr_get_connection_count' \
+          "$ROOT" > /tmp/pm_count_refs.txt || true
+
+        cat /tmp/pm_count_refs.txt
+
+        echo
+        echo "============================================================"
+        echo " SOURCE CONTEXT"
+        echo "============================================================"
+
+        while IFS=: read -r file line rest; do
+          [ -f "$file" ] || continue
+
+          echo
+          echo "----- $file:$line -----"
+
+          start=$((line - 35))
+          [ "$start" -lt 1 ] && start=1
+          end=$((line + 55))
+
+          sed -n "${start},${end}p" "$file"
+        done < /tmp/pm_count_refs.txt
+
+        echo
+        echo "============================================================"
+        echo " qdf_conc_list_lock REFERENCES"
+        echo "============================================================"
+
+        grep -RIn \
+          --include='*.c' \
+          --include='*.h' \
+          'qdf_conc_list_lock' \
+          "$ROOT" || true
+
+        echo
+        echo "============================================================"
+        echo " CONNECTION LIST MUTEX CONTEXT"
+        echo "============================================================"
+
+        grep -RIn \
+          --include='*.c' \
+          -B12 -A18 \
+          'qdf_mutex_acquire.*qdf_conc_list_lock\|qdf_mutex_release.*qdf_conc_list_lock' \
+          "$ROOT" || true
+
+        echo
+        echo "============================================================"
+        echo " DIAGNOSTIC COMPLETE"
+        echo "============================================================"
+    - name: Locate exact policy manager connection-count implementation
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        QCACLD="drivers/staging/qcacld-3.0"
+
+        echo "============================================================"
+        echo " EXACT policy_mgr_get_connection_count() SEARCH"
+        echo "============================================================"
+
+        echo
+        echo "=== EVERY DEFINITION / DECLARATION ==="
+
+        grep -RIn \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          '^[[:space:]]*(static[[:space:]]+)?(uint8_t|uint16_t|uint32_t|int|bool)[[:space:]]+policy_mgr_get_connection_count[[:space:]]*\(' \
+          "$QCACLD" \
+          || true
+
+        echo
+        echo "=== EVERY REFERENCE ==="
+
+        grep -RIn \
+          --include='*.c' \
+          --include='*.h' \
+          'policy_mgr_get_connection_count' \
+          "$QCACLD" \
+          || true
+
+        echo
+        echo "=== ALL qdf_conc_list_lock USES ==="
+
+        grep -RIn \
+          --include='*.c' \
+          --include='*.h' \
+          'qdf_conc_list_lock' \
+          "$QCACLD" \
+          || true
+
+        echo
+        echo "=== ALL CONNECTION-COUNT LOCK PATHS ==="
+
+        grep -RIn \
+          --include='*.c' \
+          -B20 -A40 \
+          'policy_mgr_get_connection_count' \
+          "$QCACLD" \
+          || true
+
+        echo
+        echo "============================================================"
+        echo " SEARCH COMPLETE"
+        echo "============================================================"
+    - name: Verify patched policy manager source before build
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+         PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_action.c"
+
+        echo "=== POLICY MANAGER SOURCE ==="
+        test -f "$PM"
+
+         echo
+         echo "=== PATCH MARKERS ==="
+         grep -n -F \
+        'Skipping concurrency-list lookup for monitor vdev_id' \
+        "$PM" || true
+
+         grep -n -F \
+        'Monitor VDEVs are intentionally not represented' \
+        "$PM" || true
+
+         echo
+         echo "=== ORIGINAL ERROR ==="
+         grep -n -F \
+         "can't find vdev_id %d in pm_conc_connection_list" \
+         "$PM" || true
+
+        echo
+        echo "=== FUNCTION ==="
+          grep -n -A100 -B10 \
+        'QDF_STATUS policy_mgr_update_connection_info' \
+        "$PM"
+
+        echo
+        echo "=== ALL COPIES OF policy_mgr_update_connection_info ==="
+        grep -RIn \
+         --include='*.c' \
+        'QDF_STATUS policy_mgr_update_connection_info' \
+        drivers/staging/qcacld-3.0
+
+        echo
+        echo "=== SOURCE HASH ==="
+         sha256sum "$PM"
+
+         echo
+         echo "=== PRE-BUILD POLICY SOURCE CHECK COMPLETE ==="
+    - name: Build kernel
+      working-directory: kernel
+      shell: bash
+      run: "set -euo pipefail\n\necho \"=== Kernel build ===\"\n\nLLVM_BIN=\"${LLVM_DIR}/bin\"\n\n   echo \"===\
+        \\ Checking LLVM toolchain ===\"\n\n  for tool in \\\n  clang \\\n  ld.lld \\\n  llvm-ar \\\n  llvm-nm \\\
+        \n  llvm-objcopy \\\n  llvm-objdump \\\n  llvm-strip \\\n  llvm-readelf\n do\n  if [ ! -x \"${LLVM_BIN}/${tool}\"\
+        \ ]; then\n  echo \"ERROR: Missing or non-executable: ${LLVM_BIN}/${tool}\"\nexit 1\nfi\n\necho \"OK: ${tool}\"\
+        \ndone\n\nexport PATH=\"${LLVM_BIN}:${PATH}\"\nhash -r\n\necho \"=== LLVM tools visible to build ===\"\n\
+        \ncommand -v clang\ncommand -v ld.lld\ncommand -v llvm-ar\ncommand -v llvm-nm\ncommand -v llvm-objcopy\n\
+        command -v llvm-objdump\ncommand -v llvm-strip\ncommand -v llvm-readelf\n\necho\nllvm-objdump --version\n\
+        \ntest -f \"${OUT_DIR}/.config\"\ntest -d \"arch/arm64/boot\"\n\n\n\n\n\n echo\necho \"=== Kernel version\
+        \\ suffix sources ===\"\n\necho \"CONFIG_LOCALVERSION:\"\n grep -E '^CONFIG_LOCALVERSION=' \"${OUT_DIR}/.config\"\
+        \ || true\n\n echo \"CONFIG_LOCALVERSION_AUTO:\"\n grep -E '^CONFIG_LOCALVERSION_AUTO=' \"${OUT_DIR}/.config\"\
+        \ || \\\n grep -E '^# CONFIG_LOCALVERSION_AUTO is not set$' \"${OUT_DIR}/.config\" || true\n\necho\n echo\
+        \\ \"Repository status:\"\n git status --short --branch\n\necho\n echo \"Repository HEAD:\"\n git rev-parse\
+        \ --short=12 HEAD\n\necho\n echo \"localversion files:\"\n find . -maxdepth 2 \\\n -type f \\\n -name 'localversion*'\
+        \ \\\n -print \\\n -exec cat {} \\; || true\n\necho\n\n  \n\n\n\necho\necho \"=== Set stock-compatible\
+        \\ kernel release ===\"\n\n   CONFIG=\"${OUT_DIR}/.config\"\n\n    scripts/config \\\n  --file \"${CONFIG}\"\
+        \ \\\n  --disable LOCALVERSION_AUTO \\\n  --set-str LOCALVERSION \"-perf\"\n\n  : > .scmversion\n  test\
+        \ -f .scmversion\n\n  echo \"CONFIG_LOCALVERSION:\"\n  grep '^CONFIG_LOCALVERSION=' \"${CONFIG}\"\n\n  echo\
+        \ \"CONFIG_LOCALVERSION_AUTO:\"\n  grep '^# CONFIG_LOCALVERSION_AUTO is not set$' \"${CONFIG}\"\n\n  echo\
+        \ \"=== Verify kernel release with explicit LOCALVERSION ===\"\n\n  RELEASE=\"$(make -s \\\n  O=\"${OUT_DIR}\"\
+        \ \\\n ARCH=arm64 \\\n  LLVM=1 \\\n  LLVM_IAS=1 \\\n CROSS_COMPILE=\"${CROSS_COMPILE}\" \\\n LOCALVERSION=\"\
+        -g39bcecd5c63d\" \\\n kernelrelease)\"\n\n echo \"KERNEL_RELEASE=${RELEASE}\"\n\n test \"${RELEASE}\" =\
+        \ \"4.19.325-cip135-st19-perf-g39bcecd5c63d\"\n\n echo \"Stock-compatible kernel release confirmed.\"\n\n\
+        \necho\necho \"=== Building kernel ABI prerequisites (vmlinux; no boot Image) ===\"\n\n     make -j2 \\\n\
+        \n        \\     O=\"${OUT_DIR}\" \\\n     ARCH=arm64 \\\n     LLVM=1 \\\n     LLVM_IAS=1 \\\n     CROSS_COMPILE=\"\
+        ${CROSS_COMPILE}\" \\\n     KBUILD_SYMTYPES=1 \\\n     LOCALVERSION=\"-g39bcecd5c63d\" \\\n     vmlinux\n\
+        \n echo\necho \"=== Kernel compilation completed ===\"\n\n    ACTUAL_RELEASE=\"$(make -s \\\n    O=\"\
+        ${OUT_DIR}\" \\\n    ARCH=arm64 \\\n    LLVM=1 \\\n   LLVM_IAS=1 \\\n   CROSS_COMPILE=\"${CROSS_COMPILE}\"\
+        \ \\\n   LOCALVERSION=\"-g39bcecd5c63d\" \\\n   kernelrelease)\"\n\n echo \"ACTUAL_KERNEL_RELEASE=${ACTUAL_RELEASE}\"\
+        \n\n test \"${ACTUAL_RELEASE}\" = \"4.19.325-cip135-st19-perf-g39bcecd5c63d\"\n\n echo \"Actual built kernel\
+        \ release is correct.\"\n\n test -s \"${OUT_DIR}/vmlinux\"\ntest -s \"${OUT_DIR}/Module.symvers\"\n\necho\
+        \ \"vmlinux and Module.symvers created for ABI-aware module build.\"\nls -lh \"${OUT_DIR}/vmlinux\" \"${OUT_DIR}/Module.symvers\"\
+        \n\n\n     echo\n    echo \"=== Building kernel modules ===\"\n\n     make -j2 \\\n     O=\"${OUT_DIR}\"\
+        \ \\\n     ARCH=arm64 \\\n     LLVM=1 \\\n     LLVM_IAS=1 \\\n     CROSS_COMPILE=\"${CROSS_COMPILE}\" \\\n\
+        \n     KBUILD_SYMTYPES=1 \\\n     LOCALVERSION=\"-g39bcecd5c63d\" \\\n     modules\n\n   echo \"Kernel modules\
+        \ built successfully.\"\n\n   \n"
+    - name: Verify final injection source after build
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        NH="nethunter-reference/drivers/staging/qcacld-3.0"
+        KERNEL="kernel/drivers/staging/qcacld-3.0"
+
+        echo "=========================================="
+        echo " FINAL INJECTION SOURCE VERIFICATION"
+
+                echo "=========================================="
+
+        echo
+        echo "=== ACTUAL FILES ==="
+        test -f "${KERNEL}/core/hdd/src/wlan_hdd_frame_inject.c"
+        test -f "${KERNEL}/core/hdd/src/wlan_hdd_frame_validate.c"
+        test -f "${KERNEL}/core/hdd/src/wlan_hdd_inject_security.c"
+        test -f "${KERNEL}/core/hdd/src/wlan_hdd_frame_inject_debug.c"
+        test -f "${KERNEL}/core/wma/src/wma_frame_inject.c"
+
+        echo "All required injection source files exist."
+
+        echo
+        echo "=== REFERENCE FILES ==="
+        test -f "${NH}/core/hdd/src/wlan_hdd_frame_inject.c"
+        test -f "${NH}/core/hdd/src/wlan_hdd_frame_validate.c"
+        test -f "${NH}/core/hdd/src/wlan_hdd_inject_security.c"
+        test -f "${NH}/core/hdd/src/wlan_hdd_frame_inject_debug.c"
+        test -f "${NH}/core/wma/src/wma_frame_inject.c"
+
+        echo "All reference files exist."
+
+        echo
+        echo "=== FRAME INJECTION DEBUG FUNCTION ==="
+        grep -n -A50 -B5 \
+          'hdd_injection_create_debugfs_entries' \
+          "${KERNEL}/core/hdd/src/wlan_hdd_frame_inject_debug.c"
+
+        echo
+        echo "=== SYSFS INITIALIZER ==="
+        grep -n -A60 -B5 \
+          'hdd_injection_init_debug_interfaces' \
+          "${KERNEL}/core/hdd/src/wlan_hdd_frame_inject_debug.c"
+
+        echo
+        echo "=== FEATURE DEFINITIONS ==="
+        grep -nE \
+          'FEATURE_FRAME_INJECTION_SUPPORT|FEATURE_MONITOR_MODE_SUPPORT' \
+          "${KERNEL}/Kbuild" || true
+
+        echo
+        echo "=== FINAL SOURCE CHECK COMPLETE ==="
+    - name: Compare final injection source with reference
+      shell: bash
+      run: "set -euo pipefail\n\nNH=\"nethunter-reference/drivers/staging/qcacld-3.0\"\nKERNEL=\"kernel/drivers/staging/qcacld-3.0\"\n\necho\necho \"==========================================\"\necho \" QCACLD3 FINAL SOURCE COMPARISON\"\necho \"==========================================\"\n\nnormalize_wma() {\n  awk '\n    BEGIN {\n      skip = 0\n      depth = 0\n    }\n\n    skip == 0 &&\n    $0 ~ /^[[:space:]]*(QDF_STATUS|void|uint32_t|bool)[[:space:]]+wma_(init_injection_queue|deinit_injection_queue|injection_pre_stop_cleanup|queue_injection_frame|get_injection_queue_stats)[[:space:]]*\\(/ {\n      skip = 1\n      depth = 0\n\n      line = $0\n\n      opens = gsub(/\\{/, \"{\", line)\n      closes = gsub(/\\}/, \"}\", line)\n\n      depth += opens\n      depth -= closes\n\n      if (depth <= 0 && opens > 0)\n        skip = 0\n\n      next\n    }\n\n    skip == 1 {\n      line = $0\n\n      opens = gsub(/\\{/, \"{\", line)\n      closes = gsub(/\\}/, \"}\", line)\n\n      depth += opens\n      depth -= closes\n\n      if (depth <= 0 && opens > 0)\n        skip = 0\n\n      next\n    }\n\n    {\n      print\n    }\n  ' \"$1\"\n}\n\ncompare_normalized() {\n  local reference=\"$1\"\n  local final=\"$2\"\n  local name=\"$3\"\n\n  echo\n  echo \"=== ${name} ===\"\n\n  if diff -u \\\n    <(normalize_wma \"${reference}\") \\\n    <(normalize_wma \"${final}\"); then\n\n    echo \"PASS: ${name}\"\n  else\n    echo\n    echo \"ERROR: ${name} differs from reference.\"\n    return 1\n  fi\n}\n\ncompare_normalized \\\n  \"${NH}/core/hdd/src/wlan_hdd_frame_inject_debug.c\" \\\n  \"${KERNEL}/core/hdd/src/wlan_hdd_frame_inject_debug.c\" \\\n  \"wlan_hdd_frame_inject_debug.c\"\n\ncompare_normalized \\\n  \"${NH}/core/hdd/src/wlan_hdd_frame_inject.c\" \\\n  \"${KERNEL}/core/hdd/src/wlan_hdd_frame_inject.c\" \\\n  \"wlan_hdd_frame_inject.c\"\n\ncompare_normalized \\\n  \"${NH}/core/hdd/src/wlan_hdd_frame_validate.c\" \\\n  \"${KERNEL}/core/hdd/src/wlan_hdd_frame_validate.c\" \\\n  \"wlan_hdd_frame_validate.c\"\n\ncompare_normalized \\\n  \"${NH}/core/wma/src/wma_frame_inject.c\" \\\n  \"${KERNEL}/core/wma/src/wma_frame_inject.c\" \\\n  \"wma_frame_inject.c\"\n\necho\necho \"==========================================\"\necho \" SOURCE COMPARISON PASSED\"\necho \"==========================================\"\n\n\n\n\n \n"
+    - name: Verify final QCACLD3 injection Kbuild
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        KBUILD="kernel/drivers/staging/qcacld-3.0/Kbuild"
+
+        echo "=========================================="
+        echo " FINAL QCACLD3 KBUILD VERIFICATION"
+        echo "=========================================="
+
+        test -f "${KBUILD}"
+
+        echo
+        echo "=== FEATURE DEFINITIONS ==="
+        grep -nE \
+          'CONFIG_FEATURE_FRAME_INJECTION_SUPPORT|CONFIG_FEATURE_MONITOR_MODE_SUPPORT|FEATURE_FRAME_INJECTION_SUPPORT|FEATURE_MONITOR_MODE_SUPPORT' \
+          "${KBUILD}" || true
+
+        echo
+        echo "=== INJECTION OBJECTS ==="
+        grep -nE \
+          'wlan_hdd_frame_inject\.o|wlan_hdd_frame_validate\.o|wlan_hdd_inject_security\.o|wlan_hdd_frame_inject_debug\.o|wma_frame_inject\.o' \
+          "${KBUILD}"
+
+        echo
+        echo "=== FINAL KBUILD CHECK PASSED ==="
+    - name: Verify module ABI configuration
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        CONFIG="${OUT_DIR}/.config"
+
+        echo "=== CONFIG_MODVERSIONS ==="
+
+        grep -Fxq \
+          "CONFIG_MODVERSIONS=y" \
+          "${CONFIG}"
+
+        grep -Fxq \
+          "CONFIG_MODVERSIONS=y" \
+          "${GITHUB_WORKSPACE}/cebu-stock.config"
+
+        echo "CONFIG_MODVERSIONS=y preserved in stock and final configs."
+
+        echo
+        echo "=== Module version data ==="
+
+        QCA_MODULE="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
+
+        test -s "${QCA_MODULE}"
+
+        echo "Checking QCACLD3 module for __versions section..."
+
+        if ! "${LLVM_BIN}/llvm-readelf" -S "${QCA_MODULE}" |
+          grep -q '__versions'; then
+          echo "ERROR: QCACLD3 wlan.ko has no __versions section."
+          exit 1
+        fi
+
+        echo "OK: QCACLD3 wlan.ko contains __versions."
+
+        echo
+        echo "Checking Module.symvers..."
+
+        MODULE_SYMVERS="${OUT_DIR}/Module.symvers"
+
+        test -s "${MODULE_SYMVERS}"
+
+        echo "OK: Module.symvers exists and is non-empty."
+
+        echo
+        echo "Module ABI configuration audit passed."
         
+ 
+        - name: Verify stock ABI CRCs against custom kernel
+          working-directory: kernel
+          shell: bash
+          run:"set -euo pipefail\n\necho \"============================================================\"\necho \"DIRECT STOCK -> CUSTOM QCACLD3 ABI CRC CHECK\"\necho \"============================================================\"\n\nCONFIG=\"${OUT_DIR}/.config\"\nSYMVERS=\"${OUT_DIR}/Module.symvers\"\nCUSTOM_WLAN=\"${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko\"\n\nSTOCK_WLAN=\"${GITHUB_WORKSPACE}/stock-qca_cld3_wlan.ko\"\nSTOCK_VERSIONS=\"${OUT_DIR}/stock-versions.bin\"\nCUSTOM_VERSIONS=\"${OUT_DIR}/custom-versions.bin\"\nREPORT=\"${OUT_DIR}/qca-crc-report.txt\"\n\necho\necho \"=== Required files ===\"\n\ntest -s \"${CONFIG}\" || {\n  echo \"ERROR:final .config is missing.\"\n  exit 1\n}\n\ntest -s \"${SYMVERS}\" || {\n  echo \"ERROR:Module.symvers is missing.\"\n  exit 1\n}\n\ntest -s \"${CUSTOM_WLAN}\" || {\n  echo \"ERROR:custom wlan.ko is missing.\"\n  exit 1\n}\n\ntest -s \"${STOCK_WLAN}\" || {\n  echo\n  echo \"ERROR:stock-qca_cld3_wlan.ko is missing.\"\n  echo\n  echo \"Place the ACTUAL stock module at:\"\n  echo \"${GITHUB_WORKSPACE}/stock-qca_cld3_wlan.ko\"\n  echo\n  echo \"Source:\"\n  echo \"/vendor/lib/modules/qca_cld3_wlan.ko\"\n  exit 1\n}\n\necho \"PASS:all required files exist.\"\n\necho\necho \"=== CONFIG_MODVERSIONS ===\"\n\ngrep -Fxq \\\n  \"CONFIG_MODVERSIONS=y\" \\\n  \"${CONFIG}\"\n\necho \"PASS:CONFIG_MODVERSIONS=y\"\necho\necho \"=== Stock module ===\"\n\necho \"Stock module:\"\nls -lh \"${STOCK_WLAN}\"\n\necho\necho \"Custom module:\"\nls -lh \"${CUSTOM_WLAN}\"\n\necho\necho \"=== Verify stock module ELF ===\"\n\n\"${LLVM_BIN}/llvm-readelf\" -h \"${STOCK_WLAN}\" |\n  grep -E 'Class:|Data:|Machine:|Type:'\n\necho\necho \"=== Verify custom module ELF ===\"\n\n\"${LLVM_BIN}/llvm-readelf\" -h \"${CUSTOM_WLAN}\" |\n  grep -E 'Class:|Data:|Machine:|Type:'\n\necho\necho \"=== Verify stock __versions section ===\"\n\nif ! \"${LLVM_BIN}/llvm-readelf\" -S -W \"${STOCK_WLAN}\" |\n  grep -q '[[:space:]]__versions[[:space:]]'; then\n  echo \"ERROR:stock qca_cld3_wlan.ko has no __versions section.\"\n  exit 1\nfi\n\necho \"PASS:stock module contains __versions.\"\necho\necho \"=== Verify custom __versions section ===\"\n\nif ! \"${LLVM_BIN}/llvm-readelf\" -S -W \"${CUSTOM_WLAN}\" |\n  grep -q '[[:space:]]__versions[[:space:]]'; then\n  echo \"ERROR:custom wlan.ko has no __versions section.\"\n  exit 1\nfi\n\necho \"PASS:custom module contains __versions.\"\n\necho\necho \"=== Extract stock __versions ===\"\n\nrm -f \"${STOCK_VERSIONS}\"\n\n\"${LLVM_BIN}/llvm-objcopy\" \\\n  --dump-section \"__versions=${STOCK_VERSIONS}\" \\\n  \"${STOCK_WLAN}\"\n\ntest -s \"${STOCK_VERSIONS}\"\n\necho \"Stock __versions:\"\nstat -c '%s bytes' \"${STOCK_VERSIONS}\"\n\necho\necho \"=== Extract custom __versions ===\"\n\nrm -f \"${CUSTOM_VERSIONS}\"\n\n\"${LLVM_BIN}/llvm-objcopy\" \\\n  --dump-section \"__versions=${CUSTOM_VERSIONS}\" \\\n  \"${CUSTOM_WLAN}\"\n\ntest -s \"${CUSTOM_VERSIONS}\"\n\necho \"Custom __versions:\"\nstat -c '%s bytes' \"${CUSTOM_VERSIONS}\"\n\necho\necho \"=== Direct stock/custom CRC comparison ===\"\n\nSTOCK_VERSIONS=\"${STOCK_VERSIONS}\" \\\nCUSTOM_VERSIONS=\"${CUSTOM_VERSIONS}\" \\\nSYMVERS=\"${SYMVERS}\" \\\nREPORT=\"${REPORT}\" \\\npython3 - <<'PY'\nimport os\nimport struct\nimport sys\n\nstock_path = os.environ[\"STOCK_VERSIONS\"]\ncustom_path = os.environ[\"CUSTOM_VERSIONS\"]\nsymvers_path = os.environ[\"SYMVERS\"]\nreport_path = os.environ[\"REPORT\"]\n\nREQUIRED = {\n    \"module_layout\",\n    \"cfg80211_unlink_bss\",\n    \"cfg80211_get_bss\",\n    \"cfg80211_inform_bss_frame_data\",\n    \"cfg80211_sched_scan_results\",\n}\n\nRECORD_SIZE = 64\nNAME_OFFSET = 8\nNAME_SIZE = 56\n\ndef parse_versions(path):\n    with open(path, \"rb\") as f:\n        data = f.read()\n\n    if not data:\n        raise RuntimeError(\n            f\"{path}: empty __versions section\"\n        )\n\n    if len(data) % RECORD_SIZE != 0:\n        raise RuntimeError(\n            f\"{path}: {len(data)} bytes is not \"\n            f\"divisible by {RECORD_SIZE}\"\n        )\n\n    result = {}\n\n    for offset in range(\n        0,\n        len(data),\n        RECORD_SIZE\n    ):\n        crc = struct.unpack_from(\n            \"<Q\",\n            data,\n            offset\n        )[0] & 0xffffffff\n\n        raw_name = data[\n            offset + NAME_OFFSET:\n            offset + NAME_OFFSET + NAME_SIZE\n        ]\n\n        name = raw_name.split(\n            b\"\\0\",\n            1\n        )[0].decode(\n            \"ascii\",\n            errors=\"strict\"\n        )\n\n        if name:\n            result[name] = crc\n\n    return result, len(data)\n\ndef parse_symvers(path):\n    result = {}\n\n    with open(\n        path,\n        \"r\",\n        encoding=\"utf-8\",\n        errors=\"replace\"\n    ) as f:\n        for line in f:\n            fields = line.rstrip(\"\\n\").split()\n\n            if len(fields) < 2:\n                continue\n\n            try:\n                crc = int(\n                    fields[0],\n                    16\n                ) & 0xffffffff\n            except ValueError:\n                continue\n\n            result[fields[1]] = crc\n\n    return result\n\nstock, stock_size = parse_versions(\n    stock_path\n)\n\ncustom, custom_size = parse_versions(\n    custom_path\n)\n\nsymvers = parse_symvers(\n    symvers_path\n)\n\nprint()\nprint(\"=\" * 78)\nprint(\"QCACLD3 DIRECT STOCK VS CUSTOM ABI\")\nprint(\"=\" * 78)\n\nprint(\n    f\"Stock __versions : {stock_size} bytes\"\n)\n\nprint(\n    f\"Custom __versions: {custom_size} bytes\"\n)\n\nprint(\n    f\"Stock symbols    : {len(stock)}\"\n)\n\nprint(\n    f\"Custom symbols   : {len(custom)}\"\n)\n\nprint(\n    f\"Module.symvers   : {len(symvers)}\"\n)\n\nfailed = False\n\nprint()\nprint(\"-\" * 78)\nprint(\"REQUIRED SYMBOLS\")\nprint(\"-\" * 78)\n\nreport = []\n\nfor symbol in sorted(REQUIRED):\n\n    s = stock.get(symbol)\n    c = custom.get(symbol)\n    v = symvers.get(symbol)\n\n    if s is None:\n        print(\n            f\"{symbol:42} \"\n            \"STOCK MISSING\"\n        )\n        failed = True\n        continue\n\n    if c is None:\n        print(\n            f\"{symbol:42} \"\n            \"CUSTOM MISSING\"\n        )\n        failed = True\n        continue\n\n    s_text = f\"0x{s:08x}\"\n    c_text = f\"0x{c:08x}\"\n\n    v_text = (\n        f\"0x{v:08x}\"\n        if v is not None\n        else \"MISSING\"\n    )\n\n    print(\n        f\"{symbol:42} \"\n        f\"stock={s_text} \"\n        f\"custom={c_text} \"\n        f\"symvers={v_text}\"\n    )\n\n    if s != c:\n        print(\n            \"  ERROR: STOCK != CUSTOM\"\n        )\n        failed = True\n\n    if v is None:\n        print(\n            \"  ERROR: missing from Module.symvers\"\n        )\n        failed = True\n\n    elif c != v:\n        print(\n            \"  ERROR: CUSTOM != Module.symvers\"\n        )\n        failed = True\n\n    if s == c and v == c:\n        print(\n            \"  PASS: all three match\"\n        )\n\n    report.append(\n        (\n            symbol,\n            s,\n            c,\n            v\n        )\n    )\n\nprint()\nprint(\"-\" * 78)\nprint(\"FULL COMMON-SYMBOL COMPARISON\")\nprint(\"-\" * 78)\n\ncommon = (\n    set(stock)\n    & set(custom)\n)\n```
+                   
+           common_matches = 0
+           common_mismatches = 0
+
+           for symbol in sorted(common):
+
+            s = stock[symbol]
+            c = custom[symbol]
+
+            if s == c:
+            common_matches += 1   
+           else:
+           common_mismatches += 1
+
+        print(
+            f"CRC MISMATCH: "
+            f"{symbol}: "
+            f"stock=0x{s:08x} "
+            f"custom=0x{c:08x}"
+        )
+
+        print()
+        print(
+        f"Common symbols    : {len(common)}"
+        )
+
+        print(
+        f"Common matches    : {common_matches}"
+        )
+
+        print(
+        f"Common mismatches : {common_mismatches}"
+        )
+
+        with open(
+        report_path,
+         "w",
+        encoding="utf-8"
+        ) as f:
+
+         f.write(
+        "QCACLD3 DIRECT STOCK VS CUSTOM ABI REPORT\n"
+        )
+
+        f.write(
+        "=" * 78 + "\n"
+        )
+
+        f.write(
+        f"Stock __versions: {stock_size}\n"
+        )
+
+        f.write(
+        f"Custom __versions: {custom_size}\n"
+        )
+
+        f.write(
+        f"Stock symbols: {len(stock)}\n"
+        )
+
+        f.write(
+        f"Custom symbols: {len(custom)}\n"
+        )
+
+        f.write(
+        f"Common symbols: {len(common)}\n"
+        )
+
+        f.write(
+        f"Common matches: {common_matches}\n"
+        )
+
+        f.write(
+        f"Common mismatches: {common_mismatches}\n"
+        )
+
+        f.write("\nREQUIRED SYMBOLS\n")
+        f.write("-" * 78 + "\n")
+
+         for symbol, s, c, v in report:
+
+        f.write(
+            f"{symbol}: "
+            f"stock=0x{s:08x} "
+            f"custom=0x{c:08x} "
+        )
+
+        if v is None:
+            f.write(
+                "symvers=MISSING\n"
+            )
+        else:
+            f.write(
+                f"symvers=0x{v:08x}\n"
+            )
+
+        f.write(
+        "\nALL COMMON MISMATCHES\n"
+        )
+
+         f.write(
+        "-" * 78 + "\n"
+        )
+
+        for symbol in sorted(common):
+
+        if stock[symbol] != custom[symbol]:
+
+               f.write(
+                f"{symbol}: "
+                f"stock=0x{stock[symbol]:08x} "
+                f"custom=0x{custom[symbol]:08x}\n"
+            )
+
+          print()
+
+        if failed or common_mismatches:
+        print(
+        "FAIL: STOCK AND CUSTOM QCACLD3 "
+        "ABI DO NOT MATCH."
+         )
+        print(
+        "The build is intentionally stopped."
+        )
+        sys.exit(1)
+
+        print(
+        "PASS: STOCK AND CUSTOM QCACLD3 "
+        "ABI MATCH."
+        )
+        PY
+
+        test -s "${REPORT}"
+
+        echo
+        echo "============================================================"
+        echo "QCACLD3 DIRECT ABI CHECK PASSED"
+        echo "============================================================"
+
+
+      
+    - name: Locate injection module and tools
+      shell: bash
+      run: "echo \"=== LOCATE WLAN MODULE ===\"\nfind \"${OUT_DIR}\" -name \"wlan.ko\" -type f -print 2>/dev/null \
+        || true\n\necho\necho \"=== LLVM TOOLS ===\"\ncommand -v llvm-readelf || true\ncommand -v llvm-objdump \
+        || true\nls -l \"${LLVM_DIR}/bin/llvm-readelf\" 2>/dev/null || true\nls -l \"${LLVM_DIR}/bin/llvm-objdump\"\
+         2>/dev/null || true\n\necho\necho \"=== INJECTION SYMBOLS ===\"\nMOD=\"$(find \"${OUT_DIR}\" -name \"\
+        wlan.ko\" -type f -print -quit 2>/dev/null || true)\"\n\nif [ -n \"$MOD\" ]; then\n  echo \"Using: $MOD\"\
+        \n  \"${LLVM_DIR}/bin/llvm-readelf\" -Ws \"$MOD\" 2>/dev/null || true\n    grep -E 'hdd_injection_create_debugfs_entries|hdd_injection_init_debug_interfaces|hdd_init_frame_injection'\
+         || true\nelse\n  echo \"wlan.ko not found\"\nfi\n\n\n\n  \n"
+    - name: Package Wi-Fi module only
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        MODULE="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
+        STOCK_MODULE="${GITHUB_WORKSPACE}/stock-qca_cld3_wlan.ko"
+        REPORT="${OUT_DIR}/qca-crc-report.txt"
+        SYMVERS="${OUT_DIR}/Module.symvers"
+        CONFIG="${OUT_DIR}/.config"
+        LLVM_READelf="${LLVM_DIR}/bin/llvm-readelf"
+
+        echo "=== Wi-Fi module-only package ==="
+
+        test -s "${MODULE}"
+        test -s "${STOCK_MODULE}"
+        test -s "${REPORT}"
+        test -s "${SYMVERS}"
+        test -s "${CONFIG}"
+
+        grep -Fxq 'CONFIG_MODVERSIONS=y' "${CONFIG}"
+        "${LLVM_READelf}" -S -W "${MODULE}" | grep -q '[[:space:]]__versions[[:space:]]'
+
+        EXPECTED_RELEASE="4.19.325-cip135-st19-perf-g39bcecd5c63d"
+        VERMAGIC="$(modinfo -F vermagic "${MODULE}")"
+        echo "Module vermagic: ${VERMAGIC}"
+        case "${VERMAGIC}" in
+          "${EXPECTED_RELEASE} "*) ;;
+          *)
+            echo "ERROR: module vermagic does not match the phone's kernel release."
+            exit 1
+            ;;
+        esac
+
+        OUT="${GITHUB_WORKSPACE}/artifacts/wifi-module"
+        rm -rf "${OUT}"
+        mkdir -p "${OUT}"
+
+        cp "${MODULE}" "${OUT}/qca_cld3_wlan.ko"
+        cp "${REPORT}" "${OUT}/qca-crc-report.txt"
+        cp "${SYMVERS}" "${OUT}/Module.symvers"
+        cp "${CONFIG}" "${OUT}/kernel.config"
+        cp "${GITHUB_WORKSPACE}/cebu-stock.config" "${OUT}/cebu-stock.config"
+
+        {
+          echo "Artifact: cebu-nethunter-wlan-module"
+          echo "Kernel repository: ${KERNEL_REPO}"
+          echo "Kernel branch: ${KERNEL_BRANCH}"
+          echo "Kernel commit: $(git -C kernel rev-parse HEAD)"
+          echo "NetHunter repository: ${NETHUNTER_REPO}"
+          echo "NetHunter branch: ${NETHUNTER_BRANCH}"
+          echo "NetHunter commit: $(git -C nethunter-reference rev-parse HEAD)"
+          echo "Expected kernel release: ${EXPECTED_RELEASE}"
+          echo "Module vermagic: ${VERMAGIC}"
+          echo "CONFIG_MODVERSIONS=y"
+          echo "Patch monitor VDEV completion diagnostics: NOT applied"
+          echo "Module SHA256: $(sha256sum "${OUT}/qca_cld3_wlan.ko" | awk '{print $1}')"
+        } > "${OUT}/MANIFEST.txt"
+
+        (
+          cd "${OUT}"
+          sha256sum qca_cld3_wlan.ko qca-crc-report.txt Module.symvers kernel.config cebu-stock.config MANIFEST.txt > SHA256SUMS
+          zip -q -9 "${GITHUB_WORKSPACE}/artifacts/cebu-nethunter-wlan-module.zip" \
+            qca_cld3_wlan.ko qca-crc-report.txt Module.symvers kernel.config cebu-stock.config MANIFEST.txt SHA256SUMS
+        )
+
+        echo
+        echo "=== Module artifact ==="
+        ls -lh "${OUT}/qca_cld3_wlan.ko" "${GITHUB_WORKSPACE}/artifacts/cebu-nethunter-wlan-module.zip"
+        sha256sum "${OUT}/qca_cld3_wlan.ko" "${GITHUB_WORKSPACE}/artifacts/cebu-nethunter-wlan-module.zip"
+    - name: Upload Wi-Fi module artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: cebu-nethunter-wlan-module
+        path: |-
+          artifacts/cebu-nethunter-wlan-module.zip
+          artifacts/wifi-module/
+        if-no-files-found: error
+        retention-days: 30
+        
+       
+         
+
+            
+        
+
+        
+
+        
+
+
+          
+
+          
+        
+        
+            
         
