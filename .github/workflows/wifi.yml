@@ -3901,51 +3901,94 @@ jobs:
 
         cat \
           "${GITHUB_WORKSPACE}/artifacts/source-audit/qcacld3-injection-manifest.txt"
+
+
+
+
+
+
+
     - name: Normalize configuration files
       shell: bash
       run: |
-        set -euxo pipefail
+        set -euo pipefail
 
         cd kernel
 
         STOCK="${GITHUB_WORKSPACE}/cebu-stock.config"
         FINAL="${OUT_DIR}/.config"
 
+        STOCK_OUT="${GITHUB_WORKSPACE}/artifacts/source-audit/stock-normalized.config"
+        FINAL_OUT="${GITHUB_WORKSPACE}/artifacts/source-audit/final-normalized.config"
+
         test -s "${STOCK}"
         test -s "${FINAL}"
 
-        # Keep only actual CONFIG entries and sort them by symbol.
-        #
-        # This makes the comparison independent of the ordering
-        # used by the original /proc/config.gz extraction.
+        mkdir -p \
+          "${GITHUB_WORKSPACE}/artifacts/source-audit"
 
-        grep \
-          '^(CONFIG_[A-Za-z0-9_]+=(.*)|# CONFIG_[A-Za-z0-9_]+ is not set)' \
-          "${STOCK}" |
-          sort \
-          > "${GITHUB_WORKSPACE}/artifacts/source-audit/stock-normalized.config"
+        echo "============================================================"
+        echo " NORMALIZE CONFIGURATION FILES"
+        echo "============================================================"
 
-        grep \
-          '^(CONFIG_[A-Za-z0-9_]+=(.*)|# CONFIG_[A-Za-z0-9_]+ is not set)' \
-          "${FINAL}" |
-          sort \
-          >
-          "${GITHUB_WORKSPACE}/artifacts/source-audit/final-normalized.config"
+        echo
+        echo "=== Normalize stock configuration ==="
 
-        test -s \
-          "${GITHUB_WORKSPACE}/artifacts/source-audit/stock-normalized.config"
+        awk '
+          /^CONFIG_[A-Za-z0-9_]+=/ {
+            print
+            next
+          }
 
-        test -s \
-          "${GITHUB_WORKSPACE}/artifacts/source-audit/final-normalized.config"
+          /^# CONFIG_[A-Za-z0-9_]+ is not set$/ {
+            print
+            next
+          }
+        ' "${STOCK}" |
+        sort -u > "${STOCK_OUT}"
 
+        echo
+        echo "=== Normalize final configuration ==="
+
+        awk '
+          /^CONFIG_[A-Za-z0-9_]+=/ {
+            print
+            next
+          }
+
+          /^# CONFIG_[A-Za-z0-9_]+ is not set$/ {
+            print
+            next
+          }
+        ' "${FINAL}" |
+        sort -u > "${FINAL_OUT}"
+
+        echo
+        echo "=== Verify normalized files ==="
+
+        test -s "${STOCK_OUT}"
+        test -s "${FINAL_OUT}"
+
+        echo
         echo "Stock configuration entries:"
-        wc -l \
-          "${GITHUB_WORKSPACE}/artifacts/source-audit/stock-normalized.config"
+        wc -l "${STOCK_OUT}"
 
         echo
         echo "Final configuration entries:"
-        wc -l \
-          "${GITHUB_WORKSPACE}/artifacts/source-audit/final-normalized.config"
+        wc -l "${FINAL_OUT}"
+
+        echo
+        echo "Stock normalized SHA256:"
+        sha256sum "${STOCK_OUT}"
+
+        echo
+        echo "Final normalized SHA256:"
+        sha256sum "${FINAL_OUT}"
+
+        echo
+        echo "============================================================"
+        echo " CONFIGURATION NORMALIZATION: PASSED"
+        echo "============================================================"
 
 
 
