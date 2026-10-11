@@ -2459,7 +2459,6 @@ jobs:
 
          echo
          echo "=== Duplicate injection helper fix passed ==="
-          
     - name: Integrate injection context into HDD
       working-directory: kernel
       shell: bash
