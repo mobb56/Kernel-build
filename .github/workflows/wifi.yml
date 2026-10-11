@@ -3635,76 +3635,33 @@ jobs:
         echo
         echo "=== Current WMA_INC definition ==="
 
-        grep -n -A8 \
+        grep -n -A12 \
           '^WMA_INC[[:space:]]*:=' \
-          "${KBUILD_FILE}" || true
+          "${KBUILD_FILE}" \
+          || true
 
         echo
-        echo "=== Ensure WMA_INC is applied to compiler flags ==="
+        echo "=== Ensure WMA_INC compiler flag exists ==="
 
-        if ! grep -Fq 'ccflags-y += $(WMA_INC)' "${KBUILD_FILE}"; then
-          python3 - "${KBUILD_FILE}" <<'PY'
-         from pathlib import Path
-         import sys
-
-        path = Path(sys.argv[1])
-        lines = path.read_text().splitlines()
-
-        target = 'ccflags-y += $(WMA_INC)'
-
-        # Do nothing if already present.
-        if any(line.strip() == target for line in lines):
-        print("PASS: ccflags-y += $(WMA_INC) already present.")
-        raise SystemExit(0)
-
-         start = None
-
-         # Locate the WMA_INC assignment.
-         for i, line in enumerate(lines):
-         if line.lstrip().startswith("WMA_INC") and ":=" in line:
-        start = i
-        break
-
-         if start is None:
-          raise SystemExit(
-        "ERROR: WMA_INC assignment was not found in Kbuild."
-         )
-
-          # Find the end of the possibly multi-line WMA_INC assignment.
-          end = start
-
-          while end + 1 < len(lines):
-          current = lines[end].rstrip()
-
-        if current.endswith("\\"):
-           end += 1
-        else:
-          break
-
-        # Insert the compiler flag immediately after WMA_INC.
-         lines.insert(end + 1, target)
-
-         path.write_text("\n".join(lines) + "\n")
-
-        print(
-          f"PASS: inserted '{target}' after WMA_INC "
-          f"at Kbuild line {end + 2}."
-         )
-         PY
-         
+        if grep -Fq 'ccflags-y += $(WMA_INC)' "${KBUILD_FILE}"; then
+          echo "PASS: WMA_INC compiler flag already exists."
         else
-          echo "PASS: ccflags-y += \$(WMA_INC) already present."
+          printf '\n# NetHunter WMA frame-injection include path\nccflags-y += $(WMA_INC)\n' >> "${KBUILD_FILE}"
+          echo "PASS: added WMA_INC to ccflags-y."
         fi
 
         echo
-        echo "=== Verify WMA include flags ==="
+        echo "=== Verify WMA include flag ==="
 
-        grep -n -A8 \
-          '^WMA_INC[[:space:]]*:=' \
+        grep -n \
+          'ccflags-y += $(WMA_INC)' \
           "${KBUILD_FILE}"
 
-        grep -Fq \
-          'ccflags-y += $(WMA_INC)' \
+        echo
+        echo "=== Verify WMA injection sources ==="
+
+        grep -n \
+          'wma_frame_inject.o' \
           "${KBUILD_FILE}"
 
         echo
