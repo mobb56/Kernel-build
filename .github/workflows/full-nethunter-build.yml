@@ -1479,6 +1479,46 @@ jobs:
 
              echo "No source modification was performed."
              echo "No kernel build was performed."
+
+
+
+
+      - name: Audit wma_handle_channel_switch_resp
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          QCACLD="drivers/staging/qcacld-3.0"
+
+          echo "========================================"
+          echo "WMA CHANNEL SWITCH RESPONSE HANDLER"
+          echo "========================================"
+
+          FILE="$(grep -RIl --include='*.c' \
+            'wma_handle_channel_switch_resp[[:space:]]*(' \
+            "$QCACLD" 2>/dev/null | head -1)"
+
+          if [ -z "$FILE" ]; then
+            echo "ERROR: handler implementation not found"
+            exit 1
+          fi
+
+          LINE="$(grep -n \
+            'wma_handle_channel_switch_resp[[:space:]]*(' \
+            "$FILE" | head -1 | cut -d: -f1)"
+
+          echo "Implementation: $FILE"
+          echo "Function line: $LINE"
+          echo
+          echo "=== FUNCTION BODY ==="
+          sed -n "${LINE},$((LINE + 180))p" "$FILE"
+
+          echo
+          echo "========================================"
+          echo "CHANNEL SWITCH HANDLER AUDIT COMPLETE"
+          echo "No source modification was performed."
+          echo "No kernel build was performed."
+          echo "========================================"
         
           
       # ============================================================
