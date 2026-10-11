@@ -6246,6 +6246,10 @@ jobs:
 
         echo
         echo "VDEV callback registration inspection complete."
+
+
+
+
     - name: Inspect monitor VDEV creation path
       working-directory: kernel
       shell: bash
@@ -6254,93 +6258,52 @@ jobs:
 
         QCACLD="drivers/staging/qcacld-3.0"
 
+        test -d "${QCACLD}"
+
         echo "=== MONITOR VDEV CREATION PATH ==="
 
         echo
         echo "=== Monitor VDEV creation symbols ==="
 
-        grep -Rni \
-          --include='*.c' \
-          --include='*.h' \
-          -E \
-          'monitor.*vdev.*create|create.*monitor.*vdev|monitor_mode_vdev|QDF_MONITOR_MODE' \
-          "${QCACLD}" \
-          2>/dev/null \
-          | head -400 \
-          || true
+        find "${QCACLD}" -type f \
+          \( -name '*.c' -o -name '*.h' \) \
+          -exec awk '
+            /monitor.*vdev.*create|create.*monitor.*vdev|monitor_mode_vdev|QDF_MONITOR_MODE/ {
+              print FILENAME ":" FNR ":" $0
+            }
+          ' {} + \
+          | head -400 || true
 
         echo
         echo "=== VDEV object creation APIs ==="
 
-        grep -Rni \
-          --include='*.c' \
-          --include='*.h' \
-          -E \
-          'wlan_objmgr_vdev_obj_create|wlan_objmgr_vdev_create|wlan_vdev.*create' \
-          "${QCACLD}" \
-          2>/dev/null \
-          | head -300 \
-          || true
+        find "${QCACLD}" -type f \
+          \( -name '*.c' -o -name '*.h' \) \
+          -exec awk '
+            /wlan_objmgr_vdev_obj_create|wlan_objmgr_vdev_create|wlan_vdev.*create/ {
+              print FILENAME ":" FNR ":" $0
+            }
+          ' {} + \
+          | head -300 || true
 
         echo
         echo "=== Monitor interface creation APIs ==="
 
-        grep -Rni \
-          --include='*.c' \
-          --include='*.h' \
-          -E \
-          'NL80211_IFTYPE_MONITOR|cfg80211.*monitor|change_virtual_intf|change_iface' \
-          "${QCACLD}" \
-          2>/dev/null \
-          | head -400 \
-          || true
+        find "${QCACLD}" -type f \
+          \( -name '*.c' -o -name '*.h' \) \
+          -exec awk '
+            /NL80211_IFTYPE_MONITOR|cfg80211.*monitor|change_virtual_intf|change_iface/ {
+              print FILENAME ":" FNR ":" $0
+            }
+          ' {} + \
+          | head -400 || true
 
         echo
         echo "Monitor VDEV creation-path inspection complete."
 
-                in_func && patched && in_missing {
-          print
-          next
-        }
 
-        {
-          print
-        }
 
-        END {
-          if (!patched) {
-            print "ERROR: Could not locate the expected !found block."
-            exit 1
-          }
-        }
-        ' "$PM" > "$PM.tmp"
-
-        mv "$PM.tmp" "$PM"
-
-        echo
-        echo "=== Verify monitor VDEV policy fix ==="
-
-        grep -n -A45 -B8 \
-          'Monitor VDEVs are intentionally not represented' \
-          "$PM"
-
-        echo
-        echo "=== Verify VDEV object API usage ==="
-
-        grep -n \
-          'wlan_objmgr_get_vdev_by_id_from_psoc' \
-          "$PM"
-
-        grep -n \
-          'wlan_vdev_mlme_get_opmode' \
-          "$PM"
-
-        grep -n \
-          'QDF_MONITOR_MODE' \
-          "$PM"
-
-        echo
-        echo "Monitor VDEV policy-manager lookup fix applied."
+        
     - name: Verify monitor VDEV policy-manager lookup
       working-directory: kernel
       shell: bash
