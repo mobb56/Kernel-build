@@ -1955,28 +1955,29 @@ jobs:
             fail=1
           fi
         }
+        
+            check_grep() {
+            local pattern="$1"
+            shift
+            local found=0
+            local file
 
-        check_grep() {
-          local pattern="$1"
-          shift
-          local found=0
-          local file
-
-                      if grep -Fq -- "$pattern" "$file" 2>/dev/null; then
-              echo "PASS: [$pattern] found in $file"
-              found=1
-              break
-            fi
-          done
-
-          if [ "$found" -eq 0 ]; then
-            echo "FAIL: [$pattern] not found in:"
             for file in "$@"; do
-              echo "      $file"
+              if grep -Fq -- "$pattern" "$file" 2>/dev/null; then
+                echo "PASS: [$pattern] found in $file"
+                found=1
+                break
+              fi
             done
-            fail=1
-          fi
-        }
+
+            if [ "$found" -eq 0 ]; then
+              echo "FAIL: [$pattern] not found in:"
+              for file in "$@"; do
+                echo "      $file"
+              done
+              fail=1
+            fi
+          }
 
         echo
         echo "=========================================="
