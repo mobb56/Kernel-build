@@ -6507,94 +6507,243 @@ jobs:
 
         echo
         echo "PCL lock-boundary inspection complete."
+
+
+        
     - name: Fix policy-manager PCL lock boundary
       working-directory: kernel
       shell: bash
       run: |
         set -euo pipefail
 
-        PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_action.c"
+        PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_pcl.c"
 
         test -f "$PM"
 
-        echo "=== POLICY-MANAGER PCL LOCK-BOUNDARY FIX ==="
+        echo "============================================================"
+        echo " FIX POLICY-MANAGER PCL LOCK BOUNDARY"
+        echo "============================================================"
+
+        cp "$PM" "$PM.before-pcl-lock-fix"
+
+        awk '
+        BEGIN {
+          found_acquire = 0
+          found_store = 0
+          store_done = 0
+          found_restore = 0
+          removed_release = 0
+          inserted_release = 0
+          inserted_acquire = 0
+          paren_depth = 0
+        }
+
+        {
+          line = $0
+        }
+
+        # --------------------------------------------------------
+        # Locate the SAP PCL mutex acquire.
+        # --------------------------------------------------------
+
+        !found_acquire &&
+        line ~ /qdf_mutex_acquire[[:space:]]*\(&pm_ctx->qdf_conc_list_lock\)[[:space:]]*;/ {
+          found_acquire = 1
+          print line
+          next
+        }
+
+        # --------------------------------------------------------
+        # Locate the SAP connection-table store/delete call.
+        # --------------------------------------------------------
+
+        found_acquire &&
+        !found_store &&
+        line ~ /policy_mgr_store_and_del_conn_info_by_vdev_id[[:space:]]*\(/ {
+
+          found_store = 1
+
+          # Count parentheses so multi-line calls are handled.
+          tmp = line
+          gsub(/[^()]/, "", tmp)
+
+          open_count = tmp
+          gsub(/[^()]/, "", open_count)
+
+          paren_depth = 0
+
+          n = split(tmp, chars, "")
+          for (i = 1; i <= n; i++) {
+            if (chars[i] == "(")
+              paren_depth++
+            else if (chars[i] == ")")
+              paren_depth--
+          }
+
+          print line
+
+          # One-line call.
+          if (paren_depth <= 0) {
+            print ""
+            print "qdf_mutex_release(&pm_ctx->qdf_conc_list_lock);"
+            inserted_release = 1
+            store_done = 1
+          }
+
+          next
+        }
+
+        # --------------------------------------------------------
+        # Finish a multi-line store/delete call.
+        # --------------------------------------------------------
+
+        found_store &&
+        !store_done {
+
+          tmp = line
+          n = split(tmp, chars, "")
+
+          for (i = 1; i <= n; i++) {
+            if (chars[i] == "(")
+              paren_depth++
+            else if (chars[i] == ")")
+              paren_depth--
+          }
+
+          print line
+
+          if (paren_depth <= 0) {
+            print ""
+            print "qdf_mutex_release(&pm_ctx->qdf_conc_list_lock);"
+            inserted_release = 1
+            store_done = 1
+          }
+
+          next
+        }
+
+        # --------------------------------------------------------
+        # Before restoring the deleted connection entry, reacquire
+        # the mutex.
+        # --------------------------------------------------------
+
+        store_done &&
+        !found_restore &&
+        line ~ /policy_mgr_restore_deleted_conn_info[[:space:]]*\(/ {
+
+          print "qdf_mutex_acquire(&pm_ctx->qdf_conc_list_lock);"
+          inserted_acquire = 1
+          found_restore = 1
+          print line
+          next
+        }
+
+        # --------------------------------------------------------
+        # Remove the OLD release which originally occurred after
+        # policy_mgr_restore_deleted_conn_info().
+        # --------------------------------------------------------
+
+        found_restore &&
+        !removed_release &&
+        line ~ /qdf_mutex_release[[:space:]]*\(&pm_ctx->qdf_conc_list_lock\)[[:space:]]*;/ {
+
+          removed_release = 1
+          next
+        }
+
+        # --------------------------------------------------------
+        # Normal source line.
+        # --------------------------------------------------------
+
+        {
+          print line
+        }
+
+        END {
+          if (!found_acquire) {
+            print "ERROR: SAP PCL mutex acquire was not found." > "/dev/stderr"
+            exit 1
+          }
+
+          if (!found_store) {
+            print "ERROR: policy_mgr_store_and_del_conn_info_by_vdev_id() was not found." > "/dev/stderr"
+            exit 1
+          }
+
+          if (!store_done) {
+            print "ERROR: Could not determine end of SAP store/delete call." > "/dev/stderr"
+            exit 1
+          }
+
+          if (!inserted_release) {
+            print "ERROR: New mutex release was not inserted." > "/dev/stderr"
+            exit 1
+          }
+
+          if (!found_restore) {
+            print "ERROR: policy_mgr_restore_deleted_conn_info() was not found." > "/dev/stderr"
+            exit 1
+          }
+
+          if (!inserted_acquire) {
+            print "ERROR: Mutex reacquire was not inserted before restore." > "/dev/stderr"
+            exit 1
+          }
+
+          if (!removed_release) {
+            print "ERROR: Original mutex release was not removed." > "/dev/stderr"
+            exit 1
+          }
+
+          print "PASS: SAP PCL lock boundary normalized." > "/dev/stderr"
+        }
+        ' "$PM" > "$PM.tmp"
+
+        mv "$PM.tmp" "$PM"
 
         echo
-        echo "=== Locate lock/unlock around PCL calculation ==="
+        echo "============================================================"
+        echo " VERIFY PCL LOCK ORDER"
+        echo "============================================================"
 
         grep -n \
-          -B35 \
-          -A70 \
-          -E \
-          'qdf_conc_list_lock|policy_mgr_get_pcl|policy_mgr_calculate_pcl' \
-          "$PM" \
-          | head -500 \
-          || true
+          -B5 \
+          -A30 \
+          'policy_mgr_store_and_del_conn_info_by_vdev_id' \
+          "$PM"
 
         echo
-        echo "=== Applying deterministic lock-boundary normalization ==="
+        echo "=== VERIFY LOCK OPERATIONS ==="
 
-        python3 - "$PM" <<'PY'
-        from pathlib import Path
-        import re
-        import sys
-
-        path = Path(sys.argv[1])
-        text = path.read_text()
-
-        # The PCL calculation must not run while the concurrency-list
-        # lock is held. Normalize the known policy-manager sequence:
-        #
-        #   lock
-        #   calculate PCL
-        #   unlock
-        #
-        # into:
-        #
-        #   unlock
-        #   calculate PCL
-        #   lock
-        #
-        # only when the exact sequence exists in the source.
-
-        patterns = [
-        re.compile(
-        r'(?P<unlock>'
-        r'qdf_mutex_unlock\(\s*&?qdf_conc_list_lock\s*\)\s*;\s*'
-        r')',
-        re.S
-        ),
-        ]
-
-        if "qdf_conc_list_lock" not in text:
-         raise SystemExit(
-        "ERROR: qdf_conc_list_lock was not found."
-         )
-
-        # This step is intentionally conservative.  It does not rewrite
-        # arbitrary lock operations; it only reports the relevant source
-        # context so the subsequent verification can confirm the intended
-        # ordering.
-
-        lines = text.splitlines()
-
-        for i, line in enumerate(lines):
-        if "qdf_conc_list_lock" in line:
-        start = max(0, i - 12)
-        end = min(len(lines), i + 35)
-
-        print()
-        print("=== LOCK CONTEXT ===")
-
-        for n in range(start, end):
-            print(f"{n + 1:6}: {lines[n]}")
-
-        print()
-        print("PCL lock-boundary source context collected.")
-        PY
+        grep -n \
+          -B3 \
+          -A3 \
+          'qdf_mutex_\(acquire\|release\)(&pm_ctx->qdf_conc_list_lock)' \
+          "$PM"
 
         echo
-        echo "=== PCL LOCK-BOUNDARY SOURCE REVIEW COMPLETE ==="
+        echo "=== VERIFY REQUIRED SYMBOLS ==="
+
+        grep -Fq \
+          'policy_mgr_store_and_del_conn_info_by_vdev_id' \
+          "$PM"
+
+        grep -Fq \
+          'policy_mgr_restore_deleted_conn_info' \
+          "$PM"
+
+        grep -Fq \
+          'qdf_mutex_release(&pm_ctx->qdf_conc_list_lock);' \
+          "$PM"
+
+        grep -Fq \
+          'qdf_mutex_acquire(&pm_ctx->qdf_conc_list_lock);' \
+          "$PM"
+
+        echo
+        echo "PASS: policy-manager PCL lock boundary fixed."
+
+        
     - name: Verify policy-manager source integrity
       working-directory: kernel
       shell: bash
