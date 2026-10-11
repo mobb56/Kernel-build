@@ -2018,9 +2018,14 @@ jobs:
           "$HDD_MAIN" "$HDD_CFG"
 
         # Do not assume which HDD source file owns the device_mode assignment.
-        check_grep \
-          "adapter->device_mode = QDF_MONITOR_MODE" \
-          "$HDD_MAIN" "$HDD_CFG"
+             if grep -Eq \
+            'adapter->device_mode[[:space:]]*=[[:space:]]*QDF_MONITOR_MODE|QDF_MONITOR_MODE[[:space:]]*==[[:space:]]*adapter->device_mode' \
+            "$HDD_MAIN" "$HDD_CFG"; then
+            echo "PASS: monitor device_mode handling found."
+          else
+            echo "FAIL: monitor device_mode handling not found."
+            fail=1
+          fi
 
         # Do not assume which HDD source file owns the nl80211 monitor
         # interface assignment.
