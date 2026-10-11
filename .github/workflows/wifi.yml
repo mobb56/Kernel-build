@@ -5632,6 +5632,10 @@ jobs:
         echo
         echo "=== SYSFS INITIALIZER CALLER INSPECTION COMPLETE ==="
         
+
+
+
+    
     - name: Restore native policy-manager VDEV callbacks
       working-directory: kernel
       shell: bash
@@ -5647,11 +5651,7 @@ jobs:
         echo " RESTORE NATIVE POLICY-MANAGER VDEV CALLBACKS"
         echo "============================================================"
 
-        echo
-        echo "=== EXTRACT EXACT PINNED-SOURCE VERSION ==="
-
         git show "HEAD:${PM}" > "$CLEAN"
-
         test -s "$CLEAN"
 
         echo "Pinned source:"
@@ -5687,64 +5687,153 @@ jobs:
           begin("status")
         }
 
-        echo
-        echo "=== 5. VDEV OBJECT MANAGER REGISTRATION ==="
+        active {
+          buffer = buffer $0 ORS
 
-        grep -RIn \
-          --include='*.c' \
-          --include='*.h' \
-          -E \
-          'wlan_objmgr_register_vdev_create_handler|wlan_objmgr_register_vdev_destroy_handler|wlan_objmgr_register_vdev_status_handler' \
-          "$QCACLD" \
-          2>/dev/null || true
+          if ($0 ~ /\{/) {
+            opened=1
+          }
 
-        echo
-        echo "=== 6. VDEV OBJECT MANAGER UNREGISTRATION ==="
+          if (opened) {
+            line=$0
+            opens=gsub(/\{/, "{", line)
+            closes=gsub(/\}/, "}", line)
 
-        grep -RIn \
-          --include='*.c' \
-          --include='*.h' \
-          -E \
-          'wlan_objmgr_unregister_vdev_create_handler|wlan_objmgr_unregister_vdev_destroy_handler|wlan_objmgr_unregister_vdev_status_handler' \
-          "$QCACLD" \
-          2>/dev/null || true
+            depth += opens
+            depth -= closes
 
-        echo
-        echo "=== 7. MONITOR-MODE POLICY-MANAGER REFERENCES ==="
+            if (depth == 0) {
+              if (target == "create")
+                print buffer > "'"${GITHUB_WORKSPACE}"'/vdev-create.clean"
 
-        grep -RIn \
-          --include='*.c' \
-          --include='*.h' \
-          -E \
-          'QDF_MONITOR_MODE|QDF_GLOBAL_MONITOR_MODE|MONITOR_MODE' \
-          "$QCACLD/components/cmn_services/policy_mgr" \
-          2>/dev/null || true
+              if (target == "destroy")
+                print buffer > "'"${GITHUB_WORKSPACE}"'/vdev-destroy.clean"
 
-        echo
-        echo "=== 8. VDEV CREATE/DESTROY STATUS CALLBACK CONTEXT ==="
+              if (target == "status")
+                print buffer > "'"${GITHUB_WORKSPACE}"'/vdev-status.clean"
 
-        PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_init_deinit.c"
+              close("'"${GITHUB_WORKSPACE}"'/vdev-create.clean")
+              close("'"${GITHUB_WORKSPACE}"'/vdev-destroy.clean")
+              close("'"${GITHUB_WORKSPACE}"'/vdev-status.clean")
 
-        test -f "$PM"
+              active=0
+              opened=0
+              depth=0
+              target=""
+              buffer=""
+            }
+          }
 
-        for symbol in \
-          policy_mgr_vdev_obj_create_cb \
-          policy_mgr_vdev_obj_destroy_cb \
-          policy_mgr_vdev_obj_status_cb
-        do
-          echo
-          echo "----- ${symbol} -----"
+          next
+        }
 
-          grep -n \
-            -A70 \
-            -B10 \
-            "${symbol}" \
-            "$PM" \
-            || true
-        done
+        ' "$CLEAN"
+
+        test -s "${GITHUB_WORKSPACE}/vdev-create.clean"
+        test -s "${GITHUB_WORKSPACE}/vdev-destroy.clean"
+        test -s "${GITHUB_WORKSPACE}/vdev-status.clean"
+
+        echo "PASS: clean create callback extracted."
+        echo "PASS: clean destroy callback extracted."
+        echo "PASS: clean status callback extracted."
 
         echo
-        echo "=== POLICY-MANAGER CONNECTION-LIST TRACE COMPLETE ==="
+        echo "=== RESTORE CALLBACKS ==="
+
+        python3 - "$PM" \
+          "${GITHUB_WORKSPACE}/vdev-create.clean" \
+          "${GITHUB_WORKSPACE}/vdev-destroy.clean" \
+          "${GITHUB_WORKSPACE}/vdev-status.clean" <<'PY'
+        from pathlib import Path
+        import re
+        import sys
+
+        pm = Path(sys.argv[1])
+        create = Path(sys.argv[2]).read_text()
+        destroy = Path(sys.argv[3]).read_text()
+        status = Path(sys.argv[4]).read_text()
+
+        text = pm.read_text()
+
+        callbacks = [
+         ("policy_mgr_vdev_obj_create_cb", create),
+         ("policy_mgr_vdev_obj_destroy_cb", destroy),
+         ("policy_mgr_vdev_obj_status_cb", status),
+        ]
+
+        def locate(text, name):
+         pattern = re.compile(
+        r'^[ \t]*static[^\n]*\b'
+        + re.escape(name)
+        + r'\s*\([^;]*\)\s*\{',
+        re.MULTILINE
+        )
+
+        match = pattern.search(text)
+
+         if not match:
+           raise SystemExit(
+            f"ERROR: callback not found: {name}"
+        )
+
+         start = match.start()
+         brace = text.find("{", match.start())
+
+        depth = 0
+        i = brace
+
+        while i < len(text):
+           if text[i] == "{":
+            depth += 1
+           elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return start, i + 1
+        i += 1
+
+           raise SystemExit(
+          f"ERROR: unterminated callback: {name}"
+         )
+
+        replacements = []
+
+         for name, replacement in callbacks:
+          start, end = locate(text, name)
+         replacements.append((start, end, replacement))
+           print(f"PASS: located {name}")
+
+          for start, end, replacement in sorted(
+           replacements,
+          reverse=True
+        ):
+           text = text[:start] + replacement + text[end:]
+
+         pm.write_text(text)
+
+        print()
+        print("Native policy-manager VDEV callbacks restored.")
+        PY
+
+        echo
+        echo "=== VERIFY RESTORATION ==="
+
+        grep -n \
+          'policy_mgr_vdev_obj_create_cb' \
+          "$PM"
+
+        grep -n \
+          'policy_mgr_vdev_obj_destroy_cb' \
+          "$PM"
+
+        grep -n \
+          'policy_mgr_vdev_obj_status_cb' \
+          "$PM"
+
+        echo
+        echo "Native policy-manager VDEV callback restoration PASSED."
+
+
+      
     - name: Inspect policy-manager monitor VDEV handling
       working-directory: kernel
       shell: bash
