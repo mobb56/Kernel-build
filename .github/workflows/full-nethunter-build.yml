@@ -1483,44 +1483,60 @@ jobs:
 
 
 
-      - name: Audit wma_handle_channel_switch_resp
+      - name: Audit csr_get_vdev_type_nss caller context
         working-directory: kernel
         shell: bash
         run: |
-          set -euo pipefail
-          QCACLD="drivers/staging/qcacld-3.0"
+           set -euo pipefail
 
-          echo "========================================"
-          echo "WMA CHANNEL SWITCH RESPONSE HANDLER"
-          echo "========================================"
+           QCACLD="drivers/staging/qcacld-3.0"
 
-          FILE="$(grep -RIl --include='*.c' \
-            'wma_handle_channel_switch_resp[[:space:]]*(' \
-            "$QCACLD" 2>/dev/null | head -1)"
+           echo "========================================"
+           echo "CSR NSS CALLER CONTEXT AUDIT"
+           echo "========================================"
 
-          if [ -z "$FILE" ]; then
-            echo "ERROR: handler implementation not found"
-            exit 1
-          fi
+            CSR_IMPL="$(grep -RIl --include='*.c' \
+           'void[[:space:]]\+csr_get_vdev_type_nss' \
+           "$QCACLD" 2>/dev/null | head -1)"
 
-          LINE="$(grep -n \
-            'wma_handle_channel_switch_resp[[:space:]]*(' \
-            "$FILE" | head -1 | cut -d: -f1)"
+           echo "Implementation: $CSR_IMPL"
+           echo
 
-          echo "Implementation: $FILE"
-          echo "Function line: $LINE"
-          echo
-          echo "=== FUNCTION BODY ==="
-          sed -n "${LINE},$((LINE + 180))p" "$FILE"
+           echo "=== ALL CALL SITES ==="
+           grep -RIn --include='*.c' --include='*.h' \
+           'csr_get_vdev_type_nss[[:space:]]*(' \
+           "$QCACLD" 2>/dev/null | head -30 || true
 
-          echo
-          echo "========================================"
-          echo "CHANNEL SWITCH HANDLER AUDIT COMPLETE"
-          echo "No source modification was performed."
-          echo "No kernel build was performed."
-          echo "========================================"
+           echo
+           echo "=== CALLER CONTEXT ==="
+
+            grep -RIl --include='*.c' \
+             'csr_get_vdev_type_nss[[:space:]]*(' \
+             "$QCACLD" 2>/dev/null |
+              while read -r f; do
+               if grep -q \
+              'csr_get_vdev_type_nss[[:space:]]*(' "$f"; then
+
+             echo
+             echo "----- $f -----"
+
+             grep -n -B12 -A12 \
+             'csr_get_vdev_type_nss[[:space:]]*(' \
+             "$f" 2>/dev/null | head -60
+            fi
+           done
+
+            echo
+            echo "========================================"
+            echo "CSR NSS CALLER AUDIT COMPLETE"
+            echo "No source modification was performed."
+            echo "No kernel build was performed."
+            echo "========================================"
         
-          
+
+
+       
+         
       # ============================================================
       # 10. CLONE NETHUNTER REFERENCE
       # ============================================================
