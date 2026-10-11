@@ -5632,9 +5632,8 @@ jobs:
         echo
         echo "=== SYSFS INITIALIZER CALLER INSPECTION COMPLETE ==="
         
-
-
-
+                
+                
     - name: Restore native policy-manager VDEV callbacks
       working-directory: kernel
       shell: bash
@@ -5653,10 +5652,6 @@ jobs:
         git show "HEAD:${PM}" > "$CLEAN"
         test -s "$CLEAN"
 
-        echo "Pinned source:"
-        git rev-parse HEAD
-        echo "Clean source extracted successfully."
-
         echo
         echo "=== EXTRACT CLEAN CALLBACKS WITH AWK ==="
 
@@ -5666,57 +5661,65 @@ jobs:
           "${GITHUB_WORKSPACE}/vdev-status.clean"
 
         awk '
-        function begin(name) {
-          active=1
-          opened=0
-          depth=0
-          target=name
-          buffer=""
+        function start_callback(name) {
+          active = 1
+          callback = name
+          depth = 0
+          seen_open = 0
+          buffer = ""
         }
 
-        /^[[:space:]]*static[[:space:]]+.*policy_mgr_vdev_obj_create_cb[[:space:]]*\(/ {
-          begin("create")
+        /^[[:space:]]*static[[:space:]].*policy_mgr_vdev_obj_create_cb[[:space:]]*\(/ {
+          start_callback("create")
         }
 
-        /^[[:space:]]*static[[:space:]]+.*policy_mgr_vdev_obj_destroy_cb[[:space:]]*\(/ {
-          begin("destroy")
+        /^[[:space:]]*static[[:space:]].*policy_mgr_vdev_obj_destroy_cb[[:space:]]*\(/ {
+          start_callback("destroy")
         }
 
-        /^[[:space:]]*static[[:space:]]+.*policy_mgr_vdev_obj_status_cb[[:space:]]*\(/ {
-          begin("status")
+        /^[[:space:]]*static[[:space:]].*policy_mgr_vdev_obj_status_cb[[:space:]]*\(/ {
+          start_callback("status")
         }
 
         active {
           buffer = buffer $0 ORS
 
-          if ($0 ~ /\{/) {
-            opened=1
-          }
+          line = $0
 
-          if (opened) {
-            line=$0
-            opens=gsub(/\{/, "{", line)
-            closes=gsub(/\}/, "}", line)
+          gsub(/"([^"\\]|\\.)*"/, "", line)
+          gsub(/'\''([^'\''\\]|\\.)*'\''/, "", line)
 
-            depth += opens
-            depth -= closes
+          opens = gsub(/\{/, "{", line)
+          closes = gsub(/\}/, "}", line)
 
-            if (depth == 0) {
-              if (target == "create")
-                print buffer > "'"${GITHUB_WORKSPACE}"'/vdev-create.clean"
+          depth += opens
+          depth -= closes
 
-              if (target == "destroy")
-                print buffer > "'"${GITHUB_WORKSPACE}"'/vdev-destroy.clean"
+          if (opens > 0)
+            seen_open = 1
 
-              if (target == "status")
-                print buffer > "'"${GITHUB_WORKSPACE}"'/vdev-status.clean"
+          if (seen_open && depth == 0) {
 
-              active=0
-              opened=0
-              depth=0
-              target=""
-              buffer=""
+            if (callback == "create") {
+              printf "%s", buffer > "'"${GITHUB_WORKSPACE}"'/vdev-create.clean"
+              close("'"${GITHUB_WORKSPACE}"'/vdev-create.clean")
             }
+
+            if (callback == "destroy") {
+              printf "%s", buffer > "'"${GITHUB_WORKSPACE}"'/vdev-destroy.clean"
+              close("'"${GITHUB_WORKSPACE}"'/vdev-destroy.clean")
+            }
+
+            if (callback == "status") {
+              printf "%s", buffer > "'"${GITHUB_WORKSPACE}"'/vdev-status.clean"
+              close("'"${GITHUB_WORKSPACE}"'/vdev-status.clean")
+            }
+
+            active = 0
+            callback = ""
+            depth = 0
+            seen_open = 0
+            buffer = ""
           }
 
           next
@@ -5732,54 +5735,113 @@ jobs:
         echo "PASS: clean status callback extracted."
 
         echo
-        echo "=== RESTORE CALLBACKS ==="
+        echo "=== RESTORE CALLBACKS WITH AWK ==="
 
-           python3 <<'PY'
-           from pathlib import Path
-           import re
+        awk \
+          -v create_file="${GITHUB_WORKSPACE}/vdev-create.clean" \
+          -v destroy_file="${GITHUB_WORKSPACE}/vdev-destroy.clean" \
+          -v status_file="${GITHUB_WORKSPACE}/vdev-status.clean" '
 
-           pm = Path("drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_init_deinit.c")
+        function load_file(file,    line, data) {
+          data = ""
 
-           text = pm.read_text()
+          while ((getline line < file) > 0)
+            data = data line ORS
 
-           files = {
-               "policy_mgr_vdev_obj_create_cb": Path("../vdev-create.clean"),
-               "policy_mgr_vdev_obj_destroy_cb": Path("../vdev-destroy.clean"),
-               "policy_mgr_vdev_obj_status_cb": Path("../vdev-status.clean"),
-            }
+          close(file)
 
-           for name, clean_file in files.items():
-                clean_file = Path(__import__("os").environ["GITHUB_WORKSPACE"]) / clean_file.name
-                replacement = clean_file.read_text().rstrip()
+          return data
+        }
 
-                pattern = re.compile(
-                     r"(?ms)^[ \t]*static\b[^\n]*\b"
-                     + re.escape(name)
-                     + r"\s*\([^;]*\)\s*\{"
-                     r".*?"
-                     r"^[ \t]*\}"
-             )
+        BEGIN {
+          create = load_file(create_file)
+          destroy = load_file(destroy_file)
+          status = load_file(status_file)
 
-            match = pattern.search(text)
+          if (create == "") {
+            print "ERROR: empty create callback"
+            exit 1
+          }
 
-           if not match:
-               raise SystemExit(
-                  f"ERROR: could not locate callback: {name}"
-             )
+          if (destroy == "") {
+            print "ERROR: empty destroy callback"
+            exit 1
+          }
 
-         text = (
-             text[:match.start()]
-             + replacement
-             + text[match.end():]
-         )
+          if (status == "") {
+            print "ERROR: empty status callback"
+            exit 1
+          }
 
-         print(f"PASS: restored {name}")
+          active = 0
+          depth = 0
+          seen_open = 0
+          callback = ""
+        }
 
-        pm.write_text(text)
+        function begin(name) {
+          active = 1
+          depth = 0
+          seen_open = 0
+          callback = name
+        }
 
-        print()
-        print("All native policy-manager VDEV callbacks restored.")
-        PY
+        function count_braces(line,    tmp, opens, closes) {
+          tmp = line
+
+          gsub(/"([^"\\]|\\.)*"/, "", tmp)
+          gsub(/'\''([^'\''\\]|\\.)*'\''/, "", tmp)
+
+          opens = gsub(/\{/, "{", tmp)
+          closes = gsub(/\}/, "}", tmp)
+
+          depth += opens
+          depth -= closes
+
+          if (opens > 0)
+            seen_open = 1
+        }
+
+        /^[[:space:]]*static[[:space:]].*policy_mgr_vdev_obj_create_cb[[:space:]]*\(/ {
+          begin("create")
+          print create
+          count_braces($0)
+          next
+        }
+
+        /^[[:space:]]*static[[:space:]].*policy_mgr_vdev_obj_destroy_cb[[:space:]]*\(/ {
+          begin("destroy")
+          print destroy
+          count_braces($0)
+          next
+        }
+
+        /^[[:space:]]*static[[:space:]].*policy_mgr_vdev_obj_status_cb[[:space:]]*\(/ {
+          begin("status")
+          print status
+          count_braces($0)
+          next
+        }
+
+        active {
+          count_braces($0)
+
+          if (seen_open && depth <= 0) {
+            active = 0
+            depth = 0
+            seen_open = 0
+            callback = ""
+          }
+
+          next
+        }
+
+        {
+          print
+        }
+        ' "$PM" > "$PM.tmp"
+
+        mv "$PM.tmp" "$PM"
 
         echo
         echo "=== VERIFY RESTORATION ==="
@@ -5799,6 +5861,8 @@ jobs:
         echo
         echo "Native policy-manager VDEV callback restoration PASSED."
 
+
+            
       
     - name: Inspect policy-manager monitor VDEV handling
       working-directory: kernel
