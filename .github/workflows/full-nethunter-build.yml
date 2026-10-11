@@ -990,7 +990,54 @@ jobs:
           echo "No source modification was performed."
           echo "No kernel build was performed."
           echo "=============================================="
-          
+
+
+
+
+
+      - name: Audit sme_get_vdev_type_nss callers
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          QCACLD="drivers/staging/qcacld-3.0"
+
+          echo "========================================"
+          echo "SME NSS CALLER AUDIT"
+          echo "========================================"
+
+          SME_IMPL="$QCACLD/core/sme/src/common/sme_api.c"
+
+          echo
+          echo "=== sme_get_vdev_type_nss definition ==="
+          grep -n -B5 -A25 \
+            'void sme_get_vdev_type_nss' \
+            "$SME_IMPL" | head -40
+
+          echo
+          echo "=== sme_get_vdev_type_nss call sites ==="
+          grep -RIn \
+            --include='*.c' \
+            --include='*.h' \
+            'sme_get_vdev_type_nss[[:space:]]*(' \
+            "$QCACLD" 2>/dev/null | head -30
+
+          echo
+          echo "=== MONITOR references near NSS callers ==="
+          grep -RIn \
+            --include='*.c' \
+            'sme_get_vdev_type_nss\|QDF_MONITOR_MODE' \
+            "$QCACLD/core/sme/src" \
+            "$QCACLD/core/mac/src" \
+            "$QCACLD/core/wma/src" 2>/dev/null | head -40
+
+          echo
+          echo "========================================"
+          echo "SME NSS CALLER AUDIT COMPLETE"
+          echo "No source modification was performed."
+          echo "No kernel build was performed."
+          echo "========================================"
 
           
 
