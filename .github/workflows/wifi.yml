@@ -6743,7 +6743,9 @@ jobs:
         echo
         echo "PASS: policy-manager PCL lock boundary fixed."
 
-        
+
+
+
     - name: Verify policy-manager source integrity
       working-directory: kernel
       shell: bash
@@ -6756,82 +6758,48 @@ jobs:
 
         echo "=== POLICY-MANAGER SOURCE INTEGRITY ==="
 
-        python3 - "$PM" <<'PY'
-        from pathlib import Path
-        import sys
+        awk '
+        BEGIN {
+          n = 5
 
-        path = Path(sys.argv[1])
-        text = path.read_text()
+          required[1] = "policy_mgr_update_connection_info"
+          required[2] = "QDF_MONITOR_MODE"
+          required[3] = "wlan_objmgr_get_vdev_by_id_from_psoc"
+          required[4] = "wlan_vdev_mlme_get_opmode"
+          required[5] = "qdf_conc_list_lock"
 
-        checks = [
-        "policy_mgr_update_connection_info",
-        "QDF_MONITOR_MODE",
-        "wlan_objmgr_get_vdev_by_id_from_psoc",
-        "wlan_vdev_mlme_get_opmode",
-        "qdf_conc_list_lock",
-        ]
+          for (i = 1; i <= n; i++)
+            found[i] = 0
+        }
 
-        for item in checks:
-        if item not in text:
-        raise SystemExit(
-            f"FAIL: expected policy-manager symbol missing: {item}"
-        )
+        {
+          for (i = 1; i <= n; i++) {
+            if (index($0, required[i]) > 0)
+              found[i] = 1
+          }
+        }
 
-        print(f"PASS: {item}")
+        END {
+          failed = 0
 
-        print()
-        print("Policy-manager source integrity verification PASSED.")
-        PY
+          for (i = 1; i <= n; i++) {
+            if (found[i]) {
+              print "PASS: " required[i]
+            } else {
+              print "FAIL: expected policy-manager symbol missing: " required[i]
+              failed = 1
+            }
+          }
 
-        
-                echo "=== DIAGNOSE POLICY-MANAGER CONNECTION-COUNT MUTEX ==="
+          if (failed)
+            exit 1
 
-        PM_DIR="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr"
+          print ""
+          print "Policy-manager source integrity verification PASSED."
+        }
+        ' "$PM"
 
-        echo
-        echo "=== CONNECTION COUNT DEFINITIONS ==="
-
-        grep -RIn \
-          --include='*.c' \
-          -E \
-          'policy_mgr_get_connection_count[[:space:]]*\(' \
-          "$PM_DIR" \
-          || true
-
-        echo
-        echo "=== CONNECTION COUNT CALLERS ==="
-
-        grep -RIn \
-          --include='*.c' \
-          -B10 \
-          -A20 \
-          'policy_mgr_get_connection_count[[:space:]]*\(' \
-          "$PM_DIR" \
-          || true
-
-        echo
-        echo "=== CONNECTION-LIST MUTEX OPERATIONS ==="
-
-        grep -RIn \
-          --include='*.c' \
-          -E \
-          'qdf_mutex_(acquire|release)\(&pm_ctx->qdf_conc_list_lock\)' \
-          "$PM_DIR" \
-          || true
-
-        echo
-        echo "=== CONNECTION-LIST ACCESS ==="
-
-        grep -RIn \
-          --include='*.c' \
-          -E \
-          'pm_conc_connection_list|pm_ctx->connection_list' \
-          "$PM_DIR" \
-          | head -400 \
-          || true
-
-        echo
-        echo "=== MUTEX DIAGNOSTIC COMPLETE ==="
+           
     - name: Verify policy-manager lock balance
       working-directory: kernel
       shell: bash
