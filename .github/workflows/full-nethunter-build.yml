@@ -1077,34 +1077,45 @@ jobs:
         working-directory: kernel
         shell: bash
         run: |
-          set -euo pipefail
+           set -euo pipefail
 
-          QCACLD="drivers/staging/qcacld-3.0"
+           QCACLD="drivers/staging/qcacld-3.0"
 
-          echo "========================================"
-          echo "MONITOR VDEV OPMODE AUDIT"
-          echo "========================================"
+           echo "========================================"
+           echo "MONITOR VDEV OPMODE AUDIT"
+           echo "========================================"
 
-          echo
-          echo "=== wlan_vdev_mlme_get_opmode definition ==="
-          grep -RIn \
+           echo
+           echo "=== wlan_vdev_mlme_get_opmode definition ==="
+
+             OPMODE_IMPL="$(grep -RIl \
+              --include='*.c' \
+              'wlan_vdev_mlme_get_opmode[[:space:]]*(' \
+              "$QCACLD" 2>/dev/null | head -1 || true)"
+
+            if [ -z "$OPMODE_IMPL" ]; then
+             echo "Definition not found"
+               else
+             echo "Implementation: $OPMODE_IMPL"
+              grep -n -A35 -B8 \
+              'wlan_vdev_mlme_get_opmode[[:space:]]*(' \
+              "$OPMODE_IMPL" | head -60 || true
+           fi
+
+            echo
+            echo "=== QDF_MONITOR_MODE references ==="
+            grep -RIn \
             --include='*.c' \
-            'wlan_vdev_mlme_get_opmode[[:space:]]*(' \
-            "$QCACLD/components/mlme" 2>/dev/null | head -20
+            --include='*.h' \
+             'QDF_MONITOR_MODE' \
+             "$QCACLD" 2>/dev/null | head -40 || true
 
-          echo
-          echo "=== Monitor opmode references ==="
-          grep -RIn \
-            --include='*.c' \
-            'wlan_vdev_mlme_get_opmode.*QDF_MONITOR_MODE\|QDF_MONITOR_MODE.*wlan_vdev_mlme_get_opmode' \
-            "$QCACLD/components/mlme" 2>/dev/null | head -20
-
-          echo
-          echo "========================================"
-          echo "MONITOR VDEV OPMODE AUDIT COMPLETE"
-          echo "No source modification was performed."
-          echo "No kernel build was performed."
-          echo "========================================"
+           echo
+           echo "========================================"
+           echo "MONITOR VDEV OPMODE AUDIT COMPLETE"
+           echo "No source modification was performed."
+           echo "No kernel build was performed."
+           echo "========================================"
 
           
 
