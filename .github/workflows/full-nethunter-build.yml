@@ -1039,6 +1039,37 @@ jobs:
           echo "No kernel build was performed."
           echo "========================================"
 
+
+
+
+
+      - name: Audit monitor NSS caller context
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SRC="drivers/staging/qcacld-3.0/components/mlme/core/src/wlan_mlme_vdev_mgr_interface.c"
+
+          echo "========================================"
+          echo "MONITOR NSS CALLER CONTEXT"
+          echo "========================================"
+
+          echo
+          echo "=== Caller around line 1030 ==="
+          sed -n '1000,1055p' "$SRC"
+
+          echo
+          echo "=== Monitor references in caller ==="
+          grep -n -B3 -A5 'QDF_MONITOR_MODE' "$SRC" | head -40
+
+          echo
+          echo "========================================"
+          echo "MONITOR NSS CALLER AUDIT COMPLETE"
+          echo "No source modification was performed."
+          echo "No kernel build was performed."
+          echo "========================================"
+
           
 
 
