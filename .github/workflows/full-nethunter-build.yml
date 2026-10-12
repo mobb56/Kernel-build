@@ -11433,7 +11433,7 @@ jobs:
           require_builtin_symbol "nf_register_net_hook"
 
           # CONFIG_BRIDGE_NETFILTER=y
-          require_builtin_symbol "br_nf_init"
+          require_builtin_symbol "br_netfilter_init"
 
           # CONFIG_TMPFS=y
           require_builtin_symbol "shmem_init"
