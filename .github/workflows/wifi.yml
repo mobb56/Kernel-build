@@ -3920,6 +3920,185 @@ jobs:
         echo
         echo "Monitor VDEV policy-manager path verification PASSED."
 
+
+    - name: Audit complete VDEV lifecycle
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        QCACLD="drivers/staging/qcacld-3.0"
+        PM="${QCACLD}/components/cmn_services/policy_mgr"
+
+        test -d "$QCACLD"
+        test -d "$PM"
+
+        echo "============================================================"
+        echo " COMPLETE QCACLD3 VDEV LIFECYCLE AUDIT"
+        echo "============================================================"
+
+        echo
+        echo "=== 1. VDEV OBJECT CALLBACK DEFINITIONS ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'policy_mgr_vdev_obj_(create|destroy|status)_cb' \
+          "$PM" \
+          || true
+
+        echo
+        echo "=== 2. VDEV OBJECT CALLBACK REGISTRATION ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'register.*vdev.*handler|vdev.*handler.*register|wlan_objmgr.*vdev.*handler' \
+          "$PM" \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -300 \
+          || true
+
+        echo
+        echo "=== 3. VDEV OBJECT CALLBACK UNREGISTRATION ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'unregister.*vdev.*handler|vdev.*handler.*unregister|wlan_objmgr.*vdev.*handler' \
+          "$PM" \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -300 \
+          || true
+
+        echo
+        echo "=== 4. VDEV CREATION CALLERS ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'wlan_objmgr_vdev_create|wlan_objmgr_vdev.*create|vdev.*create' \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -400 \
+          || true
+
+        echo
+        echo "=== 5. VDEV DESTRUCTION CALLERS ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'wlan_objmgr_vdev_delete|wlan_objmgr_vdev_destroy|vdev.*destroy|vdev.*delete' \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -400 \
+          || true
+
+        echo
+        echo "=== 6. VDEV OPMODE ASSIGNMENT / LOOKUP ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'wlan_vdev_mlme_get_opmode|wlan_vdev_mlme_set_opmode|opmode' \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -500 \
+          || true
+
+        echo
+        echo "=== 7. NORMAL VDEV MODES ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'QDF_STA_MODE|QDF_SAP_MODE|QDF_P2P|QDF_IBSS_MODE|QDF_MONITOR_MODE|QDF_NDI_MODE|QDF_OCB_MODE' \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -500 \
+          || true
+
+        echo
+        echo "=== 8. VDEV START / STOP PATH ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'vdev.*start|vdev.*stop|start.*vdev|stop.*vdev|wlan_vdev.*start|wlan_vdev.*stop' \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -500 \
+          || true
+
+        echo
+        echo "=== 9. POLICY-MANAGER CONNECTION STATE ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'policy_mgr_(store|del|update).*connection|connection.*(store|del|update)|pm_conc_connection_list' \
+          "$PM" \
+          2>/dev/null \
+          | head -500 \
+          || true
+
+        echo
+        echo "=== 10. MONITOR VDEV PATH ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'QDF_MONITOR_MODE|QDF_GLOBAL_MONITOR_MODE|monitor.*vdev|vdev.*monitor' \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -500 \
+          || true
+
+        echo
+        echo "=== 11. EARLY RETURNS IN POLICY-MANAGER VDEV PATHS ==="
+
+        grep -Rni \
+          --include='*.c' \
+          -E \
+          -B5 -A5 \
+          'return QDF_STATUS_(SUCCESS|E_FAILURE|E_INVAL|E_NOMEM|E_EXISTS|E_ALREADY)' \
+          "$PM" \
+          2>/dev/null \
+          | head -800 \
+          || true
+
+        echo
+        echo "=== 12. MONITOR-SPECIFIC EARLY RETURNS ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -B8 -A12 \
+          -E \
+          'QDF_MONITOR_MODE|QDF_GLOBAL_MONITOR_MODE' \
+          "$PM" \
+          2>/dev/null \
+          | head -600 \
+          || true
+
+        echo
+        echo "============================================================"
+        echo " VDEV LIFECYCLE AUDIT COMPLETE"
+        echo "============================================================"
+
         
     - name: Verify Kbuild and kernel config separation
       shell: bash
@@ -5862,6 +6041,186 @@ jobs:
         echo "Native policy-manager VDEV callback restoration PASSED."
 
 
+
+    - name: Audit complete VDEV lifecycle
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        QCACLD="drivers/staging/qcacld-3.0"
+        PM="${QCACLD}/components/cmn_services/policy_mgr"
+
+        test -d "$QCACLD"
+        test -d "$PM"
+
+        echo "============================================================"
+        echo " COMPLETE QCACLD3 VDEV LIFECYCLE AUDIT"
+        echo "============================================================"
+
+        echo
+        echo "=== 1. VDEV OBJECT CALLBACK DEFINITIONS ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'policy_mgr_vdev_obj_(create|destroy|status)_cb' \
+          "$PM" \
+          || true
+
+        echo
+        echo "=== 2. VDEV OBJECT CALLBACK REGISTRATION ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'register.*vdev.*handler|vdev.*handler.*register|wlan_objmgr.*vdev.*handler' \
+          "$PM" \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -300 \
+          || true
+
+        echo
+        echo "=== 3. VDEV OBJECT CALLBACK UNREGISTRATION ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'unregister.*vdev.*handler|vdev.*handler.*unregister|wlan_objmgr.*vdev.*handler' \
+          "$PM" \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -300 \
+          || true
+
+        echo
+        echo "=== 4. VDEV CREATION CALLERS ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'wlan_objmgr_vdev_create|wlan_objmgr_vdev.*create|vdev.*create' \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -400 \
+          || true
+
+        echo
+        echo "=== 5. VDEV DESTRUCTION CALLERS ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'wlan_objmgr_vdev_delete|wlan_objmgr_vdev_destroy|vdev.*destroy|vdev.*delete' \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -400 \
+          || true
+
+        echo
+        echo "=== 6. VDEV OPMODE ASSIGNMENT / LOOKUP ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'wlan_vdev_mlme_get_opmode|wlan_vdev_mlme_set_opmode|opmode' \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -500 \
+          || true
+
+        echo
+        echo "=== 7. NORMAL VDEV MODES ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'QDF_STA_MODE|QDF_SAP_MODE|QDF_P2P|QDF_IBSS_MODE|QDF_MONITOR_MODE|QDF_NDI_MODE|QDF_OCB_MODE' \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -500 \
+          || true
+
+        echo
+        echo "=== 8. VDEV START / STOP PATH ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'vdev.*start|vdev.*stop|start.*vdev|stop.*vdev|wlan_vdev.*start|wlan_vdev.*stop' \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -500 \
+          || true
+
+        echo
+        echo "=== 9. POLICY-MANAGER CONNECTION STATE ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'policy_mgr_(store|del|update).*connection|connection.*(store|del|update)|pm_conc_connection_list' \
+          "$PM" \
+          2>/dev/null \
+          | head -500 \
+          || true
+
+        echo
+        echo "=== 10. MONITOR VDEV PATH ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'QDF_MONITOR_MODE|QDF_GLOBAL_MONITOR_MODE|monitor.*vdev|vdev.*monitor' \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -500 \
+          || true
+
+        echo
+        echo "=== 11. EARLY RETURNS IN POLICY-MANAGER VDEV PATHS ==="
+
+        grep -Rni \
+          --include='*.c' \
+          -E \
+          -B5 -A5 \
+          'return QDF_STATUS_(SUCCESS|E_FAILURE|E_INVAL|E_NOMEM|E_EXISTS|E_ALREADY)' \
+          "$PM" \
+          2>/dev/null \
+          | head -800 \
+          || true
+
+        echo
+        echo "=== 12. MONITOR-SPECIFIC EARLY RETURNS ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -B8 -A12 \
+          -E \
+          'QDF_MONITOR_MODE|QDF_GLOBAL_MONITOR_MODE' \
+          "$PM" \
+          2>/dev/null \
+          | head -600 \
+          || true
+
+        echo
+        echo "============================================================"
+        echo " VDEV LIFECYCLE AUDIT COMPLETE"
+        echo "============================================================"
+
+
             
       
     - name: Inspect policy-manager monitor VDEV handling
@@ -6473,6 +6832,185 @@ jobs:
 
         echo
         echo "Monitor VDEV policy-manager fix PASSED."
+
+
+    - name: Audit complete VDEV lifecycle
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        QCACLD="drivers/staging/qcacld-3.0"
+        PM="${QCACLD}/components/cmn_services/policy_mgr"
+
+        test -d "$QCACLD"
+        test -d "$PM"
+
+        echo "============================================================"
+        echo " COMPLETE QCACLD3 VDEV LIFECYCLE AUDIT"
+        echo "============================================================"
+
+        echo
+        echo "=== 1. VDEV OBJECT CALLBACK DEFINITIONS ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'policy_mgr_vdev_obj_(create|destroy|status)_cb' \
+          "$PM" \
+          || true
+
+        echo
+        echo "=== 2. VDEV OBJECT CALLBACK REGISTRATION ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'register.*vdev.*handler|vdev.*handler.*register|wlan_objmgr.*vdev.*handler' \
+          "$PM" \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -300 \
+          || true
+
+        echo
+        echo "=== 3. VDEV OBJECT CALLBACK UNREGISTRATION ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'unregister.*vdev.*handler|vdev.*handler.*unregister|wlan_objmgr.*vdev.*handler' \
+          "$PM" \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -300 \
+          || true
+
+        echo
+        echo "=== 4. VDEV CREATION CALLERS ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'wlan_objmgr_vdev_create|wlan_objmgr_vdev.*create|vdev.*create' \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -400 \
+          || true
+
+        echo
+        echo "=== 5. VDEV DESTRUCTION CALLERS ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'wlan_objmgr_vdev_delete|wlan_objmgr_vdev_destroy|vdev.*destroy|vdev.*delete' \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -400 \
+          || true
+
+        echo
+        echo "=== 6. VDEV OPMODE ASSIGNMENT / LOOKUP ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'wlan_vdev_mlme_get_opmode|wlan_vdev_mlme_set_opmode|opmode' \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -500 \
+          || true
+
+        echo
+        echo "=== 7. NORMAL VDEV MODES ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'QDF_STA_MODE|QDF_SAP_MODE|QDF_P2P|QDF_IBSS_MODE|QDF_MONITOR_MODE|QDF_NDI_MODE|QDF_OCB_MODE' \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -500 \
+          || true
+
+        echo
+        echo "=== 8. VDEV START / STOP PATH ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'vdev.*start|vdev.*stop|start.*vdev|stop.*vdev|wlan_vdev.*start|wlan_vdev.*stop' \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -500 \
+          || true
+
+        echo
+        echo "=== 9. POLICY-MANAGER CONNECTION STATE ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'policy_mgr_(store|del|update).*connection|connection.*(store|del|update)|pm_conc_connection_list' \
+          "$PM" \
+          2>/dev/null \
+          | head -500 \
+          || true
+
+        echo
+        echo "=== 10. MONITOR VDEV PATH ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -E \
+          'QDF_MONITOR_MODE|QDF_GLOBAL_MONITOR_MODE|monitor.*vdev|vdev.*monitor' \
+          "$QCACLD" \
+          2>/dev/null \
+          | head -500 \
+          || true
+
+        echo
+        echo "=== 11. EARLY RETURNS IN POLICY-MANAGER VDEV PATHS ==="
+
+        grep -Rni \
+          --include='*.c' \
+          -E \
+          -B5 -A5 \
+          'return QDF_STATUS_(SUCCESS|E_FAILURE|E_INVAL|E_NOMEM|E_EXISTS|E_ALREADY)' \
+          "$PM" \
+          2>/dev/null \
+          | head -800 \
+          || true
+
+        echo
+        echo "=== 12. MONITOR-SPECIFIC EARLY RETURNS ==="
+
+        grep -Rni \
+          --include='*.c' \
+          --include='*.h' \
+          -B8 -A12 \
+          -E \
+          'QDF_MONITOR_MODE|QDF_GLOBAL_MONITOR_MODE' \
+          "$PM" \
+          2>/dev/null \
+          | head -600 \
+          || true
+
+        echo
+        echo "============================================================"
+        echo " VDEV LIFECYCLE AUDIT COMPLETE"
+        echo "============================================================"
     
       
     - name: Inspect policy-manager PCL lock boundary
