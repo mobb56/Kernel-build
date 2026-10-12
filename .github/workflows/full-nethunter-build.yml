@@ -11403,6 +11403,55 @@ jobs:
           echo "PASS: required NetHunter kernel configuration verified"
 
           echo
+          echo "=== Verify NetHunter module outputs ==="
+
+          require_module() {
+            local module_name="$1"
+
+            local module_path
+            module_path="$(
+              find "${OUT_DIR}" \
+                -type f \
+                -name "${module_name}" \
+                -print \
+                -quit
+            )"
+
+            if [ -z "${module_path}" ]; then
+              echo "ERROR: required module was not built: ${module_name}"
+              exit 1
+            fi
+
+            test -s "${module_path}"
+
+            echo "PASS: ${module_name}"
+            echo "      ${module_path}"
+          }
+
+          require_module "veth.ko"
+          require_module "bridge.ko"
+          require_module "8021q.ko"
+          require_module "dummy.ko"
+          require_module "macvlan.ko"
+          require_module "ipvlan.ko"
+
+          require_module "nf_conntrack.ko"
+          require_module "x_tables.ko"
+          require_module "xt_mark.ko"
+          require_module "xt_nat.ko"
+          require_module "xt_conntrack.ko"
+          require_module "xt_multiport.ko"
+
+          require_module "fuse.ko"
+          require_module "overlay.ko"
+          require_module "loop.ko"
+          require_module "squashfs.ko"
+
+          echo
+          echo "PASS: all requested NetHunter Stage 1 modules were actually built"
+
+          
+          echo
           echo "=== Copy ALL compiled kernel modules ==="
 
           MODULE_COUNT=0
