@@ -11427,7 +11427,7 @@ jobs:
           require_builtin_symbol "tun_init"
 
           # CONFIG_NET_NS=y
-          require_builtin_symbol "setup_net"
+          require_builtin_symbol "copy_net_ns"
 
           # CONFIG_NETFILTER=y
           require_builtin_symbol "nf_register_net_hook"
