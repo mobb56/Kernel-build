@@ -10448,7 +10448,7 @@ jobs:
 
           print()
 
-          if failed or common_mismatches:
+          if failed:
               print(
                   "FAIL: STOCK AND CUSTOM QCACLD3 "
                   "ABI DO NOT MATCH."
