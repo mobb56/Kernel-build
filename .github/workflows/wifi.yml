@@ -7346,25 +7346,21 @@ jobs:
         echo "Module.symvers:"
         ls -lh "${OUT_DIR}/Module.symvers"
 
-        echo
         echo "=== Verify generated WLAN module ==="
 
-        WLAN_MODULE="$(
-          find "${OUT_DIR}" \
-            -type f \
-            -name 'qca_cld3_wlan.ko' \
-            -print \
-            -quit
-        )"
+        WLAN_MODULE="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
 
-        if [ -z "${WLAN_MODULE}" ]; then
-          echo "ERROR: qca_cld3_wlan.ko was not generated."
+        if [ ! -s "${WLAN_MODULE}" ]; then
+          echo "ERROR: wlan.ko was not generated."
+          echo "=== Available QCACLD3 modules ==="
+          find "${OUT_DIR}/drivers/staging/qcacld-3.0" -type f -name "*.ko" -print | sort || true
           exit 1
         fi
 
         echo "WLAN module:"
         echo "${WLAN_MODULE}"
         ls -lh "${WLAN_MODULE}"
+
 
         echo
         echo "=== Verify module vermagic ==="
@@ -7452,6 +7448,8 @@ jobs:
 
         echo
         echo "=== FINAL SOURCE CHECK COMPLETE ==="
+
+        
     - name: Compare final injection source with reference
       shell: bash
       run: "set -euo pipefail\n\nNH=\"nethunter-reference/drivers/staging/qcacld-3.0\"\nKERNEL=\"kernel/drivers/staging/qcacld-3.0\"\n\necho\necho \"==========================================\"\necho \" QCACLD3 FINAL SOURCE COMPARISON\"\necho \"==========================================\"\n\nnormalize_wma() {\n  awk '\n    BEGIN {\n      skip = 0\n      depth = 0\n    }\n\n    skip == 0 &&\n    $0 ~ /^[[:space:]]*(QDF_STATUS|void|uint32_t|bool)[[:space:]]+wma_(init_injection_queue|deinit_injection_queue|injection_pre_stop_cleanup|queue_injection_frame|get_injection_queue_stats)[[:space:]]*\\(/ {\n      skip = 1\n      depth = 0\n\n      line = $0\n\n      opens = gsub(/\\{/, \"{\", line)\n      closes = gsub(/\\}/, \"}\", line)\n\n      depth += opens\n      depth -= closes\n\n      if (depth <= 0 && opens > 0)\n        skip = 0\n\n      next\n    }\n\n    skip == 1 {\n      line = $0\n\n      opens = gsub(/\\{/, \"{\", line)\n      closes = gsub(/\\}/, \"}\", line)\n\n      depth += opens\n      depth -= closes\n\n      if (depth <= 0 && opens > 0)\n        skip = 0\n\n      next\n    }\n\n    {\n      print\n    }\n  ' \"$1\"\n}\n\ncompare_normalized() {\n  local reference=\"$1\"\n  local final=\"$2\"\n  local name=\"$3\"\n\n  echo\n  echo \"=== ${name} ===\"\n\n  if diff -u \\\n    <(normalize_wma \"${reference}\") \\\n    <(normalize_wma \"${final}\"); then\n\n    echo \"PASS: ${name}\"\n  else\n    echo\n    echo \"ERROR: ${name} differs from reference.\"\n    return 1\n  fi\n}\n\ncompare_normalized \\\n  \"${NH}/core/hdd/src/wlan_hdd_frame_inject_debug.c\" \\\n  \"${KERNEL}/core/hdd/src/wlan_hdd_frame_inject_debug.c\" \\\n  \"wlan_hdd_frame_inject_debug.c\"\n\ncompare_normalized \\\n  \"${NH}/core/hdd/src/wlan_hdd_frame_inject.c\" \\\n  \"${KERNEL}/core/hdd/src/wlan_hdd_frame_inject.c\" \\\n  \"wlan_hdd_frame_inject.c\"\n\ncompare_normalized \\\n  \"${NH}/core/hdd/src/wlan_hdd_frame_validate.c\" \\\n  \"${KERNEL}/core/hdd/src/wlan_hdd_frame_validate.c\" \\\n  \"wlan_hdd_frame_validate.c\"\n\ncompare_normalized \\\n  \"${NH}/core/wma/src/wma_frame_inject.c\" \\\n  \"${KERNEL}/core/wma/src/wma_frame_inject.c\" \\\n  \"wma_frame_inject.c\"\n\necho\necho \"==========================================\"\necho \" SOURCE COMPARISON PASSED\"\necho \"==========================================\"\n\n\n\n\n \n"
@@ -7482,6 +7480,8 @@ jobs:
 
         echo
         echo "=== FINAL KBUILD CHECK PASSED ==="
+
+        
     - name: Verify module ABI configuration
       working-directory: kernel
       shell: bash
