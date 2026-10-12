@@ -11402,6 +11402,47 @@ jobs:
           echo
           echo "PASS: required NetHunter kernel configuration verified"
 
+
+          echo
+          echo "=== Verify built-in NetHunter functionality ==="
+
+          VMLINUX="${OUT_DIR}/vmlinux"
+
+          test -s "${VMLINUX}"
+
+          require_builtin_symbol() {
+            local symbol="$1"
+
+            if "${LLVM_DIR}/bin/llvm-nm" -n "${VMLINUX}" 2>/dev/null |
+              awk '{print $3}' |
+              grep -Fxq "${symbol}"; then
+              echo "PASS: built-in symbol ${symbol}"
+            else
+              echo "ERROR: built-in kernel symbol missing: ${symbol}"
+              exit 1
+            fi
+          }
+
+          # CONFIG_TUN=y
+          require_builtin_symbol "tun_init"
+
+          # CONFIG_NET_NS=y
+          require_builtin_symbol "setup_net"
+
+          # CONFIG_NETFILTER=y
+          require_builtin_symbol "nf_register_net_hook"
+
+          # CONFIG_BRIDGE_NETFILTER=y
+          require_builtin_symbol "br_nf_init"
+
+          # CONFIG_TMPFS=y
+          require_builtin_symbol "shmem_init"
+
+          echo
+          echo "PASS: requested built-in NetHunter functionality is present in vmlinux"
+
+          
+
           echo
           echo "=== Verify NetHunter module outputs ==="
 
