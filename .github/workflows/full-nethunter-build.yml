@@ -10859,10 +10859,19 @@ jobs:
           while IFS= read -r module; do
             MODULE_COUNT=$((MODULE_COUNT + 1))
 
-            vermagic="$(
-              modinfo -F vermagic "${module}" 2>/dev/null || true
-            )"
+            if ! vermagic="$(modinfo -F vermagic "${module}" 2>&1)"; then
+                  echo "ERROR: modinfo could not read ${module}"
+                  ls -l "${module}"
+                  file "${module}"
+                 exit 1
+            fi
 
+            if [ -z "${vermagic}" ]; then
+                echo "ERROR: empty vermagic in ${module}"
+                ls -l "${module}"
+                file "${module}"
+                exit 1
+           fi
             echo "$(basename "${module}"): ${vermagic}"
 
             test "${vermagic}" = "${EXPECTED_VERMAGIC}"
