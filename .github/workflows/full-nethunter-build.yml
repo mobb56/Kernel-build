@@ -11085,16 +11085,25 @@ jobs:
           require_config() {
             local symbol="$1"
             local expected="$2"
+            local actual
 
-            if grep -qx "${symbol}=${expected}" "${FINAL_CONFIG}"; then
-              echo "PASS: ${symbol}=${expected}"
-            else
-              echo "ERROR: ${symbol} is not ${expected}"
-              grep -E "^${symbol}=|^# ${symbol} is not set" \
-                "${FINAL_CONFIG}" || true
-              exit 1
-            fi
-          }
+              actual="$(sed -n "s/^${symbol}=//p" "${FINAL_CONFIG}" | head -n 1)"
+
+              if [ "${expected}" = "ym" ]; then
+                if [ "${actual}" = "y" ] || [ "${actual}" = "m" ]; then
+                  echo "PASS: ${symbol}=${actual} (built-in or module)"
+                   return 0
+               fi
+                  elif [ "${actual}" = "${expected}" ]; then
+                  echo "PASS: ${symbol}=${actual}"
+                    return 0
+                fi
+
+                echo "ERROR: ${symbol} expected ${expected}, actual ${actual:-disabled}"
+                 grep -E "^${symbol}=|^# ${symbol} is not set" \
+                    "${FINAL_CONFIG}" || true
+                 exit 1
+              }
 
           require_config "CONFIG_MODVERSIONS" "y"
           require_config "CONFIG_BT_BNEP" "m"
