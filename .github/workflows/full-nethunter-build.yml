@@ -10857,35 +10857,32 @@ jobs:
           MODULE_COUNT=0
 
           while IFS= read -r module; do
-            MODULE_COUNT=$((MODULE_COUNT + 1))
+             MODULE_COUNT=$((MODULE_COUNT + 1))
 
-            if ! vermagic="$(modinfo -F vermagic "${module}" 2>&1)"; then
-                  echo "ERROR: modinfo could not read ${module}"
-                  ls -l "${module}"
+             vermagic="$("${LLVM_DIR}/bin/llvm-readelf" -p .modinfo "${module}" 2>/dev/null \
+               | sed -n 's/.*vermagic=//p' \
+               | head -n 1 \
+               | tr -d '\r')"
+
+             if [ -z "${vermagic}" ]; then
+                 vermagic="$(modinfo -F vermagic "${module}" 2>/dev/null || true)"
+              fi
+
+             if [ -z "${vermagic}" ]; then
+                  echo "ERROR: unable to extract vermagic from ${module}"
                   file "${module}"
-                  "${LLVM_DIR}/bin/llvm-readelf" -S "${module}" || true
-                  "${LLVM_DIR}/bin/llvm-readelf" -p .modinfo "${module}" || true
-                 exit 1
+                 "${LLVM_DIR}/bin/llvm-readelf" -S "${module}" || true
+                exit 1
+             fi
 
-                
-                   
-            fi
+             echo "$(basename "${module}"): ${vermagic}"
 
-            if [ -z "${vermagic}" ]; then
-                echo "ERROR: empty vermagic in ${module}"
-                ls -l "${module}"
-                file "${module}"
-                "${LLVM_DIR}/bin/llvm-readelf" -S "${module}" || true
-                "${LLVM_DIR}/bin/llvm-readelf" -p .modinfo "${module}" || true
-               exit 1
-                
-              
-                       
+            if [ "${vermagic}" != "${EXPECTED_VERMAGIC}" ]; then
+               echo "ERROR: vermagic mismatch in ${module}"
+               echo "Expected: ${EXPECTED_VERMAGIC}"
+               echo "Actual:   ${vermagic}"
+             exit 1
            fi
-           
-            echo "$(basename "${module}"): ${vermagic}"
-
-            test "${vermagic}" = "${EXPECTED_VERMAGIC}"
           done < <(
             find "${OUT_DIR}" \
               -type f \
