@@ -10864,6 +10864,10 @@ jobs:
                   ls -l "${module}"
                   file "${module}"
                  exit 1
+
+                 echo "=== loop.ko metadata diagnostic ==="
+                   "${LLVM_DIR}/bin/llvm-readelf" -S "${module}" || true
+                    "${LLVM_DIR}/bin/llvm-readelf" -p .modinfo "${module}" || true
             fi
 
             if [ -z "${vermagic}" ]; then
@@ -10871,6 +10875,10 @@ jobs:
                 ls -l "${module}"
                 file "${module}"
                 exit 1
+                
+                echo "=== loop.ko metadata diagnostic ==="
+                       "${LLVM_DIR}/bin/llvm-readelf" -S "${module}" || true
+                       "${LLVM_DIR}/bin/llvm-readelf" -p .modinfo "${module}" || true
            fi
             echo "$(basename "${module}"): ${vermagic}"
 
