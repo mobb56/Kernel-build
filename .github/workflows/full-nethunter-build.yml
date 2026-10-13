@@ -10863,23 +10863,26 @@ jobs:
                   echo "ERROR: modinfo could not read ${module}"
                   ls -l "${module}"
                   file "${module}"
+                  "${LLVM_DIR}/bin/llvm-readelf" -S "${module}" || true
+                  "${LLVM_DIR}/bin/llvm-readelf" -p .modinfo "${module}" || true
                  exit 1
 
-                 echo "=== loop.ko metadata diagnostic ==="
-                   "${LLVM_DIR}/bin/llvm-readelf" -S "${module}" || true
-                    "${LLVM_DIR}/bin/llvm-readelf" -p .modinfo "${module}" || true
+                
+                   
             fi
 
             if [ -z "${vermagic}" ]; then
                 echo "ERROR: empty vermagic in ${module}"
                 ls -l "${module}"
                 file "${module}"
-                exit 1
+                "${LLVM_DIR}/bin/llvm-readelf" -S "${module}" || true
+                "${LLVM_DIR}/bin/llvm-readelf" -p .modinfo "${module}" || true
+               exit 1
                 
-                echo "=== loop.ko metadata diagnostic ==="
-                       "${LLVM_DIR}/bin/llvm-readelf" -S "${module}" || true
-                       "${LLVM_DIR}/bin/llvm-readelf" -p .modinfo "${module}" || true
+              
+                       
            fi
+           
             echo "$(basename "${module}"): ${vermagic}"
 
             test "${vermagic}" = "${EXPECTED_VERMAGIC}"
