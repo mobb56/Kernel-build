@@ -2559,7 +2559,7 @@ jobs:
            CONFIG_NF_NAT=y
            CONFIG_NETFILTER_XTABLES=y
            CONFIG_NETFILTER_XT_TARGET_MARK=y
-           CONFIG_NETFILTER_XT_TARGET_NAT=y
+           CONFIG_NETFILTER_XT_NAT=y
            CONFIG_NETFILTER_XT_MATCH_CONNTRACK=m
            CONFIG_NETFILTER_XT_MATCH_MARK=m
            CONFIG_NETFILTER_XT_MATCH_MULTIPORT=m
@@ -3163,7 +3163,7 @@ jobs:
               CONFIG_NF_NAT=y
               CONFIG_NETFILTER_XTABLES=y
               CONFIG_NETFILTER_XT_TARGET_MARK=y
-              CONFIG_NETFILTER_XT_TARGET_NAT=y
+              CONFIG_NETFILTER_XT_NAT=y
               CONFIG_NETFILTER_XT_MATCH_CONNTRACK=m
               CONFIG_NETFILTER_XT_MATCH_MARK=m
               CONFIG_NETFILTER_XT_MATCH_MULTIPORT=m
@@ -11133,7 +11133,7 @@ jobs:
           require_config "CONFIG_NF_CONNTRACK" "ym"
           require_config "CONFIG_NETFILTER_XTABLES" "ym"
           require_config "CONFIG_NETFILTER_XT_TARGET_MARK" "ym"
-          require_config "CONFIG_NETFILTER_XT_TARGET_NAT" "y"
+          require_config "CONFIG_NETFILTER_XT_NAT" "ym"
           require_config "CONFIG_NETFILTER_XT_MATCH_CONNTRACK" "ym"
           require_config "CONFIG_NETFILTER_XT_MATCH_MARK" "ym"
           require_config "CONFIG_NETFILTER_XT_MATCH_MULTIPORT" "ym"
