@@ -2556,6 +2556,7 @@ jobs:
            CONFIG_NETFILTER=y
            CONFIG_NETFILTER_ADVANCED=y
            CONFIG_NF_CONNTRACK=y
+           CONFIG_NF_NAT=m
            CONFIG_NETFILTER_XTABLES=y
            CONFIG_NETFILTER_XT_TARGET_MARK=y
            CONFIG_NETFILTER_XT_TARGET_NAT=m
@@ -11135,6 +11136,7 @@ jobs:
           require_config "CONFIG_NETFILTER_XT_MATCH_CONNTRACK" "ym"
           require_config "CONFIG_NETFILTER_XT_MATCH_MARK" "ym"
           require_config "CONFIG_NETFILTER_XT_MATCH_MULTIPORT" "ym"
+          require_config "CONFIG_NF_NAT" "ym"
 
           require_config "CONFIG_FUSE_FS" "m"
           require_config "CONFIG_OVERLAY_FS" "m"
