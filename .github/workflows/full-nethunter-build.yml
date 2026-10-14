@@ -11120,7 +11120,7 @@ jobs:
           require_config "CONFIG_NET_NS" "y"
           require_config "CONFIG_VETH" "m"
           require_config "CONFIG_BRIDGE" "m"
-          require_config "CONFIG_BRIDGE_NETFILTER" "ym"
+          require_config "CONFIG_BRIDGE_NETFILTER" "y"
           require_config "CONFIG_VLAN_8021Q" "m"
           require_config "CONFIG_DUMMY" "m"
           require_config "CONFIG_MACVLAN" "m"
