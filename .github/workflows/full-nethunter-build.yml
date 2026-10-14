@@ -11254,8 +11254,8 @@ jobs:
 
           
           
-          require_module "nf_conntrack.ko"
-          require_module "nf_nat.ko"
+          
+          
           require_module "x_tables.ko"
           require_module "xt_mark.ko"
           require_module "xt_nat.ko"
