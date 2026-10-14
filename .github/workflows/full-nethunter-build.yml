@@ -2557,7 +2557,7 @@ jobs:
            CONFIG_NETFILTER_ADVANCED=y
            CONFIG_NF_CONNTRACK=y
            CONFIG_NETFILTER_XTABLES=y
-           CONFIG_NETFILTER_XT_TARGET_MARK=m
+           CONFIG_NETFILTER_XT_TARGET_MARK=y
            CONFIG_NETFILTER_XT_TARGET_NAT=m
            CONFIG_NETFILTER_XT_MATCH_CONNTRACK=m
            CONFIG_NETFILTER_XT_MATCH_MARK=m
@@ -3160,7 +3160,7 @@ jobs:
               CONFIG_NETFILTER_ADVANCED=y
               CONFIG_NF_CONNTRACK=y
               CONFIG_NETFILTER_XTABLES=y
-              CONFIG_NETFILTER_XT_TARGET_MARK=m
+              CONFIG_NETFILTER_XT_TARGET_MARK=y
               CONFIG_NETFILTER_XT_TARGET_NAT=m
               CONFIG_NETFILTER_XT_MATCH_CONNTRACK=m
               CONFIG_NETFILTER_XT_MATCH_MARK=m
@@ -11130,7 +11130,7 @@ jobs:
           require_config "CONFIG_NETFILTER_ADVANCED" "y"
           require_config "CONFIG_NF_CONNTRACK" "y"
           require_config "CONFIG_NETFILTER_XTABLES" "y"
-          require_config "CONFIG_NETFILTER_XT_TARGET_MARK" "m"
+          require_config "CONFIG_NETFILTER_XT_TARGET_MARK" "y"
           require_config "CONFIG_NETFILTER_XT_TARGET_NAT" "m"
           require_config "CONFIG_NETFILTER_XT_MATCH_CONNTRACK" "m"
           require_config "CONFIG_NETFILTER_XT_MATCH_MARK" "m"
