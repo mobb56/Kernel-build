@@ -11172,7 +11172,14 @@ jobs:
           }
 
           # CONFIG_TUN=y
-          require_builtin_symbol "tun_init"
+          if "${LLVM_DIR}/bin/llvm-nm" "${VMLINUX}" 2>/dev/null | grep -E ' [Tt] tun_init$'; then
+            echo "PASS: tun_init found in vmlinux"
+           elif grep -w 'tun_init' "${OUT_DIR}/System.map"; then
+            echo "PASS: tun_init found in System.map"
+           else
+           echo "ERROR: tun_init not found in vmlinux or System.map"
+          exit 1
+          fi
 
           # CONFIG_NET_NS=y
           require_builtin_symbol "copy_net_ns"
