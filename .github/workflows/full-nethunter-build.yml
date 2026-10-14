@@ -2543,7 +2543,7 @@ jobs:
           CONFIG_NET_NS=y
           CONFIG_VETH=m
           CONFIG_BRIDGE=m
-          CONFIG_BRIDGE_NETFILTER=y
+          CONFIG_BRIDGE_NETFILTER=m
           CONFIG_VLAN_8021Q=m
           CONFIG_DUMMY=m
           CONFIG_MACVLAN=m
@@ -3149,7 +3149,7 @@ jobs:
               CONFIG_NET_NS=y
               CONFIG_VETH=m
               CONFIG_BRIDGE=m
-              CONFIG_BRIDGE_NETFILTER=y
+              CONFIG_BRIDGE_NETFILTER=m
               CONFIG_VLAN_8021Q=m
               CONFIG_DUMMY=m
               CONFIG_MACVLAN=m
@@ -11120,7 +11120,7 @@ jobs:
           require_config "CONFIG_NET_NS" "y"
           require_config "CONFIG_VETH" "m"
           require_config "CONFIG_BRIDGE" "m"
-          require_config "CONFIG_BRIDGE_NETFILTER" "y"
+          require_config "CONFIG_BRIDGE_NETFILTER" "m"
           require_config "CONFIG_VLAN_8021Q" "m"
           require_config "CONFIG_DUMMY" "m"
           require_config "CONFIG_MACVLAN" "m"
@@ -11178,7 +11178,7 @@ jobs:
           require_builtin_symbol "nf_register_net_hook"
 
           # CONFIG_BRIDGE_NETFILTER=y
-          require_builtin_symbol "br_netfilter_init"
+          require_module "br_netfilter.ko"
 
           # CONFIG_TMPFS=y
           require_builtin_symbol "shmem_init"
