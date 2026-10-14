@@ -11202,14 +11202,7 @@ jobs:
           fi
 
           # CONFIG_BRIDGE_NETFILTER=y
-          if "${LLVM_DIR}/bin/llvm-nm" "${VMLINUX}" 2>/dev/null | grep -E ' [Tt] br_netfilter.ko$'; then
-            echo "PASS: br_netfilter.ko found in vmlinux"
-           elif grep -w 'br_netfilter.ko' "${OUT_DIR}/System.map"; then
-          echo "PASS: br_netfilter.ko found in System.map"
-          else
-           echo "ERROR: br_netfilter.ko not found in vmlinux or System.map"
-          exit 1
-          fi
+          require_module "br_netfilter.ko"
          
 
           # CONFIG_TMPFS=y
