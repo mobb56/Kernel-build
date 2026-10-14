@@ -11136,7 +11136,7 @@ jobs:
           require_config "CONFIG_NETFILTER_XT_MATCH_MARK" "m"
           require_config "CONFIG_NETFILTER_XT_MATCH_MULTIPORT" "m"
 
-          require_config "CONFIG_FUSE_FS" "y"
+          require_config "CONFIG_FUSE_FS" "m"
           require_config "CONFIG_OVERLAY_FS" "m"
           require_config "CONFIG_BLK_DEV_LOOP" "m"
           require_config "CONFIG_SQUASHFS" "m"
