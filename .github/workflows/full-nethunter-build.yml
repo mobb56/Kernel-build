@@ -11182,16 +11182,45 @@ jobs:
           fi
 
           # CONFIG_NET_NS=y
-          require_builtin_symbol "copy_net_ns"
+          if "${LLVM_DIR}/bin/llvm-nm" "${VMLINUX}" 2>/dev/null | grep -E ' [Tt] copy_net_ns$'; then
+            echo "PASS: copy_net_ns found in vmlinux"
+          elif grep -w 'copy_net_ns' "${OUT_DIR}/System.map"; then
+           echo "PASS: copy_net_ns found in System.map"
+          else
+          echo "ERROR: copy_net_ns not found in vmlinux or System.map"
+          exit 1
+          fi
 
           # CONFIG_NETFILTER=y
-          require_builtin_symbol "nf_register_net_hook"
+          if "${LLVM_DIR}/bin/llvm-nm" "${VMLINUX}" 2>/dev/null | grep -E ' [Tt] nf_register_net_hook$'; then
+           echo "PASS: nf_register_net_hook found in vmlinux"
+          elif grep -w 'nf_register_net_hook' "${OUT_DIR}/System.map"; then
+           echo "PASS: nf_register_net_hook found in System.map"
+          else
+          echo "ERROR: nf_register_net_hook not found in vmlinux or System.map"
+          exit 1
+          fi
 
           # CONFIG_BRIDGE_NETFILTER=y
-          require_module "br_netfilter.ko"
+          if "${LLVM_DIR}/bin/llvm-nm" "${VMLINUX}" 2>/dev/null | grep -E ' [Tt] br_netfilter.ko$'; then
+            echo "PASS: br_netfilter.ko found in vmlinux"
+           elif grep -w 'br_netfilter.ko' "${OUT_DIR}/System.map"; then
+          echo "PASS: br_netfilter.ko found in System.map"
+          else
+           echo "ERROR: br_netfilter.ko not found in vmlinux or System.map"
+          exit 1
+          fi
+         
 
           # CONFIG_TMPFS=y
-          require_builtin_symbol "shmem_init"
+          if "${LLVM_DIR}/bin/llvm-nm" "${VMLINUX}" 2>/dev/null | grep -E ' [Tt] shmem_init$'; then
+           echo "PASS: shmem_init found in vmlinux"
+          elif grep -w 'shmem_init' "${OUT_DIR}/System.map"; then
+          echo "PASS: shmem_init found in System.map"
+          else
+          echo "ERROR: shmem_init not found in vmlinux or System.map"
+          exit 1
+          fi
 
           echo
           echo "PASS: requested built-in NetHunter functionality is present in vmlinux"
