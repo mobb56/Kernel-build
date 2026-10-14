@@ -11201,9 +11201,7 @@ jobs:
           exit 1
           fi
 
-          # CONFIG_BRIDGE_NETFILTER=y
-          require_module "br_netfilter.ko"
-         
+          
 
           # CONFIG_TMPFS=y
           if "${LLVM_DIR}/bin/llvm-nm" "${VMLINUX}" 2>/dev/null | grep -E ' [Tt] shmem_init$'; then
@@ -11249,6 +11247,7 @@ jobs:
           require_module "veth.ko"
           require_module "bridge.ko"
           require_module "8021q.ko"
+          require_module "br_netfilter.ko"
           require_module "dummy.ko"
           require_module "macvlan.ko"
           require_module "ipvlan.ko"
