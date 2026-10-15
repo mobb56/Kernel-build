@@ -993,21 +993,75 @@ jobs:
 
           grep -nE 'wlan_hdd_frame_inject\.o|wma_frame_inject\.o|FEATURE_(FRAME_INJECTION|MONITOR_MODE)_SUPPORT' "$KB"
 
+    
+    
+    
       - name: Fix WMA and HDD include paths
         working-directory: kernel
         shell: bash
         run: |
-          set -euo pipefail
-          KB="drivers/staging/qcacld-3.0/Kbuild"
-          HDD_INC='ccflags-y += -I$(srctree)/$(WLAN_ROOT)/core/hdd/inc'
-          if ! grep -Fxq "$HDD_INC" "$KB"; then
-            L="$(grep -nF 'ccflags-y += $(WMA_INC)' "$KB" | head -n1 | cut -d: -f1 || true)"
-            if [ -n "$L" ]; then
-              sed -i "${L}a\\
-          ${HDD_INC}" "$KB"
+            set -euo pipefail
+            KB="drivers/staging/qcacld-3.0/Kbuild"
+            test -f "$KB"
+
+            echo "=== Existing include flags in QCACLD3 Kbuild ==="
+            grep -nE 'ccflags-y|subdir-ccflags-y|WLAN_ROOT|HDD_INC|WMA_INC' "$KB" | head -40 || true
+
+            # Determine the correct path prefix used by this Kbuild.
+            # Typically it's $(srctree)/$(WLAN_ROOT)/core/hdd/inc
+             HDD_INC_LINE='ccflags-y += -I$(srctree)/$(WLAN_ROOT)/core/hdd/inc'
+             WMA_INC_LINE='ccflags-y += -I$(srctree)/$(WLAN_ROOT)/core/wma/inc'
+
+              add_if_missing() {
+                 local line="$1"
+                  if grep -Fqx "$line" "$KB"; then
+                echo "Already present: $line"
+             return 0
+              fi
+              # Insert after the first ccflags-y line in the file, or at the top.
+              local anchor
+              anchor="$(grep -nE '^[[:space:]]*ccflags-y[[:space:]]*\+=' "$KB" | head -n1 | cut -d: -f1 || true)"
+              if [ -n "$anchor" ]; then
+               sed -i "${anchor}i ${line}" "$KB"
+               echo "Inserted after first ccflags-y at line $anchor: $line"
+            else
+              sed -i "1i ${line}" "$KB"
+              echo "Inserted at file top: $line"
             fi
-          fi
-          grep -Fq "$HDD_INC" "$KB" || echo "WARN: HDD include line not found"
+            }
+
+            add_if_missing "$HDD_INC_LINE"
+            add_if_missing "$WMA_INC_LINE"
+
+              echo
+              echo "=== Verify include flags ==="
+               grep -Fq "$HDD_INC_LINE" "$KB"
+               grep -Fq "$WMA_INC_LINE" "$KB"
+             grep -nE 'core/(hdd|wma)/inc' "$KB" | head -20
+
+            echo "PASS: QCACLD3 include paths configured."
+
+
+       
+      - name: Verify injection headers are present
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+            echo "=== Looking for wlan_hdd_frame_inject.h ==="
+           find drivers/staging/qcacld-3.0 -name 'wlan_hdd_frame_inject.h' -print
+           find drivers/staging/qcacld-3.0 -name 'wma_frame_inject.h' -print
+
+          echo
+          echo "=== hdd/inc directory ==="
+          ls -la drivers/staging/qcacld-3.0/core/hdd/inc/ | head -30 || true
+          
+          echo
+          echo "=== Include line in the .c file ==="
+             grep -n '#include.*frame_inject' \
+            drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.c || true
+              grep -n '#include.*frame_inject' \
+             drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c || true
 
       - name: Build kernel
         working-directory: kernel
