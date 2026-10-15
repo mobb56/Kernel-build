@@ -2526,6 +2526,31 @@ jobs:
           CONFIG_USB_RTL8150=m
           CONFIG_USB_RTL8152=m
 
+          # USB serial adapter support
+           CONFIG_USB_SERIAL_CH341=m
+           CONFIG_USB_SERIAL_CP210X=m
+           CONFIG_USB_SERIAL_FTDI_SIO=m
+           CONFIG_USB_SERIAL_PL2303=m
+           CONFIG_USB_SERIAL_QUALCOMM=m
+           CONFIG_USB_SERIAL_OPTION=m
+
+          # USB/IP and virtual host controller
+            CONFIG_USBIP_CORE=m
+            CONFIG_USBIP_VHCI_HCD=m
+
+          # Controller Area Network (CAN)
+             CONFIG_CAN=m
+             CONFIG_CAN_RAW=m
+             CONFIG_CAN_BCM=m
+             CONFIG_CAN_GW=m
+             CONFIG_CAN_VCAN=m
+             CONFIG_CAN_VXCAN=m
+             CONFIG_CAN_ISOTP=m
+             CONFIG_CAN_SLCAN=m
+             CONFIG_CAN_GS_USB=m
+             CONFIG_CAN_KVASER_USB=m
+             CONFIG_CAN_PEAK_USB=m
+
 
           # ============================================================
           # PACKET SOCKETS
