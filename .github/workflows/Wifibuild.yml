@@ -816,67 +816,117 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          HS="drivers/staging/qcacld-3.0/core/hdd/src"
-          TARGET="$(grep -RIl 'hdd_set_station_ops[[:space:]]*(struct net_device' "$HS" 2>/dev/null | head -n1 || true)"
-          if [ -z "$TARGET" ]; then
-            echo "WARN: hdd_set_station_ops not found"
-            exit 0
+           HS="drivers/staging/qcacld-3.0/core/hdd/src"
+           TARGET="$(grep -RIl 'hdd_set_station_ops[[:space:]]*(struct net_device' "$HS" 2>/dev/null | head -n1 || true)"
+           if [ -z "$TARGET" ]; then
+           echo "WARN: hdd_set_station_ops not found"
+          exit 0
           fi
-          echo "Target: $TARGET"
+           echo "Target: $TARGET"
 
-          cat > /tmp/station_ops.awk <<'AWK'
-          BEGIN {
-              in_func = 0
-              depth = 0
-              started = 0
-              replaced = 0
+         
+           echo
+           echo "=== ORIGINAL DEFINITION (for debugging) ==="
+              grep -n -B3 -A25 'hdd_set_station_ops[[:space:]]*(' "$TARGET" | head -80 || true
+            echo "=== END ORIGINAL ==="
+           echo
+
+             if grep -q 'NETHUNTER_MONITOR_NETDEV_OPS' "$TARGET"; then
+               echo "PASS: monitor netdev ops already present."
+          exit 0
+          fi
+
+           cat > /tmp/station_ops2.awk <<'AWK'
+            BEGIN {
+           armed = 0
+           depth = 0
+           started = 0
+           replaced = 0
+           drop = 0
           }
-          !in_func && /^[[:space:]]*(static[[:space:]]+)?void[[:space:]]+hdd_set_station_ops[[:space:]]*\([[:space:]]*struct[[:space:]]+net_device[[:space:]]*\*[[:space:]]*dev[[:space:]]*\)[[:space:]]*\{/ {
-              in_func = 1
-              print "void hdd_set_station_ops(struct net_device *dev)"
-              print "{"
-              print "\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
-              print "\t/* NETHUNTER_MONITOR_NETDEV_OPS */"
-              print "\tif (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||"
-              print "\t    (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {"
-              print "\t\tdev->netdev_ops = &wlan_mon_drv_ops;"
-              print "\t} else {"
-              print "\t\tdev->netdev_ops = &wlan_drv_ops;"
-              print "\t}"
-              print "\tdev->ethtool_ops = &wlan_ethtool_ops;"
-              print "}"
-              replaced = 1
+
+          # Step 1: arm as soon as we see the function name.
+          # Print the line first, then set armed.
+             !armed && /hdd_set_station_ops[[:space:]]*\(/ {
+           armed = 1
+           print
+           next
+          }
+
+          # Step 2: while armed and not yet started, look for the first '{'.
+          # If we find it on the same line as more content, replace the
+          # entire line with our new function.
+            armed && !started {
+             line = $0
+             opens = gsub(/\{/, "{", line)
+            closes = gsub(/\}/, "}", line)
+
+          if (opens > 0) {
+            # We've reached the opening brace. Emit the new body
+            # and mark the function as being inside our replacement.
+            print "void hdd_set_station_ops(struct net_device *dev)"
+            print "{"
+            print "\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);"
+            print "\t/* NETHUNTER_MONITOR_NETDEV_OPS */"
+            print "\tif (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||"
+            print "\t    (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {"
+            print "\t\tdev->netdev_ops = &wlan_mon_drv_ops;"
+            print "\t} else {"
+            print "\t\tdev->netdev_ops = &wlan_drv_ops;"
+            print "\t}"
+            print "\tdev->ethtool_ops = &wlan_ethtool_ops;"
+            print "}"
+
+            replaced = 1
+            started = 1
+            drop = 1
+            depth += opens - closes
+            next
+           }
+
+          # Still in the signature/declaration area. Drop these lines.
+          drop = 1
+          next
+          }
+
+          # Step 3: swallow the original function body until brace balance
+          # returns to zero.
+            started {
               line = $0
               opens = gsub(/\{/, "{", line)
               closes = gsub(/\}/, "}", line)
-              depth += opens - closes
-              if (opens > 0) started = 1
-              next
+               depth += opens - closes
+              if (depth == 0) {
+               started = 0
+               armed = 0
+               drop = 0
+            }
+            next
           }
-          in_func {
-              line = $0
-              opens = gsub(/\{/, "{", line)
-              closes = gsub(/\}/, "}", line)
-              depth += opens - closes
-              if (started && depth == 0) in_func = 0
-              next
-          }
+
           { print }
-          END {
-              if (!replaced) {
-                  print "ERROR: hdd_set_station_ops not replaced" > "/dev/stderr"
-                  exit 2
-              }
+
+           END {
+                if (!replaced) {
+                print "ERROR: hdd_set_station_ops body not replaced" > "/dev/stderr"
+             exit 2
+           }
           }
           AWK
 
-          awk -f /tmp/station_ops.awk "$TARGET" > "${TARGET}.new"
-          mv "${TARGET}.new" "$TARGET"
+            awk -f /tmp/station_ops2.awk "$TARGET" > "${TARGET}.new"
+             mv "${TARGET}.new" "$TARGET"
 
-          grep -q 'NETHUNTER_MONITOR_NETDEV_OPS' "$TARGET"
-          grep -q 'wlan_mon_drv_ops' "$TARGET"
-          grep -q 'wlan_drv_ops' "$TARGET"
-          grep -q 'wlan_ethtool_ops' "$TARGET"
+              echo "=== NEW DEFINITION ==="
+              grep -n -B2 -A15 'NETHUNTER_MONITOR_NETDEV_OPS' "$TARGET"
+
+            grep -q 'NETHUNTER_MONITOR_NETDEV_OPS' "$TARGET"
+            grep -q 'wlan_mon_drv_ops' "$TARGET"
+            grep -q 'wlan_drv_ops' "$TARGET"
+            grep -q 'wlan_ethtool_ops' "$TARGET"
+
+            echo "PASS: hdd_set_station_ops replaced."
+        
 
       - name: Enable QCACLD3 injection Kbuild features
         working-directory: kernel
