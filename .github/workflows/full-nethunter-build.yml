@@ -11266,9 +11266,24 @@ jobs:
             echo "ERROR: CONFIG_NETFILTER_XT_NAT is neither built-in nor a module"
            exit 1
           fi
-          require_module "xt_conntrack.ko"
-          require_module "xt_multiport.ko"
+          
+            if grep -q '^CONFIG_NETFILTER_XT_MATCH_CONNTRACK=m$' "${OUT_DIR}/.config"; then
+             require_module "xt_conntrack.ko"
+            elif grep -q '^CONFIG_NETFILTER_XT_MATCH_CONNTRACK=y$' "${OUT_DIR}/.config"; then
+             echo "PASS: CONFIG_NETFILTER_XT_MATCH_CONNTRACK is built into the kernel"
+            else
+             echo "ERROR: CONFIG_NETFILTER_XT_MATCH_CONNTRACK is disabled"
+          exit 1
+          fi
 
+           if grep -q '^CONFIG_NETFILTER_XT_MATCH_MULTIPORT=m$' "${OUT_DIR}/.config"; then
+             require_module "xt_multiport.ko"
+           elif grep -q '^CONFIG_NETFILTER_XT_MATCH_MULTIPORT=y$' "${OUT_DIR}/.config"; then
+           echo "PASS: CONFIG_NETFILTER_XT_MATCH_MULTIPORT is built into the kernel"
+           else
+            echo "ERROR: CONFIG_NETFILTER_XT_MATCH_MULTIPORT is disabled"
+          exit 1
+          fi
           
           require_module "overlay.ko"
           require_module "loop.ko"
