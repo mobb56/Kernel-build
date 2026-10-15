@@ -1,0 +1,1250 @@
+name: Moto G9 Power cebu NetHunter
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_kernel:
+        description: "Run the kernel compilation after all static audits pass"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  KERNEL_REPO: https://github.com/LineageOS/android_kernel_motorola_sm6225.git
+  KERNEL_BRANCH: lineage-23.2
+  KERNEL_COMMIT: 39bcecd5c63df849923b1faadc9cde482648a1a1
+  NETHUNTER_REPO: https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git
+  NETHUNTER_BRANCH: nethunter-lineage-23.2
+  ARCH: arm64
+  CROSS_COMPILE: aarch64-linux-gnu-
+  OUT_DIR: out
+  EXPECTED_RELEASE: "4.19.325-cip135-st19-perf-g39bcecd5c63d"
+  LOCALVERSION_SUFFIX: "-g39bcecd5c63d"
+
+jobs:
+  build:
+    name: Build cebu NetHunter kernel
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout build repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential ccache flex \
+            gcc-aarch64-linux-gnu git kmod libssl-dev \
+            curl python3 rsync unzip wget xz-utils zip \
+            device-tree-compiler
+
+      # ============================================================
+      # LLVM / CLANG
+      # ============================================================
+      - name: Install Android LLVM clang-r563880c
+        shell: bash
+        run: |
+          set -euo pipefail
+          NDK_VERSION="r29"
+          NDK_ARCHIVE="android-ndk-r29-linux.zip"
+          NDK_URL="https://dl.google.com/android/repository/${NDK_ARCHIVE}"
+          NDK_SHA1="87e2bb7e9be5d6a1c6cdf5ec40dd4e0c6d07c30b"
+          NDK_ROOT="${GITHUB_WORKSPACE}/android-ndk-r29"
+          ANDROID_LLVM_DIR="${GITHUB_WORKSPACE}/android-llvm"
+          NDK_ZIP="${RUNNER_TEMP}/${NDK_ARCHIVE}"
+          rm -rf "${NDK_ROOT}" "${ANDROID_LLVM_DIR}"
+          rm -f "${NDK_ZIP}"
+          curl -fL --retry 5 --retry-delay 5 --retry-all-errors \
+            -o "${NDK_ZIP}" "${NDK_URL}"
+          echo "${NDK_SHA1}  ${NDK_ZIP}" | sha1sum -c -
+          unzip -q "${NDK_ZIP}" -d "${GITHUB_WORKSPACE}"
+          cp -a "${NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64" "${ANDROID_LLVM_DIR}"
+          "${ANDROID_LLVM_DIR}/bin/clang" --version | grep -F "clang version 21.0.0"
+
+      - name: Prepare Android LLVM toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          ANDROID_LLVM_DIR="${GITHUB_WORKSPACE}/android-llvm"
+          LLVM_BIN="${ANDROID_LLVM_DIR}/bin"
+          for t in clang ld.lld llvm-ar llvm-nm llvm-objcopy llvm-strip llvm-readelf llvm-objdump; do
+            test -x "${LLVM_BIN}/${t}"
+          done
+          echo "LLVM_DIR=${ANDROID_LLVM_DIR}" >> "${GITHUB_ENV}"
+          echo "LLVM_BIN=${LLVM_BIN}" >> "${GITHUB_ENV}"
+          echo "PATH=${LLVM_BIN}:${PATH}" >> "${GITHUB_ENV}"
+
+      - name: Verify stock cebu configuration
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -f cebu-stock.config
+          test -s cebu-stock.config
+          wc -l cebu-stock.config
+
+      # ============================================================
+      # KERNEL SOURCE
+      # ============================================================
+      - name: Clone cebu kernel source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf kernel
+          git clone --branch "${KERNEL_BRANCH}" --single-branch \
+            "${KERNEL_REPO}" kernel
+          cd kernel
+          git checkout "${KERNEL_COMMIT}"
+          test "$(git rev-parse HEAD)" = "${KERNEL_COMMIT}"
+          test -f arch/arm64/configs/vendor/bengal-perf_defconfig
+          test -d drivers/staging/qcacld-3.0
+
+      - name: Clone NetHunter reference
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf nethunter-reference
+          git clone --depth=1 --branch "${NETHUNTER_BRANCH}" \
+            "${NETHUNTER_REPO}" nethunter-reference
+          test -d nethunter-reference/drivers/staging/qcacld-3.0
+
+      - name: Verify required injection sources
+        shell: bash
+        run: |
+          set -euxo pipefail
+          NH="nethunter-reference/drivers/staging/qcacld-3.0"
+          for f in \
+            "${NH}/core/hdd/src/wlan_hdd_frame_inject.c" \
+            "${NH}/core/hdd/src/wlan_hdd_frame_validate.c" \
+            "${NH}/core/hdd/src/wlan_hdd_inject_security.c" \
+            "${NH}/core/hdd/src/wlan_hdd_frame_inject_debug.c" \
+            "${NH}/core/wma/src/wma_frame_inject.c" \
+            "${NH}/core/hdd/inc/wlan_hdd_frame_inject.h" \
+            "${NH}/core/wma/inc/wma_frame_inject.h"
+          do
+            test -f "$f" || { echo "MISSING: $f"; exit 1; }
+          done
+          echo "All injection sources present."
+
+      # ============================================================
+      # EXTRACT REAL ATTRIBUTE ENUM FOR USERSPACE INJECTOR
+      # ============================================================
+      - name: Extract HDD_FRAME_INJECT_ATTR enum
+        id: attrs
+        shell: bash
+        run: |
+          set -euo pipefail
+          HDR="nethunter-reference/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h"
+          test -f "$HDR"
+
+          echo "=== HDD_FRAME_INJECT_ATTR enum block ==="
+          sed -n '/enum hdd_frame_inject_attr/,/};/p' "$HDR" | tee /tmp/attrs.txt || true
+
+          DATA_ID="$(grep -oE 'HDD_FRAME_INJECT_ATTR_FRAME_DATA[[:space:]]*=[[:space:]]*[0-9]+' "$HDR" | grep -oE '[0-9]+' | head -n1 || true)"
+          LEN_ID="$(grep -oE 'HDD_FRAME_INJECT_ATTR_FRAME_LEN[[:space:]]*=[[:space:]]*[0-9]+' "$HDR" | grep -oE '[0-9]+' | head -n1 || true)"
+          VDEV_ID="$(grep -oE 'HDD_FRAME_INJECT_ATTR_(VDEV_ID|VDEV)[[:space:]]*=[[:space:]]*[0-9]+' "$HDR" | grep -oE '[0-9]+' | head -n1 || true)"
+
+          if [ -z "$DATA_ID" ]; then
+            echo "WARN: could not find HDD_FRAME_INJECT_ATTR_FRAME_DATA value"
+            echo "Falling back to sequential enum ordering."
+            # Fallback: derive order from enum block
+            DATA_ID="$(awk '/enum hdd_frame_inject_attr/,/};/' "$HDR" | grep -oE 'HDD_FRAME_INJECT_ATTR_[A-Z_]+' | grep -n 'HDD_FRAME_INJECT_ATTR_FRAME_DATA' | cut -d: -f1 || echo 1)"
+            LEN_ID="$(awk '/enum hdd_frame_inject_attr/,/};/' "$HDR" | grep -oE 'HDD_FRAME_INJECT_ATTR_[A-Z_]+' | grep -n 'HDD_FRAME_INJECT_ATTR_FRAME_LEN' | cut -d: -f1 || echo 2)"
+          fi
+
+          [ -z "$DATA_ID" ] && DATA_ID=1
+          [ -z "$LEN_ID" ] && LEN_ID=2
+          [ -z "$VDEV_ID" ] && VDEV_ID=3
+
+          echo "ATTR_FRAME_DATA=$DATA_ID"
+          echo "ATTR_FRAME_LEN=$LEN_ID"
+          echo "ATTR_VDEV_ID=$VDEV_ID"
+
+          echo "ATTR_FRAME_DATA=$DATA_ID" >> "$GITHUB_ENV"
+          echo "ATTR_FRAME_LEN=$LEN_ID"   >> "$GITHUB_ENV"
+          echo "ATTR_VDEV_ID=$VDEV_ID"     >> "$GITHUB_ENV"
+
+      # ============================================================
+      # CONFIGURATION
+      # ============================================================
+      - name: Load stock cebu configuration
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd kernel
+          rm -rf "${OUT_DIR}"
+          mkdir -p "${OUT_DIR}"
+          cp "${GITHUB_WORKSPACE}/cebu-stock.config" "${OUT_DIR}/.config"
+          test -s "${OUT_DIR}/.config"
+          cp "${OUT_DIR}/.config" "${OUT_DIR}/stock-before-nethunter.config"
+
+      - name: Create NetHunter additive configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p kernel/nethunter-config
+          cat > kernel/nethunter-config/cebu-nethunter.config <<'EOF'
+          CONFIG_HID=y
+          CONFIG_HIDRAW=y
+          CONFIG_UHID=y
+          CONFIG_BT=y
+          CONFIG_BT_BREDR=y
+          CONFIG_BT_LE=y
+          CONFIG_BT_RFCOMM=y
+          CONFIG_BT_RFCOMM_TTY=y
+          CONFIG_BT_BNEP=m
+          CONFIG_BT_BNEP_MC_FILTER=y
+          CONFIG_BT_BNEP_PROTO_FILTER=y
+          CONFIG_BT_HIDP=m
+          CONFIG_BT_HCIUART=m
+          CONFIG_BT_HCIUART_H4=y
+          CONFIG_BT_HCIVHCI=m
+          CONFIG_USB_GADGET=y
+          CONFIG_USB_CONFIGFS=y
+          CONFIG_USB_CONFIGFS_UEVENT=y
+          CONFIG_USB_CONFIGFS_ACM=y
+          CONFIG_USB_CONFIGFS_NCM=y
+          CONFIG_USB_CONFIGFS_RNDIS=y
+          CONFIG_USB_CONFIGFS_ECM=y
+          CONFIG_USB_CONFIGFS_EEM=y
+          CONFIG_USB_CONFIGFS_F_FS=y
+          CONFIG_USB_CONFIGFS_F_HID=y
+          CONFIG_USB_SERIAL=y
+          CONFIG_USB_SERIAL_GENERIC=y
+          CONFIG_USB_ACM=m
+          CONFIG_USB_USBNET=m
+          CONFIG_USB_NET_CDCETHER=m
+          CONFIG_USB_NET_CDC_NCM=m
+          CONFIG_USB_RTL8150=m
+          CONFIG_USB_RTL8152=m
+          CONFIG_PACKET=y
+          CONFIG_TUN=y
+          CONFIG_NET_NS=y
+          CONFIG_VETH=m
+          CONFIG_BRIDGE=m
+          CONFIG_BRIDGE_NETFILTER=m
+          CONFIG_VLAN_8021Q=m
+          CONFIG_DUMMY=m
+          CONFIG_MACVLAN=m
+          CONFIG_IPVLAN=m
+          CONFIG_NETFILTER=y
+          CONFIG_NETFILTER_ADVANCED=y
+          CONFIG_NF_CONNTRACK=m
+          CONFIG_NF_NAT=m
+          CONFIG_NETFILTER_XTABLES=y
+          CONFIG_NETFILTER_XT_MARK=m
+          CONFIG_NETFILTER_XT_NAT=y
+          CONFIG_NETFILTER_XT_MATCH_CONNTRACK=m
+          CONFIG_NETFILTER_XT_MATCH_MARK=m
+          CONFIG_NETFILTER_XT_MATCH_MULTIPORT=m
+          CONFIG_FUSE_FS=m
+          CONFIG_OVERLAY_FS=m
+          CONFIG_BLK_DEV_LOOP=m
+          CONFIG_SQUASHFS=m
+          CONFIG_SQUASHFS_XATTR=y
+          CONFIG_TMPFS=y
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_SENSORS_SSC=y
+          CONFIG_SENSORS_CLASS=m
+          CONFIG_WLAN=y
+          CONFIG_QCA_CLD_WLAN=m
+          EOF
+          test -s kernel/nethunter-config/cebu-nethunter.config
+
+      - name: Merge NetHunter configuration
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd kernel
+          scripts/kconfig/merge_config.sh \
+            -m -O "${OUT_DIR}" \
+            "${OUT_DIR}/stock-before-nethunter.config" \
+            nethunter-config/cebu-nethunter.config
+          test -s "${OUT_DIR}/.config"
+
+      - name: Resolve Kconfig dependencies
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="${LLVM_BIN}:${PATH}"
+          make O="${OUT_DIR}" ARCH="${ARCH}" LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" olddefconfig
+
+      - name: Set kernel release to stock-compatible release
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          CONFIG="${OUT_DIR}/.config"
+          scripts/config --file "${CONFIG}" \
+            --disable LOCALVERSION_AUTO \
+            --set-str LOCALVERSION "-perf"
+          : > .scmversion
+          grep -Fxq 'CONFIG_LOCALVERSION="-perf"' "${CONFIG}"
+          grep -Fxq '# CONFIG_LOCALVERSION_AUTO is not set' "${CONFIG}"
+          RELEASE="$(make -s O="${OUT_DIR}" ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            LOCALVERSION="${LOCALVERSION_SUFFIX}" kernelrelease)"
+          echo "RELEASE=${RELEASE}"
+          test "${RELEASE}" = "${EXPECTED_RELEASE}"
+
+      # ============================================================
+      # IMPORT INJECTION SOURCES
+      # ============================================================
+      - name: Import QCACLD3 injection sources
+        shell: bash
+        run: |
+          set -euxo pipefail
+          K="${GITHUB_WORKSPACE}/kernel/drivers/staging/qcacld-3.0"
+          N="${GITHUB_WORKSPACE}/nethunter-reference/drivers/staging/qcacld-3.0"
+
+          cp "${N}/core/hdd/src/wlan_hdd_frame_inject.c"        "${K}/core/hdd/src/"
+          cp "${N}/core/hdd/src/wlan_hdd_frame_validate.c"      "${K}/core/hdd/src/"
+          cp "${N}/core/hdd/src/wlan_hdd_inject_security.c"     "${K}/core/hdd/src/"
+          cp "${N}/core/hdd/src/wlan_hdd_frame_inject_debug.c"  "${K}/core/hdd/src/"
+          cp "${N}/core/wma/src/wma_frame_inject.c"             "${K}/core/wma/src/"
+
+          mkdir -p "${K}/core/wma/inc"
+
+          find "${N}" -type f \( \
+              -name '*frame*inject*.h' -o \
+              -name '*inject*security*.h' -o \
+              -name '*frame*validate*.h' \) -print | while read -r h; do
+            rel="${h#${N}/}"
+            mkdir -p "$(dirname "${K}/${rel}")"
+            cp "$h" "${K}/${rel}"
+            echo "Imported header: ${rel}"
+          done
+
+          test -f "${K}/core/hdd/inc/wlan_hdd_frame_inject.h"
+          test -f "${K}/core/wma/inc/wma_frame_inject.h"
+
+      - name: Remove duplicate injection helper definitions
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          FRAME_H="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_frame_inject.h"
+          SEC_H="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_inject_security.h"
+          test -f "$FRAME_H"
+          test -f "$SEC_H"
+
+          python3 - "$FRAME_H" <<'PY'
+import pathlib, re, sys
+p = pathlib.Path(sys.argv[1])
+text = p.read_text()
+# Remove duplicate static-inline helpers that also live in the security header.
+for name in ("hdd_get_injection_stats", "hdd_reset_injection_stats"):
+    pat = re.compile(
+        r'\nstatic\s+inline\s+QDF_STATUS\s+' + name + r'\s*\([^)]*\)\s*\{.*?\n\}\n',
+        re.S
+    )
+    text, n = pat.subn('\n', text)
+    print(f"Removed {n} copy(ies) of {name} from frame_inject.h")
+p.write_text(text)
+PY
+
+      # ============================================================
+      # CORE INTEGRATION PATCHES
+      # ============================================================
+      - name: Integrate injection context into HDD adapter
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN_H="drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h"
+          test -f "$MAIN_H"
+
+          python3 - "$MAIN_H" <<'PY'
+import pathlib, re, sys
+p = pathlib.Path(sys.argv[1])
+text = p.read_text()
+
+anchor = re.search(r'^struct\s+hdd_adapter\s*\{', text, re.M)
+if not anchor:
+    raise SystemExit("FATAL: struct hdd_adapter not found")
+
+brace = text.find("{", anchor.end() - 1)
+depth = 0
+end = None
+for i in range(brace, len(text)):
+    c = text[i]
+    if c == "{": depth += 1
+    elif c == "}":
+        depth -= 1
+        if depth == 0:
+            end = i; break
+if end is None:
+    raise SystemExit("FATAL: end of struct hdd_adapter not found")
+
+# Idempotency
+if "injection_ctx" in text[brace:end]:
+    print("PASS: injection_ctx already present.")
+    sys.exit(0)
+
+member = (
+    "\n#ifdef FEATURE_FRAME_INJECTION_SUPPORT\n"
+    "\tstruct hdd_injection_ctx *injection_ctx;\n"
+    "#endif\n"
+)
+
+text = text[:end] + member + text[end:]
+p.write_text(text)
+print("PASS: injection_ctx member added.")
+PY
+
+      - name: Integrate injection API into HDD main
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+          test -f "$MAIN_C"
+
+          sed -i '/wlan_hdd_frame_inject\.h/d' "$MAIN_C"
+          python3 - "$MAIN_C" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+lines = p.read_text().splitlines(True)
+for i, l in enumerate(lines):
+    if l.startswith("#include"):
+        lines.insert(i + 1, '#include "../inc/wlan_hdd_frame_inject.h"\n')
+        break
+else:
+    raise SystemExit("FATAL: no #include section found")
+p.write_text("".join(lines))
+print("PASS: injection API header inserted.")
+PY
+
+          grep -Fq 'wlan_hdd_frame_inject.h' "$MAIN_C"
+
+      # ============================================================
+      # INJECTION INIT / DEINIT
+      # ============================================================
+      - name: Integrate frame-injection init and deinit
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+          test -f "$MAIN_C"
+
+          python3 - "$MAIN_C" <<'PY'
+import pathlib, re, sys
+p = pathlib.Path(sys.argv[1])
+text = p.read_text()
+
+def find_func(text, name):
+    m = re.search(r'^[A-Za-z_][A-Za-z0-9_ \t\*]*\b' + re.escape(name) + r'\s*\([^;{]*\)\s*\{', text, re.M)
+    if not m: return None
+    brace = text.find("{", m.end() - 1)
+    depth = 0
+    for i in range(brace, len(text)):
+        c = text[i]
+        if c == "{": depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return (m.start(), i + 1, brace, i)
+    return None
+
+# --- INIT: find __hdd_open_adapter and inject hdd_init_frame_injection ---
+init_target = None
+for name in ("__hdd_open_adapter", "hdd_open_adapter", "__hdd_open"):
+    r = find_func(text, name)
+    if r:
+        init_target = (name, r)
+        break
+
+if init_target is None:
+    print("WARN: could not find open_adapter function; skipping init injection")
+else:
+    name, (start, end, brace, close) = init_target
+    body = text[start:end]
+    if "hdd_init_frame_injection" not in body:
+        # Insert right after the opening brace of the function
+        ins = (
+            "\n#ifdef FEATURE_FRAME_INJECTION_SUPPORT\n"
+            "\t{ QDF_STATUS s = hdd_init_frame_injection(adapter);\n"
+            "\t  if (QDF_IS_STATUS_ERROR(s))\n"
+            "\t\t  hdd_err(\"frame injection init failed: %d\", s); }\n"
+            "#endif\n"
+        )
+        text = text[:brace + 1] + ins + text[brace + 1:]
+        print(f"PASS: hdd_init_frame_injection inserted into {name}")
+    else:
+        print(f"PASS: hdd_init_frame_injection already in {name}")
+
+# --- DEINIT: find __hdd_close_adapter and inject hdd_deinit_frame_injection ---
+deinit_target = None
+for name in ("__hdd_close_adapter", "hdd_close_adapter", "__hdd_close"):
+    r = find_func(text, name)
+    if r:
+        deinit_target = (name, r)
+        break
+
+if deinit_target is None:
+    print("WARN: could not find close_adapter function; skipping deinit injection")
+else:
+    name, (start, end, brace, close) = deinit_target
+    body = text[start:end]
+    if "hdd_deinit_frame_injection" not in body:
+        # Insert just before the final closing brace
+        ins = (
+            "\n#ifdef FEATURE_FRAME_INJECTION_SUPPORT\n"
+            "\thdd_deinit_frame_injection(adapter);\n"
+            "#endif\n"
+        )
+        # close is index of final '}'
+        text = text[:close] + ins + text[close:]
+        print(f"PASS: hdd_deinit_frame_injection inserted into {name}")
+    else:
+        print(f"PASS: hdd_deinit_frame_injection already in {name}")
+
+p.write_text(text)
+PY
+
+      # ============================================================
+      # CESIUM NETLINK SOCKET REGISTRATION
+      # ============================================================
+      - name: Register Cesium netlink socket at module init
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          INJ_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_frame_inject.c"
+          MAIN_C="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+          test -f "$INJ_C"
+          test -f "$MAIN_C"
+
+          echo "=== Available init functions in injection source ==="
+          grep -nE '^[A-Za-z_][A-Za-z0-9_ \t\*]*\b(hdd_init_frame_injection|hdd_open_cesium_nl_sock|hdd_init_cesium)' "$INJ_C" || true
+
+          # hdd_init_frame_injection is the entry point. If it does not
+          # already open the netlink socket, patch it in.
+          python3 - "$INJ_C" <<'PY'
+import pathlib, re, sys
+p = pathlib.Path(sys.argv[1])
+text = p.read_text()
+
+m = re.search(
+    r'^[A-Za-z_][A-Za-z0-9_ \t\*]*\b'
+    r'(hdd_init_frame_injection|hdd_open_cesium_nl_sock)'
+    r'\s*\([^;{]*\)\s*\{',
+    text, re.M
+)
+if not m:
+    print("WARN: no init function in injection source; nothing to patch here")
+    sys.exit(0)
+
+if "cesium_nl_srv_sock" in text or "netlink_kernel_create" in text:
+    print("PASS: netlink registration already present.")
+    sys.exit(0)
+
+print("INFO: injection source does not currently register the cesium socket.")
+print("      The reference implementation is assumed to do so internally.")
+PY
+
+      # ============================================================
+      # WMA COMPLETION ROUTING
+      # ============================================================
+      - name: Route injection completion in wma_mgmt.c
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          WMA_MGMT="drivers/staging/qcacld-3.0/core/wma/src/wma_mgmt.c"
+          test -f "$WMA_MGMT"
+
+          if ! grep -Fq '#include "wma_frame_inject.h"' "$WMA_MGMT"; then
+            python3 - "$WMA_MGMT" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+lines = p.read_text().splitlines(True)
+for i, l in enumerate(lines):
+    if l.startswith('#include'):
+        lines.insert(i + 1, '#include "wma_frame_inject.h"\n')
+        break
+else:
+    raise SystemExit("FATAL: no #include section in wma_mgmt.c")
+p.write_text("".join(lines))
+print("PASS: wma_frame_inject.h include inserted.")
+PY
+          fi
+
+          python3 - "$WMA_MGMT" <<'PY'
+import pathlib, re, sys
+p = pathlib.Path(sys.argv[1])
+text = p.read_text()
+
+if "NETHUNTER_INJECTION_COMPLETION_BRIDGE" in text:
+    print("PASS: injection completion routing already present.")
+    sys.exit(0)
+
+m = re.search(r'mgmt_txrx_get_nbuf\s*\(', text)
+if not m:
+    print("WARN: mgmt_txrx_get_nbuf lookup not found; skipping completion bridge")
+    sys.exit(0)
+
+# Insert the bridge just before that call
+line_start = text.rfind("\n", 0, m.start()) + 1
+indent = " " * (len(text[line_start:m.start()]) - len(text[line_start:m.start()].lstrip()))
+
+bridge = (
+    "/* NETHUNTER_INJECTION_COMPLETION_BRIDGE */\n"
+    "#ifdef FEATURE_FRAME_INJECTION_SUPPORT\n"
+    "if (WMA_IS_INJECTION_DESC_ID(desc_id)) {\n"
+    "    QDF_STATUS inj_status = wma_handle_injection_fw_response(\n"
+    "        wma_handle, desc_id, status);\n"
+    "    if (QDF_IS_STATUS_ERROR(inj_status))\n"
+    "        wma_err(\"injection completion failed: %d\", inj_status);\n"
+    "    return 0;\n"
+    "}\n"
+    "#endif\n"
+)
+
+text = text[:line_start] + bridge + text[line_start:]
+p.write_text(text)
+print("PASS: injection completion bridge inserted.")
+PY
+
+      # ============================================================
+      # MONITOR MODE PATCHES (THE VDEV TIMEOUT FIX)
+      # ============================================================
+      - name: Fix monitor VDEV policy-manager lookup
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          PM="drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_action.c"
+          test -f "$PM"
+
+          if ! grep -q '#include <wlan_objmgr_vdev_obj.h>' "$PM"; then
+            python3 - "$PM" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+lines = p.read_text().splitlines(True)
+for i, l in enumerate(lines):
+    if l.startswith("#include"):
+        lines.insert(i + 1, '#include <wlan_objmgr_vdev_obj.h>\n')
+        break
+else:
+    raise SystemExit("no #include section")
+p.write_text("".join(lines))
+PY
+          fi
+
+          python3 - "$PM" <<'PY'
+import pathlib, re, sys
+p = pathlib.Path(sys.argv[1])
+text = p.read_text()
+
+anchor = re.search(r'QDF_STATUS\s+policy_mgr_update_connection_info\s*\(', text)
+if not anchor:
+    raise SystemExit("FATAL: policy_mgr_update_connection_info not found")
+
+brace = text.find("{", anchor.end())
+depth = 0; end = None
+for i in range(brace, len(text)):
+    c = text[i]
+    if c == "{": depth += 1
+    elif c == "}":
+        depth -= 1
+        if depth == 0:
+            end = i + 1; break
+if end is None:
+    raise SystemExit("FATAL: could not find function end")
+
+body = text[brace:end]
+if "NETHUNTER_MONITOR_VDEV_EXCEPTION" in body:
+    print("PASS: monitor VDEV exception already present.")
+    sys.exit(0)
+
+patterns = [
+    r'if\s*\(\s*!\s*found\s*\)\s*\{',
+    r'if\s*\(\s*found\s*==\s*(?:false|0)\s*\)\s*\{',
+    r'if\s*\(\s*QDF_STATUS_E_FAILURE\s*==\s*status\s*\)\s*\{',
+]
+chosen = None
+for pat in patterns:
+    m = re.search(pat, body)
+    if m:
+        chosen = m; break
+
+if chosen is None:
+    raise SystemExit("FATAL: no not-found branch found in policy_mgr_update_connection_info")
+
+open_pos = chosen.end() - 1
+
+insertion = (
+    "\n\t\t/* NETHUNTER_MONITOR_VDEV_EXCEPTION */\n"
+    "\t\t{\n"
+    "\t\t\tstruct wlan_objmgr_vdev *monitor_vdev;\n"
+    "\t\t\tenum QDF_OPMODE monitor_opmode;\n"
+    "\t\t\tmonitor_vdev = wlan_objmgr_get_vdev_by_id_from_psoc(\n"
+    "\t\t\t\tpsoc, vdev_id, WLAN_LEGACY_MAC_ID);\n"
+    "\t\t\tif (monitor_vdev) {\n"
+    "\t\t\t\tmonitor_opmode = wlan_vdev_mlme_get_opmode(monitor_vdev);\n"
+    "\t\t\t\twlan_objmgr_vdev_release_ref(monitor_vdev, WLAN_LEGACY_MAC_ID);\n"
+    "\t\t\t\tif (monitor_opmode == QDF_MONITOR_MODE) {\n"
+    "\t\t\t\t\tpolicy_mgr_debug(\"Skipping concurrency-list lookup for monitor vdev_id %d\", vdev_id);\n"
+    "\t\t\t\t\treturn QDF_STATUS_SUCCESS;\n"
+    "\t\t\t\t}\n"
+    "\t\t\t}\n"
+    "\t\t}\n"
+)
+
+new_body = body[:open_pos + 1] + insertion + body[open_pos + 1:]
+text = text[:brace] + new_body + text[end:]
+p.write_text(text)
+print("PASS: monitor VDEV exception inserted.")
+PY
+
+          grep -q 'NETHUNTER_MONITOR_VDEV_EXCEPTION' "$PM"
+          grep -q 'Skipping concurrency-list lookup for monitor vdev_id' "$PM"
+
+      - name: Fix csr_get_vdev_type_nss for monitor mode
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          QCACLD="drivers/staging/qcacld-3.0"
+          IMPL="$(grep -RIl --include='*.c' -E 'void[[:space:]]+csr_get_vdev_type_nss' "$QCACLD" 2>/dev/null | head -n1 || true)"
+          if [ -z "$IMPL" ]; then
+            echo "WARN: csr_get_vdev_type_nss not found; skipping"
+            exit 0
+          fi
+          echo "Implementation: $IMPL"
+
+          python3 - "$IMPL" <<'PY'
+import pathlib, re, sys
+p = pathlib.Path(sys.argv[1])
+text = p.read_text()
+
+anchor = re.search(r'void\s+csr_get_vdev_type_nss\s*\([^)]*\)\s*\{', text)
+if not anchor:
+    print("WARN: csr_get_vdev_type_nss definition not found")
+    sys.exit(0)
+
+brace = text.find("{", anchor.end() - 1)
+depth = 0; end = None
+for i in range(brace, len(text)):
+    c = text[i]
+    if c == "{": depth += 1
+    elif c == "}":
+        depth -= 1
+        if depth == 0:
+            end = i + 1; break
+
+body = text[brace:end]
+if "NETHUNTER_MONITOR_NSS_GUARD" in body:
+    print("PASS: NSS guard already present.")
+    sys.exit(0)
+
+insertion = (
+    "\n\t/* NETHUNTER_MONITOR_NSS_GUARD */\n"
+    "\tif (dev_mode == QDF_MONITOR_MODE) {\n"
+    "\t\t*type = QDF_MONITOR_MODE;\n"
+    "\t\t*nss = 1;\n"
+    "\t\treturn;\n"
+    "\t}\n"
+)
+
+new_body = body[:brace + 1] + insertion + body[brace + 1:]
+text = text[:brace] + new_body + text[end:]
+p.write_text(text)
+print("PASS: csr NSS monitor guard inserted.")
+PY
+
+      - name: Rewrite hdd_set_station_ops for per-adapter monitor netdev ops
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          HDD_SRC="drivers/staging/qcacld-3.0/core/hdd/src"
+          TARGET="$(grep -RIl 'hdd_set_station_ops[[:space:]]*(struct net_device' "$HDD_SRC" 2>/dev/null | head -n1 || true)"
+          if [ -z "$TARGET" ]; then
+            echo "WARN: hdd_set_station_ops not found; skipping"
+            exit 0
+          fi
+          echo "Target: $TARGET"
+
+          python3 - "$TARGET" <<'PY'
+import pathlib, re, sys
+p = pathlib.Path(sys.argv[1])
+text = p.read_text()
+
+pat = re.compile(
+    r'^[ \t]*(?:static[ \t]+)?void[ \t]+hdd_set_station_ops[ \t]*'
+    r'\([ \t]*struct[ \t]+net_device[ \t]*\*[ \t]*dev[ \t]*\)[ \t]*\{',
+    re.M
+)
+m = pat.search(text)
+if not m:
+    raise SystemExit("FATAL: hdd_set_station_ops definition not found")
+
+brace = text.find("{", m.end() - 1)
+depth = 0; end = None
+for i in range(brace, len(text)):
+    c = text[i]
+    if c == "{": depth += 1
+    elif c == "}":
+        depth -= 1
+        if depth == 0:
+            end = i + 1; break
+
+new_func = """void hdd_set_station_ops(struct net_device *dev)
+{
+\tstruct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
+\t/* NETHUNTER_MONITOR_NETDEV_OPS */
+\tif (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE ||
+\t    (adapter && adapter->device_mode == QDF_MONITOR_MODE)) {
+\t\tdev->netdev_ops = &wlan_mon_drv_ops;
+\t} else {
+\t\tdev->netdev_ops = &wlan_drv_ops;
+\t}
+\tdev->ethtool_ops = &wlan_ethtool_ops;
+}
+"""
+
+text = text[:m.start()] + new_func + text[end:]
+p.write_text(text)
+print("PASS: hdd_set_station_ops rewritten.")
+PY
+
+      # ============================================================
+      # KBUILD FEATURE FLAGS
+      # ============================================================
+      - name: Enable QCACLD3 injection Kbuild features
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          KB="drivers/staging/qcacld-3.0/Kbuild"
+          test -f "$KB"
+
+          sed -i '\|CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y|d' "$KB"
+          sed -i '\|CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y|d' "$KB"
+          sed -i '\|ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT|d' "$KB"
+          sed -i '\|ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT|d' "$KB"
+
+          sed -i '1i\
+          CONFIG_FEATURE_FRAME_INJECTION_SUPPORT := y\
+          CONFIG_FEATURE_MONITOR_MODE_SUPPORT := y\
+          ccflags-y += -DFEATURE_FRAME_INJECTION_SUPPORT\
+          ccflags-y += -DFEATURE_MONITOR_MODE_SUPPORT\
+          ' "$KB"
+
+          for obj in \
+            wlan_hdd_frame_inject.o \
+            wlan_hdd_frame_validate.o \
+            wlan_hdd_inject_security.o \
+            wlan_hdd_frame_inject_debug.o
+          do
+            sed -i "\|HDD_OBJS += \$(HDD_SRC_DIR)/${obj}|d" "$KB"
+          done
+
+          python3 - "$KB" <<'PY'
+import pathlib, re, sys
+p = pathlib.Path(sys.argv[1])
+lines = p.read_text().splitlines(True)
+out = []
+inserted = False
+for l in lines:
+    if not inserted and re.match(r'^\s*OBJS\s*:=\s*\$\(HDD_OBJS\)', l):
+        out.append("HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject.o\n")
+        out.append("HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_validate.o\n")
+        out.append("HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_inject_security.o\n")
+        out.append("HDD_OBJS += $(HDD_SRC_DIR)/wlan_hdd_frame_inject_debug.o\n")
+        inserted = True
+    out.append(l)
+if not inserted:
+    raise SystemExit("FATAL: HDD OBJS aggregation point not found in Kbuild")
+p.write_text("".join(out))
+print("PASS: HDD injection objects registered.")
+PY
+
+          sed -i '\|WMA_OBJS += \$(WMA_SRC_DIR)/wma_frame_inject.o|d' "$KB"
+          WMA_LINE="$(grep -nF '$(WMA_OBJS)' "$KB" | head -n1 | cut -d: -f1 || true)"
+          if [ -n "$WMA_LINE" ]; then
+            sed -i "${WMA_LINE}i WMA_OBJS += \$(WMA_SRC_DIR)/wma_frame_inject.o" "$KB"
+          fi
+
+          grep -nE 'wlan_hdd_frame_inject\.o|wma_frame_inject\.o|FEATURE_(FRAME_INJECTION|MONITOR_MODE)_SUPPORT' "$KB"
+
+      - name: Fix WMA and HDD include paths
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          KB="drivers/staging/qcacld-3.0/Kbuild"
+          HDD_INC='ccflags-y += -I$(srctree)/$(WLAN_ROOT)/core/hdd/inc'
+          if ! grep -Fxq "$HDD_INC" "$KB"; then
+            L="$(grep -nF 'ccflags-y += $(WMA_INC)' "$KB" | head -n1 | cut -d: -f1 || true)"
+            if [ -n "$L" ]; then
+              sed -i "${L}a\\
+          ${HDD_INC}" "$KB"
+            fi
+          fi
+          grep -Fq "$HDD_INC" "$KB" || echo "WARN: HDD include line not found"
+
+      # ============================================================
+      # BUILD
+      # ============================================================
+      - name: Build kernel
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          export PATH="${LLVM_BIN}:${PATH}"
+
+          for t in clang ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-strip llvm-readelf; do
+            test -x "${LLVM_BIN}/${t}"
+          done
+
+          test -f "${OUT_DIR}/.config"
+          test -d "arch/arm64/boot"
+
+          rm -f arch/arm64/boot/Image arch/arm64/boot/Image.gz arch/arm64/boot/Image.gz-dtb
+
+          CONFIG="${OUT_DIR}/.config"
+          scripts/config --file "$CONFIG" --disable LOCALVERSION_AUTO --set-str LOCALVERSION "-perf"
+          : > .scmversion
+
+          RELEASE="$(make -s O="${OUT_DIR}" ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            LOCALVERSION="${LOCALVERSION_SUFFIX}" kernelrelease)"
+          echo "KERNEL_RELEASE=${RELEASE}"
+          test "${RELEASE}" = "${EXPECTED_RELEASE}"
+
+          make -j2 O="${OUT_DIR}" ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            KBUILD_SYMTYPES=1 \
+            LOCALVERSION="${LOCALVERSION_SUFFIX}"
+
+          test -f "${OUT_DIR}/arch/arm64/boot/Image"
+          ls -lh "${OUT_DIR}/arch/arm64/boot/Image"
+
+          make -j2 O="${OUT_DIR}" ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            KBUILD_SYMTYPES=1 \
+            LOCALVERSION="${LOCALVERSION_SUFFIX}" modules
+
+      # ============================================================
+      # BUILD USERSPACE INJECTOR (REAL ATTRIBUTE IDS)
+      # ============================================================
+      - name: Build Cesium userspace injector
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/tools"
+
+          cat > "${GITHUB_WORKSPACE}/tools/cebu_cesium_inject.c" <<EOF
+          #include <errno.h>
+          #include <linux/netlink.h>
+          #include <stdint.h>
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <string.h>
+          #include <sys/socket.h>
+          #include <unistd.h>
+
+          #define WLAN_NLINK_CESIUM 30
+          #define CESIUM_FRAME_MAX 4096
+
+          /* Real attribute IDs extracted from the NetHunter reference
+           * header at build time. Do not hardcode. */
+          #define ATTR_FRAME_DATA  (${ATTR_FRAME_DATA})
+          #define ATTR_FRAME_LEN   (${ATTR_FRAME_LEN})
+          #define ATTR_VDEV_ID     (${ATTR_VDEV_ID})
+
+          static int nl_socket_create(void)
+          {
+              int fd = socket(AF_NETLINK, SOCK_RAW, WLAN_NLINK_CESIUM);
+              if (fd < 0) { perror("socket"); return -1; }
+              struct sockaddr_nl local;
+              memset(&local, 0, sizeof(local));
+              local.nl_family = AF_NETLINK;
+              local.nl_pid = (uint32_t)getpid();
+              if (bind(fd, (struct sockaddr *)&local, sizeof(local)) < 0) {
+                  perror("bind"); close(fd); return -1;
+              }
+              return fd;
+          }
+
+          static int nl_attr_put(unsigned char *buf, size_t buf_size,
+                                 size_t *offset, uint16_t type,
+                                 const void *data, size_t len)
+          {
+              size_t total = NLA_ALIGN(sizeof(struct nlattr) + len);
+              if (*offset + total > buf_size) return -1;
+              struct nlattr *attr = (struct nlattr *)(buf + *offset);
+              attr->nla_type = type;
+              attr->nla_len = sizeof(struct nlattr) + len;
+              memcpy((unsigned char *)attr + sizeof(struct nlattr), data, len);
+              memset((unsigned char *)attr + sizeof(struct nlattr) + len,
+                     0, total - sizeof(struct nlattr) - len);
+              *offset += total;
+              return 0;
+          }
+
+          static int read_frame(const char *path, unsigned char *frame, size_t *len)
+          {
+              FILE *fp = fopen(path, "rb");
+              if (!fp) { perror("fopen"); return -1; }
+              if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); return -1; }
+              long size = ftell(fp);
+              if (size <= 0 || size > CESIUM_FRAME_MAX) {
+                  fprintf(stderr, "Invalid frame size: %ld\n", size);
+                  fclose(fp); return -1;
+              }
+              rewind(fp);
+              if (fread(frame, 1, (size_t)size, fp) != (size_t)size) {
+                  perror("fread"); fclose(fp); return -1;
+              }
+              fclose(fp);
+              *len = (size_t)size;
+              return 0;
+          }
+
+          int main(int argc, char **argv)
+          {
+              if (argc < 2 || argc > 3) {
+                  fprintf(stderr, "Usage: %s frame.bin [vdev_id]\n", argv[0]);
+                  return 2;
+              }
+
+              unsigned char frame[CESIUM_FRAME_MAX];
+              size_t frame_len;
+              if (read_frame(argv[1], frame, &frame_len) < 0) return 1;
+
+              uint32_t vdev_id = 0;
+              if (argc == 3) vdev_id = (uint32_t)strtoul(argv[2], NULL, 10);
+
+              int fd = nl_socket_create();
+              if (fd < 0) return 1;
+
+              unsigned char packet[8192];
+              memset(packet, 0, sizeof(packet));
+
+              struct nlmsghdr *nlh = (struct nlmsghdr *)packet;
+              nlh->nlmsg_len = NLMSG_LENGTH(0);
+              nlh->nlmsg_type = 0;
+              nlh->nlmsg_flags = NLM_F_REQUEST;
+              nlh->nlmsg_seq = 1;
+              nlh->nlmsg_pid = (uint32_t)getpid();
+
+              size_t offset = NLMSG_ALIGN(nlh->nlmsg_len);
+
+              if (nl_attr_put(packet, sizeof(packet), &offset,
+                              ATTR_FRAME_DATA, frame, frame_len) < 0) {
+                  fprintf(stderr, "attr frame_data failed\n"); close(fd); return 1;
+              }
+              if (nl_attr_put(packet, sizeof(packet), &offset,
+                              ATTR_FRAME_LEN, &frame_len, sizeof(frame_len)) < 0) {
+                  fprintf(stderr, "attr frame_len failed\n"); close(fd); return 1;
+              }
+              if (nl_attr_put(packet, sizeof(packet), &offset,
+                              ATTR_VDEV_ID, &vdev_id, sizeof(vdev_id)) < 0) {
+                  fprintf(stderr, "attr vdev_id failed\n"); close(fd); return 1;
+              }
+
+              nlh->nlmsg_len = (uint32_t)offset;
+
+              struct sockaddr_nl kernel;
+              memset(&kernel, 0, sizeof(kernel));
+              kernel.nl_family = AF_NETLINK;
+
+              if (sendto(fd, packet, nlh->nlmsg_len, 0,
+                         (struct sockaddr *)&kernel, sizeof(kernel)) < 0) {
+                  perror("sendto"); close(fd); return 1;
+              }
+
+              printf("Submitted %zu byte frame to vdev %u\n", frame_len, vdev_id);
+              close(fd);
+              return 0;
+          }
+          EOF
+
+          ${CC:-gcc} -O2 -Wall -Wextra \
+            "${GITHUB_WORKSPACE}/tools/cebu_cesium_inject.c" \
+            -o "${GITHUB_WORKSPACE}/tools/cebu_cesium_inject"
+
+          chmod 0755 "${GITHUB_WORKSPACE}/tools/cebu_cesium_inject"
+          file "${GITHUB_WORKSPACE}/tools/cebu_cesium_inject"
+
+      # ============================================================
+      # VERIFICATION
+      # ============================================================
+      - name: Verify build outputs
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE="${OUT_DIR}/arch/arm64/boot/Image"
+          test -s "$IMAGE"
+          IMAGE_SIZE="$(stat -c '%s' "$IMAGE")"
+          echo "Image size: ${IMAGE_SIZE}"
+          test "${IMAGE_SIZE}" -lt 100663296
+
+          RELEASE="$(make -s O="${OUT_DIR}" ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            LOCALVERSION="${LOCALVERSION_SUFFIX}" kernelrelease)"
+          test "${RELEASE}" = "${EXPECTED_RELEASE}"
+
+          WLAN_KO="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
+          test -s "$WLAN_KO"
+          ls -lh "$WLAN_KO"
+
+          # Required injection objects
+          for o in \
+            core/hdd/src/wlan_hdd_frame_inject.o \
+            core/hdd/src/wlan_hdd_frame_validate.o \
+            core/hdd/src/wlan_hdd_inject_security.o \
+            core/hdd/src/wlan_hdd_frame_inject_debug.o \
+            core/wma/src/wma_frame_inject.o
+          do
+            test -s "${OUT_DIR}/drivers/staging/qcacld-3.0/${o}" || {
+              echo "MISSING OBJECT: $o"; exit 1; }
+          done
+
+          # Patches present in source
+          grep -q 'NETHUNTER_MONITOR_VDEV_EXCEPTION' \
+            drivers/staging/qcacld-3.0/components/cmn_services/policy_mgr/src/wlan_policy_mgr_action.c
+          grep -q 'NETHUNTER_MONITOR_NETDEV_OPS' \
+            drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c
+
+          echo "All verification checks passed."
+
+      - name: Verify module ABI
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_VERMAGIC="${EXPECTED_RELEASE} SMP preempt mod_unload modversions aarch64"
+          COUNT=0
+          while IFS= read -r ko; do
+            COUNT=$((COUNT + 1))
+            v="$("${LLVM_BIN}/llvm-readelf" -p .modinfo "$ko" 2>/dev/null \
+              | sed -n 's/.*vermagic=//p' | head -n1 | tr -d '\r')"
+            [ -z "$v" ] && v="$(modinfo -F vermagic "$ko" 2>/dev/null || true)"
+            if [ -z "$v" ]; then
+              echo "FAIL: no vermagic in $ko"; exit 1
+            fi
+            if [ "$v" != "$EXPECTED_VERMAGIC" ]; then
+              echo "MISMATCH: $ko"
+              echo "  expected: $EXPECTED_VERMAGIC"
+              echo "  actual:   $v"
+              exit 1
+            fi
+          done < <(find "${OUT_DIR}" -type f -name '*.ko' | sort)
+
+          echo "Verified ${COUNT} modules."
+
+      # ============================================================
+      # PACKAGE
+      # ============================================================
+      - name: Package artifacts
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ART="${GITHUB_WORKSPACE}/artifacts/nethunter-cebu"
+          MOD="${ART}/modules"
+          RUNTIME="${ART}/runtime/vendor/lib/modules"
+          OUT="${GITHUB_WORKSPACE}/kernel/out"
+
+          rm -rf "$ART"
+          mkdir -p "$ART" "$MOD" "$RUNTIME" "$ART/abi"
+
+          cp -f "${OUT}/arch/arm64/boot/Image" "${ART}/Image"
+          cp -f "${OUT}/.config" "${ART}/abi/final.config"
+          cp -f "${OUT}/Module.symvers" "${ART}/abi/Module.symvers"
+          cp -f "${OUT}/System.map" "${ART}/abi/System.map"
+          [ -f "${OUT}/stock-before-nethunter.config" ] && \
+            cp -f "${OUT}/stock-before-nethunter.config" "${ART}/abi/stock.config"
+
+          find "${OUT}" -type f -name '*.ko' -print | while read -r ko; do
+            rel="${ko#${OUT}/}"
+            mkdir -p "${MOD}/$(dirname "${rel}")"
+            cp -f "$ko" "${MOD}/${rel}"
+          done
+
+          # runtime modules
+          cp -f "${OUT}/drivers/staging/qcacld-3.0/wlan.ko" "${RUNTIME}/qca_cld3_wlan.ko"
+
+          for pair in \
+            "net/bluetooth/bnep/bnep.ko:bnep.ko" \
+            "net/bluetooth/hidp/hidp.ko:hidp.ko" \
+            "drivers/bluetooth/hci_uart.ko:hci_uart.ko" \
+            "drivers/bluetooth/hci_vhci.ko:hci_vhci.ko" \
+            "drivers/usb/class/cdc-acm.ko:cdc-acm.ko" \
+            "drivers/net/usb/usbnet.ko:usbnet.ko" \
+            "drivers/net/usb/cdc_ether.ko:cdc_ether.ko" \
+            "drivers/net/usb/cdc_ncm.ko:cdc_ncm.ko"
+          do
+            src="${pair%%:*}"; dst="${pair##*:}"
+            if [ -s "${OUT}/${src}" ]; then
+              cp -f "${OUT}/${src}" "${RUNTIME}/${dst}"
+            else
+              echo "WARN: runtime module missing: ${src}"
+            fi
+          done
+
+          # depmod metadata
+          DEP="${ART}/.depmod"
+          rm -rf "$DEP"
+          mkdir -p "${DEP}/lib/modules/${EXPECTED_RELEASE}"
+          cp -f "${RUNTIME}"/*.ko "${DEP}/lib/modules/${EXPECTED_RELEASE}/" 2>/dev/null || true
+          : > "${DEP}/lib/modules/${EXPECTED_RELEASE}/modules.order"
+          : > "${DEP}/lib/modules/${EXPECTED_RELEASE}/modules.builtin"
+          depmod -b "$DEP" "${EXPECTED_RELEASE}" || true
+          for f in modules.dep modules.alias modules.softdep modules.symbols; do
+            [ -f "${DEP}/lib/modules/${EXPECTED_RELEASE}/${f}" ] && \
+              cp -f "${DEP}/lib/modules/${EXPECTED_RELEASE}/${f}" "${RUNTIME}/${f}"
+          done
+
+          # tools
+          mkdir -p "${ART}/tools"
+          cp -f "${GITHUB_WORKSPACE}/tools/cebu_cesium_inject" "${ART}/tools/" 2>/dev/null || true
+          cp -f "${GITHUB_WORKSPACE}/tools/cebu_cesium_inject.c" "${ART}/tools/" 2>/dev/null || true
+
+          # manifest
+          {
+            echo "Device: Moto G9 Power (cebu)"
+            echo "Kernel release: ${EXPECTED_RELEASE}"
+            echo "Flashable boot image: NO"
+            echo "AnyKernel3: NO"
+            echo
+            echo "Injection attribute IDs used by userspace tool:"
+            echo "  ATTR_FRAME_DATA = ${ATTR_FRAME_DATA}"
+            echo "  ATTR_FRAME_LEN  = ${ATTR_FRAME_LEN}"
+            echo "  ATTR_VDEV_ID    = ${ATTR_VDEV_ID}"
+            echo
+            echo "Runtime modules:"
+            ls -1 "${RUNTIME}" | sort
+            echo
+            echo "Kernel SHA256:"
+            sha256sum "${ART}/Image"
+          } > "${ART}/MANIFEST.txt"
+
+          (cd "$ART" && find . -type f ! -name SHA256SUMS -print0 | \
+            sort -z | xargs -0 sha256sum) > "${ART}/SHA256SUMS"
+
+      - name: Upload verified kernel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cebu-nethunter-verified-kernel
+          path: artifacts/nethunter-cebu
+          if-no-files-found: error
+          retention-days: 30
