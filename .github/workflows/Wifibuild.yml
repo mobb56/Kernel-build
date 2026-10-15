@@ -717,72 +717,99 @@ jobs:
           grep -q 'NETHUNTER_MONITOR_VDEV_EXCEPTION' "$PM"
           grep -q 'Skipping concurrency-list lookup for monitor vdev_id' "$PM"
 
+
+
+
       - name: Fix csr_get_vdev_type_nss for monitor mode
         working-directory: kernel
         shell: bash
         run: |
-          set -euo pipefail
-          QC="drivers/staging/qcacld-3.0"
-          IMPL="$(grep -RIl --include='*.c' -E 'void[[:space:]]+csr_get_vdev_type_nss' "$QC" 2>/dev/null | head -n1 || true)"
-          if [ -z "$IMPL" ]; then
+         set -euo pipefail
+           QC="drivers/staging/qcacld-3.0"
+         IMPL="$(grep -RIl --include='*.c' -E 'csr_get_vdev_type_nss[[:space:]]*\(' "$QC" 2>/dev/null | head -n1 || true)"
+           if [ -z "$IMPL" ]; then
             echo "WARN: csr_get_vdev_type_nss not found"
-            exit 0
-          fi
+          exit 0
+         fi
           echo "Implementation: $IMPL"
 
-          if grep -q 'NETHUNTER_MONITOR_NSS_GUARD' "$IMPL"; then
+            echo "=== CONTEXT ==="
+           grep -n -B3 -A30 'csr_get_vdev_type_nss[[:space:]]*(' "$IMPL" | head -80
+
+           if grep -q 'NETHUNTER_MONITOR_NSS_GUARD' "$IMPL"; then
             echo "PASS: NSS guard already present."
-            exit 0
+           exit 0
           fi
 
-          cat > /tmp/nss_guard.awk <<'AWK'
+           cat > /tmp/nss_guard2.awk <<'AWK'
           BEGIN {
-              in_func = 0
-              depth = 0
-              started = 0
-              inserted = 0
+            armed = 0
+            depth = 0
+            started = 0
+            inserted = 0
           }
-          !in_func && /void[[:space:]]+csr_get_vdev_type_nss[[:space:]]*\(/ {
-              in_func = 1
-              print
-              line = $0
-              opens = gsub(/\{/, "{", line)
-              closes = gsub(/\}/, "}", line)
-              depth += opens - closes
-              if (opens > 0) started = 1
-              if (started && !inserted) {
-                  print "\t/* NETHUNTER_MONITOR_NSS_GUARD */"
-                  print "\tif (dev_mode == QDF_MONITOR_MODE) {"
-                  print "\t\t*type = QDF_MONITOR_MODE;"
-                  print "\t\t*nss = 1;"
-                  print "\t\treturn;"
-                  print "\t}"
-                  inserted = 1
-              }
-              next
+
+          # Arm when we see the function name and an opening paren.
+          # Do not print the guard yet - the body has not started.
+          !armed && /csr_get_vdev_type_nss[[:space:]]*\(/ {
+           armed = 1
+           print
+           next
+         }
+
+         # While armed, look for the first opening brace '{'.
+          armed && !started {
+            print
+            line = $0
+           opens = gsub(/\{/, "{", line)
+           closes = gsub(/\}/, "}", line)
+            if (opens > 0) {
+            depth += opens - closes
+            started = 1
+            if (!inserted) {
+                print "\t/* NETHUNTER_MONITOR_NSS_GUARD */"
+                print "\tif (dev_mode == QDF_MONITOR_MODE) {"
+                print "\t\t*type = QDF_MONITOR_MODE;"
+                print "\t\t*nss = 1;"
+                print "\t\treturn;"
+                print "\t}"
+                inserted = 1
+            }
+            if (depth == 0) {
+                armed = 0
+            }
           }
-          in_func {
-              print
-              line = $0
-              opens = gsub(/\{/, "{", line)
-              closes = gsub(/\}/, "}", line)
-              depth += opens - closes
-              if (started && depth == 0) in_func = 0
-              next
-          }
-          { print }
-          END {
-              if (!inserted) {
-                  print "ERROR: NSS guard not inserted" > "/dev/stderr"
-                  exit 2
-              }
-          }
+          next
+         }
+
+           started {
+           print
+           line = $0
+            opens = gsub(/\{/, "{", line)
+            closes = gsub(/\}/, "}", line)
+            depth += opens - closes
+           if (depth == 0) {
+            started = 0
+            armed = 0
+           }
+          next
+         }
+
+         { print }
+
+         END {
+            if (!inserted) {
+               print "ERROR: NSS guard not inserted (function body not detected)" > "/dev/stderr"
+             exit 2
+           }
+         }
           AWK
 
-          awk -f /tmp/nss_guard.awk "$IMPL" > "${IMPL}.new"
+          awk -f /tmp/nss_guard2.awk "$IMPL" > "${IMPL}.new"
           mv "${IMPL}.new" "$IMPL"
 
-          grep -q 'NETHUNTER_MONITOR_NSS_GUARD' "$IMPL"
+          grep -n -A15 -B3 'NETHUNTER_MONITOR_NSS_GUARD' "$IMPL"
+        
 
       - name: Rewrite hdd_set_station_ops for monitor netdev ops
         working-directory: kernel
