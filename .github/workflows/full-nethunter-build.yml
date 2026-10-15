@@ -11258,7 +11258,14 @@ jobs:
           
           
           
-          require_module "xt_nat.ko"
+          if grep -q '^CONFIG_NETFILTER_XT_NAT=m$' "${OUT_DIR}/.config"; then
+             require_module "xt_nat.ko"
+            elif grep -q '^CONFIG_NETFILTER_XT_NAT=y$' "${OUT_DIR}/.config"; then
+           echo "PASS: CONFIG_NETFILTER_XT_NAT is built into the kernel"
+          else
+            echo "ERROR: CONFIG_NETFILTER_XT_NAT is neither built-in nor a module"
+           exit 1
+          fi
           require_module "xt_conntrack.ko"
           require_module "xt_multiport.ko"
 
