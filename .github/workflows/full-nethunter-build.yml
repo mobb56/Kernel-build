@@ -11132,7 +11132,7 @@ jobs:
           require_config "CONFIG_NETFILTER_ADVANCED" "y"
           require_config "CONFIG_NF_CONNTRACK" "ym"
           require_config "CONFIG_NETFILTER_XTABLES" "ym"
-          require_config "CONFIG_NETFILTER_XT_MARK" "ym"
+          require_config "CONFIG_NETFILTER_XT_MARK" "m"
           require_config "CONFIG_NETFILTER_XT_NAT" "ym"
           require_config "CONFIG_NETFILTER_XT_MATCH_CONNTRACK" "ym"
           require_config "CONFIG_NETFILTER_XT_MATCH_MARK" "ym"
