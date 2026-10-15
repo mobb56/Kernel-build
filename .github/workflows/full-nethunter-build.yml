@@ -2537,6 +2537,7 @@ jobs:
           # USB/IP and virtual host controller
             CONFIG_USBIP_CORE=m
             CONFIG_USBIP_VHCI_HCD=m
+            CONFIG_USBIP_HOST=m
 
           # Controller Area Network (CAN)
              CONFIG_CAN=m
@@ -3174,6 +3175,7 @@ jobs:
              CONFIG_USB_SERIAL_OPTION=m
              CONFIG_USBIP_CORE=m
              CONFIG_USBIP_VHCI_HCD=m
+             CONFIG_USBIP_HOST=m
              CONFIG_CAN=m
              CONFIG_CAN_RAW=m
              CONFIG_CAN_BCM=m
