@@ -2504,7 +2504,7 @@
           # USB SERIAL
           # ============================================================
 
-          CONFIG_USB_SERIAL=y
+          CONFIG_USB_SERIAL=m
           CONFIG_USB_SERIAL_GENERIC=y
 
           CONFIG_USB_ACM=m
@@ -3164,7 +3164,7 @@
            CONFIG_USB_CONFIGFS_EEM=y
             CONFIG_USB_CONFIGFS_F_HID=y
             CONFIG_USB_CONFIGFS_F_FS=y
-             CONFIG_USB_SERIAL=y
+             CONFIG_USB_SERIAL=m
              CONFIG_USB_SERIAL_GENERIC=y
              CONFIG_USB_SERIAL_CH341=m
              CONFIG_USB_SERIAL_CP210X=m
