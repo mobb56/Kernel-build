@@ -1,37 +1,37 @@
-nameless: Moto G9 Power cebu NetHunter
+ name: Moto G9 Power cebu NetHunter
 
-on:
-  workflow_dispatch:
-    inputs:
-      build_kernel: 
-        description: "Run the kernel compilation after all static audits pass"
-        required: true
-        default: false
-        type: boolean
+ on:
+   workflow_dispatch:
+     inputs:
+       build_kernel: 
+         description: "Run the kernel compilation after all static audits pass"
+         required: true
+         default: false
+         type: boolean
 
-permissions:
-  contents: read
+ permissions:
+   contents: read
 
-env:
-  KERNEL_REPO: https://github.com/LineageOS/android_kernel_motorola_sm6225.git
-  KERNEL_BRANCH: lineage-23.2
+ env:
+   KERNEL_REPO: https://github.com/LineageOS/android_kernel_motorola_sm6225.git
+   KERNEL_BRANCH: lineage-23.2
 
-  NETHUNTER_REPO: https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git
-  NETHUNTER_BRANCH: nethunter-lineage-23.2
+   NETHUNTER_REPO: https://github.com/V0lk3n/nethunter_kernel_oneplus_sm8150.git
+   NETHUNTER_BRANCH: nethunter-lineage-23.2
 
-  ARCH: arm64
-  CROSS_COMPILE: aarch64-linux-gnu-
-  OUT_DIR: out
+   ARCH: arm64
+   CROSS_COMPILE: aarch64-linux-gnu-
+   OUT_DIR: out
 
-  # Stock kernel metadata shows Clang/LLVM 21.
-  LLVM_DIR: /usr/lib/llvm-21
+   # Stock kernel metadata shows Clang/LLVM 21.
+   LLVM_DIR: /usr/lib/llvm-21
 
-jobs:
-  build:
-    name: Build cebu NetHunter kernel
-    runs-on: ubuntu-22.04
+ jobs:
+   build:
+     name: Build cebu NetHunter kernel
+     runs-on: ubuntu-22.04
 
-    steps:
+     steps:
 
       # ============================================================
       # 1. CHECKOUT THIS WORKFLOW REPOSITORY
