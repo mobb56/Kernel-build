@@ -11920,8 +11920,10 @@
 
           echo "PASS: ${RUNTIME_MODULE_COUNT} runtime modules packaged"
 
-          echo
-          echo "PASS: exactly ${RUNTIME_MODULE_COUNT} runtime NetHunter modules prepared"
+          
+          
+
+         
 
           echo
           echo "=== Generate runtime module manifest ==="
@@ -12056,8 +12058,13 @@
 
           test -s "${ARTIFACT_DIR}/kernel-Image.sha256"
 
+
+
+          
           echo
-          echo "=== Generate artifact checksums ==="
+          echo "=== Generate checksums for completed artifact ==="
+
+          rm -f "${ARTIFACT_DIR}/SHA256SUMS"
 
           (
             cd "${ARTIFACT_DIR}"
@@ -12068,11 +12075,20 @@
               -print0 \
               | sort -z \
               | xargs -0 sha256sum
-
           ) > "${ARTIFACT_DIR}/SHA256SUMS"
 
           test -s "${ARTIFACT_DIR}/SHA256SUMS"
 
+          echo
+          echo "=== Verify artifact checksums ==="
+
+          (
+            cd "${ARTIFACT_DIR}"
+            sha256sum -c SHA256SUMS
+          )
+
+          echo "PASS: every checksummed artifact file verified"
+           
           echo
           echo "=== Generate artifact manifest ==="
 
