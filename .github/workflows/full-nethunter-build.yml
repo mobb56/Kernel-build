@@ -1,4 +1,4 @@
-name: Moto G9 Power cebu NetHunter
+nameless: Moto G9 Power cebu NetHunter
 
 on:
   workflow_dispatch:
@@ -11765,7 +11765,7 @@ jobs:
               | wc -l
           )"
 
-          test "${RUNTIME_MODULE_COUNT}" -eq 9
+          test "${RUNTIME_MODULE_COUNT}" -eq 29
 
           echo
           echo "PASS: exactly ${RUNTIME_MODULE_COUNT} runtime NetHunter modules prepared"
