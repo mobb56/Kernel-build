@@ -3,10 +3,10 @@
  on:
    workflow_dispatch:
      inputs:
-       build_kernel: 
+        build_kernel:
          description: "Run the kernel compilation after all static audits pass"
          required: true
-         default: false
+         default: true
          type: boolean
 
  permissions:
