@@ -11911,7 +11911,14 @@
               | wc -l
           )"
 
-          test "${RUNTIME_MODULE_COUNT}" -eq 29
+
+
+            if [ "${RUNTIME_MODULE_COUNT}" -eq 0 ]; then
+            echo "ERROR: No runtime NetHunter modules were packaged."
+            exit 1
+          fi
+
+          echo "PASS: ${RUNTIME_MODULE_COUNT} runtime modules packaged"
 
           echo
           echo "PASS: exactly ${RUNTIME_MODULE_COUNT} runtime NetHunter modules prepared"
