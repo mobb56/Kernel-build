@@ -11524,6 +11524,30 @@ jobs:
           install_runtime_module \
             "drivers/usb/usbip/usbip-host.ko" \
             "usbip-host.ko"
+
+          install_runtime_module \
+            "drivers/usb/serial/ch341.ko" \
+            "ch341.ko"
+
+          install_runtime_module \
+            "drivers/usb/serial/cp210x.ko" \
+            "cp210x.ko"
+
+          install_runtime_module \
+            "drivers/usb/serial/ftdi_sio.ko" \
+            "ftdi_sio.ko"
+
+          install_runtime_module \
+            "drivers/usb/serial/pl2303.ko" \
+            "pl2303.ko"
+
+          install_runtime_module \
+            "drivers/usb/serial/qcserial.ko" \
+            "qcserial.ko"
+
+          install_runtime_module \
+            "drivers/usb/serial/option.ko" \
+            "option.ko"
             
           echo
           echo "=== Install custom QCACLD3 WLAN ==="
