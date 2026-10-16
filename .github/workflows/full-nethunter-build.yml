@@ -11563,6 +11563,49 @@ jobs:
           install_runtime_module \
             "drivers/usb/serial/option.ko" \
             "option.ko"
+
+          # CAN core
+          install_runtime_module \
+            "net/can/can.ko" \
+            "can.ko"
+
+          install_runtime_module \
+            "net/can/can-raw.ko" \
+            "can-raw.ko"
+
+          install_runtime_module \
+            "net/can/can-bcm.ko" \
+            "can-bcm.ko"
+
+          install_runtime_module \
+            "net/can/can-gw.ko" \
+            "can-gw.ko"
+
+          # Virtual and serial CAN
+          install_runtime_module \
+            "drivers/net/can/vcan.ko" \
+            "vcan.ko"
+
+          install_runtime_module \
+            "drivers/net/can/vxcan.ko" \
+            "vxcan.ko"
+
+          install_runtime_module \
+            "drivers/net/can/slcan.ko" \
+            "slcan.ko"
+
+          # USB CAN adapters
+          install_runtime_module \
+            "drivers/net/can/usb/gs_usb.ko" \
+            "gs_usb.ko"
+
+          install_runtime_module \
+            "drivers/net/can/usb/kvaser_usb/kvaser_usb.ko" \
+            "kvaser_usb.ko"
+
+          install_runtime_module \
+            "drivers/net/can/usb/peak_usb/peak_usb.ko" \
+            "peak_usb.ko"
             
           echo
           echo "=== Install custom QCACLD3 WLAN ==="
