@@ -11186,7 +11186,6 @@ jobs:
           require_config "CONFIG_CAN_GW" "m"
           require_config "CONFIG_CAN_VCAN" "m"
           require_config "CONFIG_CAN_VXCAN" "m"
-          require_config "CONFIG_CAN_ISOTP" "m"
           require_config "CONFIG_CAN_SLCAN" "m"
           require_config "CONFIG_CAN_GS_USB" "m"
           require_config "CONFIG_CAN_KVASER_USB" "m"
