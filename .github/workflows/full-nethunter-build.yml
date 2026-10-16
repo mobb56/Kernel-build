@@ -9451,7 +9451,6 @@
                          
       - name: Build kernel
         working-directory: kernel
-        if: ${{ inputs.build_kernel }}
         shell: bash
         run: |
           set -euo pipefail
