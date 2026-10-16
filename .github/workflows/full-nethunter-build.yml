@@ -2527,29 +2527,29 @@
           CONFIG_USB_RTL8152=m
 
           # USB serial adapter support
-           CONFIG_USB_SERIAL_CH341=m
-           CONFIG_USB_SERIAL_CP210X=m
-           CONFIG_USB_SERIAL_FTDI_SIO=m
-           CONFIG_USB_SERIAL_PL2303=m
-           CONFIG_USB_SERIAL_QUALCOMM=m
-           CONFIG_USB_SERIAL_OPTION=m
+          CONFIG_USB_SERIAL_CH341=m
+          CONFIG_USB_SERIAL_CP210X=m
+          CONFIG_USB_SERIAL_FTDI_SIO=m
+          CONFIG_USB_SERIAL_PL2303=m
+          CONFIG_USB_SERIAL_QUALCOMM=m
+          CONFIG_USB_SERIAL_OPTION=m
 
           # USB/IP and virtual host controller
-            CONFIG_USBIP_CORE=m
-            CONFIG_USBIP_VHCI_HCD=m
-            CONFIG_USBIP_HOST=m
+          CONFIG_USBIP_CORE=m
+          CONFIG_USBIP_VHCI_HCD=m
+          CONFIG_USBIP_HOST=m
 
           # Controller Area Network (CAN)
-             CONFIG_CAN=m
-             CONFIG_CAN_RAW=m
-             CONFIG_CAN_BCM=m
-             CONFIG_CAN_GW=m
-             CONFIG_CAN_VCAN=m
-             CONFIG_CAN_VXCAN=m
-             CONFIG_CAN_SLCAN=m
-             CONFIG_CAN_GS_USB=m
-             CONFIG_CAN_KVASER_USB=m
-             CONFIG_CAN_PEAK_USB=m
+          CONFIG_CAN=m
+          CONFIG_CAN_RAW=m
+          CONFIG_CAN_BCM=m
+          CONFIG_CAN_GW=m
+          CONFIG_CAN_VCAN=m
+          CONFIG_CAN_VXCAN=m
+          CONFIG_CAN_SLCAN=m
+          CONFIG_CAN_GS_USB=m
+          CONFIG_CAN_KVASER_USB=m
+          CONFIG_CAN_PEAK_USB=m
 
 
           # ============================================================
@@ -2578,16 +2578,16 @@
           # Netfilter / connection tracking
           # ============================================================
 
-           CONFIG_NETFILTER=y
-           CONFIG_NETFILTER_ADVANCED=y
-           CONFIG_NF_CONNTRACK=m
-           CONFIG_NF_NAT=m
-           CONFIG_NETFILTER_XTABLES=y
-           CONFIG_NETFILTER_XT_MARK=y
-           CONFIG_NETFILTER_XT_NAT=y
-           CONFIG_NETFILTER_XT_MATCH_CONNTRACK=m
-           CONFIG_NETFILTER_XT_MATCH_MARK=m
-           CONFIG_NETFILTER_XT_MATCH_MULTIPORT=m
+          CONFIG_NETFILTER=y
+          CONFIG_NETFILTER_ADVANCED=y
+          CONFIG_NF_CONNTRACK=m
+          CONFIG_NF_NAT=m
+          CONFIG_NETFILTER_XTABLES=y
+          CONFIG_NETFILTER_XT_MARK=y
+          CONFIG_NETFILTER_XT_NAT=y
+          CONFIG_NETFILTER_XT_MATCH_CONNTRACK=m
+          CONFIG_NETFILTER_XT_MATCH_MARK=m
+          CONFIG_NETFILTER_XT_MATCH_MULTIPORT=m
 
           # ============================================================
           # NetHunter filesystem / container support
