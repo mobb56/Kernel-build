@@ -11466,6 +11466,93 @@
           echo "PASS: ${MODULE_COUNT} compiled modules packaged"
 
           echo
+          echo "=== Verify ALL compiled modules were packaged ==="
+
+          SOURCE_MODULE_LIST="${RUNNER_TEMP}/source-modules.list"
+          PACKAGED_MODULE_LIST="${RUNNER_TEMP}/packaged-modules.list"
+
+          # Record every compiled module relative to OUT_DIR.
+          find "${OUT_DIR}" \
+            -type f \
+            -name '*.ko' \
+            -printf '%P\n' \
+            | sort \
+            > "${SOURCE_MODULE_LIST}"
+
+          # Record every packaged module relative to MODULE_DIR.
+          find "${MODULE_DIR}" \
+            -type f \
+            -name '*.ko' \
+            -printf '%P\n' \
+            | sort \
+            > "${PACKAGED_MODULE_LIST}"
+
+          if [ ! -s "${SOURCE_MODULE_LIST}" ]; then
+            echo "ERROR: No compiled modules were found."
+            exit 1
+          fi
+
+          echo "Compiled module count:"
+          wc -l < "${SOURCE_MODULE_LIST}"
+
+          echo "Packaged module count:"
+          wc -l < "${PACKAGED_MODULE_LIST}"
+
+          # Fail if a module is missing or an unexpected module was added.
+          if ! diff -u \
+              "${SOURCE_MODULE_LIST}" \
+              "${PACKAGED_MODULE_LIST}"; then
+            echo "ERROR: Source and packaged module inventories differ."
+            exit 1
+          fi
+
+          echo
+          echo "=== Verify each packaged module's contents ==="
+
+          VERIFIED_MODULE_COUNT=0
+
+          while IFS= read -r RELATIVE_MODULE; do
+            [ -n "${RELATIVE_MODULE}" ] || continue
+
+            SOURCE_MODULE="${OUT_DIR}/${RELATIVE_MODULE}"
+            PACKAGED_MODULE="${MODULE_DIR}/${RELATIVE_MODULE}"
+
+            if [ ! -s "${SOURCE_MODULE}" ]; then
+              echo "ERROR: Source module is missing or empty:"
+              echo "${RELATIVE_MODULE}"
+              exit 1
+            fi
+
+            if [ ! -s "${PACKAGED_MODULE}" ]; then
+              echo "ERROR: Packaged module is missing or empty:"
+              echo "${RELATIVE_MODULE}"
+              exit 1
+            fi
+
+            if ! cmp -s \
+                "${SOURCE_MODULE}" \
+                "${PACKAGED_MODULE}"; then
+              echo "ERROR: Packaged module differs from build output:"
+              echo "${RELATIVE_MODULE}"
+              exit 1
+            fi
+
+            VERIFIED_MODULE_COUNT=$((VERIFIED_MODULE_COUNT + 1))
+
+          done < "${SOURCE_MODULE_LIST}"
+
+          if [ "${VERIFIED_MODULE_COUNT}" -ne "${MODULE_COUNT}" ]; then
+            echo "ERROR: Verified module count does not match copy count."
+            exit 1
+          fi
+
+          echo "PASS: all ${VERIFIED_MODULE_COUNT} compiled modules"
+          echo "PASS: no compiled modules are missing from the artifact"
+          echo "PASS: every packaged module matches its build output"
+
+          
+           
+          echo
           echo "=== Verify required NetHunter module files ==="
 
            REQUIRED_MODULES=(
