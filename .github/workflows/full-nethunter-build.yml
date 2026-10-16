@@ -11268,7 +11268,7 @@
           require_config "CONFIG_NETFILTER_XT_MATCH_CONNTRACK" "ym"
           require_config "CONFIG_NETFILTER_XT_MATCH_MARK" "ym"
           require_config "CONFIG_NETFILTER_XT_MATCH_MULTIPORT" "ym"
-          require_config "CONFIG_NF_NAT" "y"
+          require_config "CONFIG_NF_NAT" "m"
 
           require_config "CONFIG_FUSE_FS" "m"
           require_config "CONFIG_OVERLAY_FS" "m"
