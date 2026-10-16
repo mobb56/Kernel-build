@@ -11593,6 +11593,11 @@ jobs:
             "drivers/net/can/slcan.ko" \
             "slcan.ko"
 
+           # Qualcomm WLAN
+          install_runtime_module \
+            "drivers/staging/qcacld-3.0/wlan.ko" \
+            "wlan.ko"
+
           # USB CAN adapters
           install_runtime_module \
             "drivers/net/can/usb/gs_usb.ko" \
