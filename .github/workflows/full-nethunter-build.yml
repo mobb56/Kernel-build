@@ -9467,6 +9467,46 @@
           echo "No source modification was performed."
           echo "No kernel build was performed."
 
+
+
+
+      - name: Fix PEAK USB CAN compiler compatibility
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FILE="drivers/net/can/usb/peak_usb/pcan_usb_pro.c"
+
+          test -f "$FILE" || {
+            echo "ERROR: PEAK USB CAN source file not found: $FILE"
+            exit 1
+          }
+
+          echo "=== Checking pcan_msg_add_rec declaration ==="
+          grep -n -A 4 -B 2 'pcan_msg_add_rec' "$FILE"
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("drivers/net/can/usb/peak_usb/pcan_usb_pro.c")
+          source = path.read_text()
+
+          old = "static int pcan_msg_add_rec(struct pcan_usb_pro_msg *pm, u8 id, ...)"
+          new = "static int pcan_msg_add_rec(struct pcan_usb_pro_msg *pm, int id, ...)"
+
+          if old not in source:
+              raise SystemExit(
+                  "ERROR: Expected function declaration was not found. "
+                  "No source changes made."
+              )
+
+          path.write_text(source.replace(old, new, 1))
+          print("PASS: Changed the variadic function's id parameter from u8 to int.")
+          PY
+
+          grep -n -A 2 -B 1 'pcan_msg_add_rec' "$FILE"
+
       
                          
       - name: Build kernel
