@@ -11682,6 +11682,18 @@
             "drivers/net/usb/cdc_ncm.ko" \
             "cdc_ncm.ko"
 
+
+
+            
+          install_runtime_module \
+           "drivers/net/usb/r8152.ko" \
+           "r8152.ko"
+
+          install_runtime_module \
+           "drivers/net/usb/rtl8150.ko" \
+           "rtl8150.ko"
+          
+
            install_runtime_module \
             "drivers/usb/usbip/usbip-core.ko" \
             "usbip-core.ko"
