@@ -11424,6 +11424,12 @@ jobs:
                   "drivers/usb/usbip/usbip-core.ko"
                   "drivers/usb/usbip/vhci-hcd.ko"
                   "drivers/usb/usbip/usbip-host.ko"
+                  "drivers/usb/serial/ch341.ko"
+                  "drivers/usb/serial/cp210x.ko"
+                  "drivers/usb/serial/ftdi_sio.ko"
+                  "drivers/usb/serial/pl2303.ko"
+                  "drivers/usb/serial/qcserial.ko"
+                  "drivers/usb/serial/option.ko"
               )
 
           for RELATIVE_MODULE in "${REQUIRED_MODULES[@]}"; do
