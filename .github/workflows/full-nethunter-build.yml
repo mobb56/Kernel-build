@@ -12070,35 +12070,7 @@
 
 
 
-          
-          echo
-          echo "=== Generate checksums for completed artifact ==="
 
-          rm -f "${ARTIFACT_DIR}/SHA256SUMS"
-
-          (
-            cd "${ARTIFACT_DIR}"
-
-            find . \
-              -type f \
-              ! -name 'SHA256SUMS' \
-              -print0 \
-              | sort -z \
-              | xargs -0 sha256sum
-          ) > "${ARTIFACT_DIR}/SHA256SUMS"
-
-          test -s "${ARTIFACT_DIR}/SHA256SUMS"
-
-          echo
-          echo "=== Verify artifact checksums ==="
-
-          (
-            cd "${ARTIFACT_DIR}"
-            sha256sum -c SHA256SUMS
-          )
-
-          echo "PASS: every checksummed artifact file verified"
-           
           echo
           echo "=== Generate artifact manifest ==="
 
@@ -12131,6 +12103,39 @@
           } > "${ARTIFACT_DIR}/MANIFEST.txt"
 
           test -s "${ARTIFACT_DIR}/MANIFEST.txt"
+
+
+
+          
+          echo
+          echo "=== Generate checksums for completed artifact ==="
+
+          rm -f "${ARTIFACT_DIR}/SHA256SUMS"
+
+          (
+            cd "${ARTIFACT_DIR}"
+
+            find . \
+              -type f \
+              ! -name 'SHA256SUMS' \
+              -print0 \
+              | sort -z \
+              | xargs -0 sha256sum
+          ) > "${ARTIFACT_DIR}/SHA256SUMS"
+
+          test -s "${ARTIFACT_DIR}/SHA256SUMS"
+
+          echo
+          echo "=== Verify artifact checksums ==="
+
+          (
+            cd "${ARTIFACT_DIR}"
+            sha256sum -c SHA256SUMS
+          )
+
+          echo "PASS: every checksummed artifact file verified"
+           
+          
 
           echo
           echo "=== Final artifact verification ==="
