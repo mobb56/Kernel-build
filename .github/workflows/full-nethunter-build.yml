@@ -11594,6 +11594,16 @@
           for RELATIVE_MODULE in "${REQUIRED_MODULES[@]}"; do
             SOURCE_MODULE="${OUT_DIR}/${RELATIVE_MODULE}"
 
+
+            PACKAGED_MODULE="${MODULE_DIR}/${RELATIVE_MODULE}"
+
+          if [ ! -s "${PACKAGED_MODULE}" ]; then
+            echo "ERROR: Required module is missing from package:"
+           echo "${RELATIVE_MODULE}"
+           exit 1
+           fi
+            
+
             if [ ! -s "${SOURCE_MODULE}" ]; then
               echo "ERROR: required NetHunter module is missing:"
               echo "${RELATIVE_MODULE}"
