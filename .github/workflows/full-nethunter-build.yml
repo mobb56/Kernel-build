@@ -11421,6 +11421,9 @@ jobs:
                   "drivers/net/usb/cdc_ether.ko"
                   "drivers/net/usb/cdc_ncm.ko"
                   "drivers/staging/qcacld-3.0/wlan.ko"
+                  "drivers/usb/usbip/usbip-core.ko"
+                  "drivers/usb/usbip/vhci-hcd.ko"
+                  "drivers/usb/usbip/usbip-host.ko"
               )
 
           for RELATIVE_MODULE in "${REQUIRED_MODULES[@]}"; do
