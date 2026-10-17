@@ -9931,6 +9931,76 @@
 
           grep -n -A 2 -B 1 'pcan_msg_add_rec' "$FILE"
 
+
+
+
+
+      - name: Trace monitor VDEV response path
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FILE="drivers/staging/qcacld-3.0/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
+
+          test -f "$FILE" || {
+            echo "::error::Monitor response source file not found"
+            exit 1
+          }
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path(
+              "drivers/staging/qcacld-3.0/core/mac/src/pe/lim/"
+              "lim_process_mlm_rsp_messages.c"
+          )
+          s = p.read_text()
+
+          old = '''        pe_session = pe_find_session_by_vdev_id(mac, rsp->vdev_id);
+          if (!pe_session) {
+                  pe_err("session does not exist for given sessionId");
+                  return;
+          }'''
+
+          new = '''        pe_session = pe_find_session_by_vdev_id(mac, rsp->vdev_id);
+          if (!pe_session) {
+                  pe_err("MON_VDEV_TRACE: no PE session for vdev_id=%d",
+                         rsp->vdev_id);
+                  pe_err("session does not exist for given sessionId");
+                  return;
+          }'''
+
+          if "MON_VDEV_TRACE: no PE session for vdev_id=%d" not in s:
+              if old not in s:
+                  raise SystemExit(
+                      "ERROR: Expected PE-session lookup block not found; "
+                      "source was not modified."
+                  )
+              s = s.replace(old, new, 1)
+
+          marker = '''        channelChangeReasonCode = pe_session->channelChangeReasonCode;
+          pe_session->chainMask = rsp->chain_mask;'''
+
+          replacement = '''        pe_err("MON_VDEV_TRACE: response vdev=%d status=%d reason=%d bssType=%d opmode=%d",
+               rsp->vdev_id, status, pe_session->channelChangeReasonCode,
+               pe_session->bssType, pe_session->opmode);
+          channelChangeReasonCode = pe_session->channelChangeReasonCode;
+          pe_session->chainMask = rsp->chain_mask;'''
+
+          if "MON_VDEV_TRACE: response vdev=%d status=%d" not in s:
+              if marker not in s:
+                  raise SystemExit(
+                      "ERROR: Expected channel-response block not found; "
+                      "source was not modified."
+                  )
+              s = s.replace(marker, replacement, 1)
+
+          p.write_text(s)
+          print("Monitor VDEV response trace applied and verified.")
+          PY
+
+          grep -n "MON_VDEV_TRACE:" "$FILE"
+
       
                          
       - name: Build kernel
