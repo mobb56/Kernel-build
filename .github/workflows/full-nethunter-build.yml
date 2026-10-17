@@ -443,6 +443,62 @@
 
 
 
+      - name: Patch monitor same-channel response routing
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SRC="drivers/staging/qcacld-3.0/core/mac/src/pe/lim/lim_process_sme_req_messages.c"
+
+          test -f "$SRC"
+
+          python3 - "$SRC" <<'PY'
+          import pathlib
+          import sys
+
+          path = pathlib.Path(sys.argv[1])
+          source = path.read_text()
+
+          old = """\tif (session_entry->curr_op_freq == target_freq &&
+          \t    session_entry->ch_width == ch_change_req->ch_width) {
+          \t\tpe_err("Target channel and mode is same as current channel and mode channel freq %d and mode %d",
+          \t\t       session_entry->curr_op_freq, session_entry->ch_width);
+          \t\treturn;
+          \t}
+          """
+
+          new = """\tif (session_entry->curr_op_freq == target_freq &&
+          \t    session_entry->ch_width == ch_change_req->ch_width &&
+          \t    session_entry->opmode != QDF_MONITOR_MODE) {
+          \t\tpe_err("Target channel and mode is same as current channel and mode channel freq %d and mode %d",
+          \t\t       session_entry->curr_op_freq, session_entry->ch_width);
+          \t\treturn;
+          \t}
+          """
+
+          if source.count(old) != 1:
+              print("ERROR: Expected source block not found exactly once.")
+              print("No source changes made.")
+              sys.exit(1)
+
+          path.write_text(source.replace(old, new, 1))
+
+          updated = path.read_text()
+          if new not in updated:
+              print("ERROR: Patch verification failed.")
+              sys.exit(1)
+
+          print("PASS: monitor same-channel early-return condition patched.")
+          print("Monitor requests can now continue through the normal request path.")
+          PY
+
+          git diff --check
+          git diff -- "$SRC"
+
+
+
+
 
 
             
