@@ -9940,8 +9940,8 @@
         run: |
           set -euo pipefail
 
-          FILE="drivers/staging/qcacld-3.0/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
-
+          FILE="${GITHUB_WORKSPACE}/android_kernel/drivers/staging/qcacld-3.0/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
+          
           test -f "$FILE" || {
             echo "::error::Monitor response source file not found"
             exit 1
