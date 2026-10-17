@@ -1043,6 +1043,38 @@
 
 
 
+
+      - name: Inspect QCACLD3 monitor and injection sources
+        shell: bash
+        run: |
+          set -u
+
+          cd kernel/drivers/staging/qcacld-3.0
+
+          echo "========== INJECTION AND MONITOR FILES =========="
+          find . -type f \( \
+            -iname '*inject*' -o \
+            -iname '*monitor*' -o \
+            -iname '*wma*' -o \
+            -iname '*hdd*' \
+          \) | sort
+
+          echo
+          echo "========== RELEVANT FUNCTION REFERENCES =========="
+          grep -RniE \
+            'FEATURE_FRAME_INJECTION_SUPPORT|FEATURE_MONITOR_MODE_SUPPORT|frame.inject|monitor.mode|MONITOR|VDEV.*(START|UP)|vdev.*(start|up)' \
+            core/hdd core/wma \
+            --include='*.c' \
+            --include='*.h' \
+            --include='Kbuild' \
+            --include='Makefile' \
+            2>/dev/null || true
+        
+
+
+
+
+
       
               
 
