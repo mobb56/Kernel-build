@@ -9532,6 +9532,112 @@
 
 
 
+
+
+      - name: Trace monitor VDEV response to LIM and HDD callback
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          QCACLD="drivers/staging/qcacld-3.0"
+          REPORT="${GITHUB_WORKSPACE}/monitor-vdev-lim-trace.txt"
+
+          : > "$REPORT"
+
+          {
+            echo "Moto G9 Power cebu — monitor VDEV response trace"
+            echo "Commit: $(git rev-parse HEAD 2>/dev/null || echo unknown)"
+            echo "Generated: $(date -u +%FT%TZ)"
+            echo
+
+            dump_matches() {
+              local title="$1"
+              local pattern="$2"
+              shift 2
+
+              echo "============================================================"
+              echo "$title"
+              echo "Pattern: $pattern"
+              echo "============================================================"
+
+              local root
+              for root in "$@"; do
+                [ -e "$root" ] || continue
+
+                grep -RInE \
+                  --include='*.c' \
+                  --include='*.h' \
+                  -B18 -A42 \
+                  "$pattern" "$root" 2>/dev/null || true
+              done
+
+              echo
+            }
+
+            dump_matches \
+              "WMA channel-switch response dispatch" \
+              'wma_handle_channel_switch_resp|lim_process_switch_channel_rsp' \
+              "$QCACLD/core/wma" \
+              "$QCACLD/core/mac"
+
+            dump_matches \
+              "LIM monitor response and channel-change reason" \
+              'lim_handle_mon_switch_channel_rsp|LIM_SWITCH_CHANNEL_MONITOR|lim_process_switch_channel_rsp' \
+              "$QCACLD/core/mac"
+
+            dump_matches \
+              "VDEV start/restart response event handlers" \
+              'WLAN_VDEV_SM_EV_START_RESP|WLAN_VDEV_SM_EV_RESTART_RESP|WLAN_VDEV_SM_EV_START_SUCCESS' \
+              "$QCACLD/components/mlme" \
+              "$QCACLD/core"
+
+            dump_matches \
+              "Monitor MLME continuation and VDEV-up path" \
+              'mon_mlme_start_continue|mon_mlme_vdev_start_restart_send|mon_mlme_vdev_up_send|eWNI_SME_MONITOR_MODE_VDEV_UP' \
+              "$QCACLD"
+
+            dump_matches \
+              "SME monitor callback registration and dispatch" \
+              'sme_set_monitor_mode_cb|sme_process_monitor_mode_vdev_up_evt|hdd_sme_monitor_mode_callback' \
+              "$QCACLD/core/sme" \
+              "$QCACLD/core/hdd" \
+              "$QCACLD/inc"
+
+            dump_matches \
+              "Monitor and frame-injection compile definitions" \
+              'FEATURE_MONITOR_MODE_SUPPORT|FEATURE_FRAME_INJECTION_SUPPORT' \
+              "$QCACLD"
+
+            echo "============================================================"
+            echo "TRACE NOTES"
+            echo "============================================================"
+            echo "Diagnostic only: no source code is modified by this step."
+            echo "Check whether successful START/RESTART responses reach the"
+            echo "correct MLME state handler."
+            echo "Check whether the matching PE session has"
+            echo "LIM_SWITCH_CHANNEL_MONITOR set."
+            echo "Check whether the SME/HDD callback is compiled with"
+            echo "FEATURE_MONITOR_MODE_SUPPORT."
+            echo "Do not add a duplicate LIM response without evidence."
+
+          } | tee "$REPORT"
+
+          test -s "$REPORT"
+
+          echo "Trace report saved: $REPORT" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload monitor VDEV LIM trace
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor-vdev-lim-trace
+          path: monitor-vdev-lim-trace.txt
+          if-no-files-found: error
+          retention-days: 14
+
+
+
+
       - name: Fix PEAK USB CAN compiler compatibility
         working-directory: kernel
         shell: bash
