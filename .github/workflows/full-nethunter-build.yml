@@ -615,6 +615,47 @@
 
 
 
+      
+      - name: Verify QCACLD3 frame injection build integration
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          QCACLD="drivers/staging/qcacld-3.0"
+          REPORT="${GITHUB_WORKSPACE}/frame-injection-build-check.txt"
+
+          {
+            echo "=== Frame injection build integration ==="
+
+            echo
+            echo "=== Kbuild feature flags ==="
+            grep -RInE \
+              'FEATURE_FRAME_INJECTION_SUPPORT|FEATURE_MONITOR_MODE_SUPPORT' \
+              "$QCACLD" \
+              --include='Kbuild' --include='Makefile' || true
+
+            echo
+            echo "=== Injection source and declarations ==="
+            grep -RInE \
+              'frame.inject|inject.*frame|frame.*inject|inject.*80211' \
+              "$QCACLD/core/hdd" "$QCACLD/core/wma" "$QCACLD/inc" \
+              --include='*.c' --include='*.h' || true
+
+            echo
+            echo "=== Injection object build entries ==="
+            grep -RInE \
+              'wma_frame_inject|hdd.*inject|inject.*\.o' \
+              "$QCACLD" \
+              --include='Kbuild' --include='Makefile' || true
+
+          } | tee "$REPORT"
+
+          test -s "$REPORT"
+
+          echo "### Frame injection integration report" >> "$GITHUB_STEP_SUMMARY"
+          echo "See uploaded frame-injection-build-check.txt for source and build entries." >> "$GITHUB_STEP_SUMMARY"
+
 
             
        
