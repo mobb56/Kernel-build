@@ -442,6 +442,81 @@
 
 
 
+
+
+
+            
+       
+      - name: Inspect monitor start request completion path
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          QCACLD="drivers/staging/qcacld-3.0"
+          REPORT="${GITHUB_WORKSPACE}/monitor-start-completion.txt"
+
+          : > "$REPORT"
+
+          {
+            echo "=== 1. LIM channel-change request handler ==="
+
+            sed -n '4880,5055p' \
+              "$QCACLD/core/mac/src/pe/lim/lim_process_sme_req_messages.c"
+
+            echo
+            echo "=== 2. Monitor start-send implementation ==="
+
+            grep -RIn -E \
+              --include='*.c' \
+              --include='*.h' \
+              'lim_mon_mlme_vdev_start_send[[:space:]]*\(' \
+              "$QCACLD"
+
+            echo
+            echo "=== 3. Monitor start-send function context ==="
+
+            grep -RIn -B35 -A100 \
+              --include='*.c' \
+              'lim_mon_mlme_vdev_start_send[[:space:]]*(' \
+              "$QCACLD"
+
+            echo
+            echo "=== 4. Monitor response handler ==="
+
+            sed -n '2860,3005p' \
+              "$QCACLD/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
+
+            echo
+            echo "=== 5. WMA response continuation ==="
+
+            sed -n '4590,4665p' \
+              "$QCACLD/core/wma/src/wma_utils.c"
+
+            echo
+            echo "=== 6. Monitor VDEV-up event path ==="
+
+            grep -RIn -B15 -A45 \
+              --include='*.c' \
+              'eWNI_SME_MONITOR_MODE_VDEV_UP' \
+              "$QCACLD"
+
+            echo
+            echo "=== End of source capture ==="
+            echo "Diagnostic only: no source files modified."
+
+          } 2>&1 | tee "$REPORT"
+
+          test -s "$REPORT"
+
+      - name: Upload monitor start completion source
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor-start-completion
+          path: monitor-start-completion.txt
+          if-no-files-found: error
+          retention-days: 14
+      
        
        
 
