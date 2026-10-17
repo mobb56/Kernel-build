@@ -502,114 +502,31 @@
 
 
 
-          
-      - name: Trace monitor VDEV startup checkpoints
+      - name: Inspect monitor VDEV startup checkpoints
         working-directory: kernel
         shell: bash
         run: |
           set -euo pipefail
 
-          python3 - <<'PY'
-          from pathlib import Path
+          FILE="drivers/staging/qcacld-3.0/core/mac/src/pe/lim/lim_utils.c"
 
-          base = Path("drivers/staging/qcacld-3.0")
+          echo "=== Monitor start-send function locations ==="
+          grep -n -B 12 -A 25 \
+            'lim_mon_mlme_vdev_start_send' "$FILE"
 
-          def patch_file(rel, replacements):
-              path = base / rel
-              text = path.read_text()
-              original = text
+          echo
+          echo "=== Session mac_ctx assignments ==="
+          grep -n -B 12 -A 12 \
+            'mac_ctx = session->mac_ctx;' "$FILE"
 
-              for old, new, label in replacements:
-                  count = text.count(old)
-                  if count != 1:
-                      raise SystemExit(
-                          f"STOP: {label}: expected one match, found {count} "
-                          f"in {path}"
-                      )
-                  text = text.replace(old, new, 1)
+          echo
+          echo "=== LIM response handler ==="
+          grep -n -B 8 -A 35 \
+            'lim_process_switch_channel_rsp' \
+            drivers/staging/qcacld-3.0/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c
 
-              if text != original:
-                  path.write_text(text)
-                  print(f"Instrumented: {path}")
-
-          patch_file(
-              "core/mac/src/pe/lim/lim_utils.c",
-              [
-                  (
-                      "mac_ctx = session->mac_ctx;",
-                      'pe_err("NH_TRACE monitor_start_send vdev=%d '
-                      'bssType=%d freq=%d reason=%d", '
-                      'session->vdev_id, session->bssType, '
-                      'session->curr_op_freq, '
-                      'session->channelChangeReasonCode);\n'
-                      "\tmac_ctx = session->mac_ctx;",
-                      "LIM monitor start-send checkpoint",
-                  ),
-              ],
-          )
-
-          patch_file(
-              "core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c",
-              [
-                  (
-                      "status = rsp->status;",
-                      'status = rsp->status;\n'
-                      '\tpe_err("NH_TRACE lim_switch_rsp vdev=%d status=%d", '
-                      'rsp->vdev_id, status);',
-                      "LIM switch response checkpoint",
-                  ),
-                  (
-                      "channelChangeReasonCode = "
-                      "pe_session->channelChangeReasonCode;",
-                      "channelChangeReasonCode = "
-                      "pe_session->channelChangeReasonCode;\n"
-                      '\tpe_err("NH_TRACE lim_switch_reason vdev=%d '
-                      'reason=%d bssType=%d opmode=%d", '
-                      "rsp->vdev_id, channelChangeReasonCode, "
-                      "pe_session->bssType, pe_session->opmode);",
-                      "LIM response reason checkpoint",
-                  ),
-                  (
-                      "if (session->bssType != eSIR_MONITOR_MODE)\n"
-                      "\t\treturn;",
-                      'pe_err("NH_TRACE monitor_rsp_handler vdev=%d '
-                      'status=%d bssType=%d", session->vdev_id, '
-                      'status, session->bssType);\n'
-                      "\tif (session->bssType != eSIR_MONITOR_MODE)\n"
-                      "\t\treturn;",
-                      "LIM monitor completion checkpoint",
-                  ),
-              ],
-          )
-
-          patch_file(
-              "core/wma/src/wma_utils.c",
-              [
-                  (
-                      "if (mlme_is_chan_switch_in_progress"
-                      "(vdev_mlme->vdev))\n"
-                      "\t\tmlme_set_chan_switch_in_progress"
-                      "(vdev_mlme->vdev, false);\n\n"
-                      "\tlim_process_switch_channel_rsp(wma->mac_context, data);",
-                      'WMA_LOGE("NH_TRACE wma_monitor_continue vdev=%d '
-                      'chan_switch=%d", '
-                      'wlan_vdev_get_id(vdev_mlme->vdev), '
-                      'mlme_is_chan_switch_in_progress(vdev_mlme->vdev));\n'
-                      "\tif (mlme_is_chan_switch_in_progress"
-                      "(vdev_mlme->vdev))\n"
-                      "\t\tmlme_set_chan_switch_in_progress"
-                      "(vdev_mlme->vdev, false);\n\n"
-                      "\tlim_process_switch_channel_rsp(wma->mac_context, data);",
-                      "WMA monitor continuation checkpoint",
-                  ),
-              ],
-          )
-
-          print("VDEV diagnostic instrumentation completed.")
-          PY
-
-          echo "### Monitor VDEV diagnostic patch" >> "$GITHUB_STEP_SUMMARY"
-          echo "Source checkpoints added; no response is fabricated and no timeout is suppressed." >> "$GITHUB_STEP_SUMMARY"
+          echo
+          echo "Source inspection completed."
 
 
 
