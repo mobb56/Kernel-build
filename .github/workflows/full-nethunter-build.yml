@@ -1069,7 +1069,37 @@
             --include='Kbuild' \
             --include='Makefile' \
             2>/dev/null || true
-        
+
+            
+            echo
+            echo "========== MONITOR MODE IMPLEMENTATION =========="
+
+           grep -n -B 25 -A 45 \
+          -E 'wlan_hdd_cfg80211_set_mon_ch|monitor_mode_vdev_up_event|monitor_mode_vdev_up_in_progress|Failed to set monitor mode|Failed monitor mode vdev up' \
+           core/hdd/src/wlan_hdd_cfg80211.c || true
+
+           echo
+           echo "========== MONITOR RX CALLBACK =========="
+
+           grep -n -B 20 -A 35 \
+          -E 'hdd_monitor_set_rx_monitor_cb|hdd_enable_monitor_mode|cdp_set_monitor_mode' \
+          core/hdd/src/wlan_hdd_rx_monitor.c || true
+
+            echo
+            echo "========== INJECTION SOURCE FILES =========="
+
+           find core/hdd core/wma -type f \
+          \( -iname '*inject*' -o -iname '*monitor*' \) \
+          | sort
+
+            echo
+            echo "========== INJECTION FEATURE REFERENCES =========="
+
+            grep -RniE \
+            'FEATURE_FRAME_INJECTION_SUPPORT|frame.inject|CAP_NET_RAW|wma.*inject|inject.*wma' \
+             core/hdd core/wma \
+              --include='*.c' --include='*.h' --include='Kbuild' --include='Makefile' \
+               2>/dev/null || true
 
 
 
