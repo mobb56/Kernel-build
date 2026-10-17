@@ -390,6 +390,58 @@
 
 
 
+
+
+      - name: Validate monitor same-channel response path
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SRC="drivers/staging/qcacld-3.0/core/mac/src/pe/lim/lim_process_sme_req_messages.c"
+
+          test -f "$SRC"
+
+          echo "=== Verify the exact same-channel branch ==="
+
+          python3 - "$SRC" <<'PY'
+          import pathlib
+          import sys
+
+          path = pathlib.Path(sys.argv[1])
+          source = path.read_text()
+
+          expected = (
+              "if (session_entry->curr_op_freq == target_freq &&\n"
+              "\t    session_entry->ch_width == ch_change_req->ch_width) {\n"
+              "\t\tpe_err(\"Target channel and mode is same as current channel and mode channel freq %d and mode %d\",\n"
+              "\t\t       session_entry->curr_op_freq, session_entry->ch_width);\n"
+              "\t\treturn;\n"
+              "\t}\n"
+          )
+
+          if expected not in source:
+              print("STOP: source does not match the reviewed branch.")
+              print("No source was changed.")
+              sys.exit(1)
+
+          print("PASS: exact branch found.")
+          print("No source was changed.")
+          print("A behavior change requires verifying the caller and")
+          print("the response-completion path first.")
+          PY
+
+          echo "=== Relevant response-routing references ==="
+
+          grep -n -E \
+            'LIM_SWITCH_CHANNEL_MONITOR|lim_process_switch_channel_rsp|lim_mon_mlme_vdev_start_send' \
+            "$SRC" \
+            drivers/staging/qcacld-3.0/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c \
+            drivers/staging/qcacld-3.0/components/mlme/core/src/wlan_mlme_vdev_mgr_interface.c \
+            || true
+
+
+
        
        
 
