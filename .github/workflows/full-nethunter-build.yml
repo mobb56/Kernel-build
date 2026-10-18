@@ -9934,28 +9934,67 @@
 
 
       
-      - name: Inspect monitor VDEV response source
+ 
+
+      - name: Patch monitor VDEV response diagnostics
         shell: bash
         run: |
           set -euo pipefail
 
           FILE="kernel/drivers/staging/qcacld-3.0/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
 
-          if [ ! -f "$FILE" ]; then
-            echo "::error::Source file not found: $FILE"
-            exit 1
-          fi
+          python3 - "$FILE" <<'PY'
+          import sys
+          from pathlib import Path
 
-          echo "=== PE-session lookup and channel response ==="
+          p = Path(sys.argv[1])
+          s = p.read_text()
 
-          grep -n -A 24 -B 8 \
-            'pe_find_session_by_vdev_id(mac, rsp->vdev_id)' "$FILE" || true
+          old = '''        pe_session = pe_find_session_by_vdev_id(mac, rsp->vdev_id);
+                if (!pe_session) {
+                        pe_err("session does not exist for given sessionId");
+                        return;
+                }'''
 
-          echo "=== Monitor response handler ==="
+          new = '''        pe_session = pe_find_session_by_vdev_id(mac, rsp->vdev_id);
+                if (!pe_session) {
+                        pe_err("MON_VDEV_TRACE: no PE session for vdev_id=%d",
+                               rsp->vdev_id);
+                        pe_err("session does not exist for given sessionId");
+                        return;
+                }'''
 
-          grep -n -A 35 -B 5 \
-            'lim_handle_mon_switch_channel_rsp' "$FILE" || true
-                         
+          if "MON_VDEV_TRACE: no PE session for vdev_id=%d" not in s:
+              if old not in s:
+                  print("ERROR: PE-session lookup block did not match.")
+                  print("No source changes made.")
+                  sys.exit(1)
+              s = s.replace(old, new, 1)
+
+          marker = '''        channelChangeReasonCode = pe_session->channelChangeReasonCode;
+                pe_session->chainMask = rsp->chain_mask;'''
+
+          replacement = '''        pe_err("MON_VDEV_TRACE: response vdev=%d status=%d reason=%d bssType=%d opmode=%d",
+               rsp->vdev_id, status, pe_session->channelChangeReasonCode,
+               pe_session->bssType, pe_session->opmode);
+          channelChangeReasonCode = pe_session->channelChangeReasonCode;
+                pe_session->chainMask = rsp->chain_mask;'''
+
+          if "MON_VDEV_TRACE: response vdev=%d status=%d" not in s:
+              if marker not in s:
+                  print("ERROR: Channel-response block did not match.")
+                  print("No further source changes made.")
+                  sys.exit(1)
+              s = s.replace(marker, replacement, 1)
+
+          p.write_text(s)
+          print("PASS: Monitor-response diagnostic patch applied.")
+          PY
+
+          grep -n "MON_VDEV_TRACE:" "$FILE"
+
+
+          
       - name: Build kernel
         working-directory: kernel
         shell: bash
