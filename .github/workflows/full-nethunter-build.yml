@@ -10050,6 +10050,44 @@
           'hdd_sme_monitor_mode_callback' \
            drivers/staging/qcacld-3.0/core/hdd/src
 
+
+
+      - name: Inspect monitor VDEV-up wait and timeout logic
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -eu
+          QCACLD="drivers/staging/qcacld-3.0"
+          REPORT="${GITHUB_WORKSPACE}/monitor-vdev-wait-logic.txt"
+
+          : > "$REPORT"
+
+          {
+            echo "=== MONITOR VDEV-UP EVENT WAIT AND TIMEOUT ==="
+
+            grep -RInE \
+              --include='*.c' --include='*.h' \
+              -B12 -A25 \
+              'qdf_event_wait|qdf_event_set|qdf_event_reset|qdf_event_destroy|monitor_mode_vdev_up_event|monitor_mode_vdev_up_in_progress' \
+              "$QCACLD/core/hdd" "$QCACLD/core/sme" \
+              2>/dev/null || true
+
+            echo
+            echo "=== MONITOR STARTUP AND FAILURE CLEANUP ==="
+
+            grep -RInE \
+              --include='*.c' --include='*.h' \
+              -B15 -A30 \
+              'hdd_sme_monitor_mode_callback|hdd_mon.*start|mon.*vdev.*up|MONITOR_MODE.*TIMEOUT' \
+              "$QCACLD/core/hdd" \
+              2>/dev/null || true
+
+          } | tee "$REPORT"
+
+          echo
+          echo "=== REPORT GENERATED ==="
+          test -s "$REPORT"
+
           
 
           
