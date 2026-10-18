@@ -9936,78 +9936,24 @@
       
  
 
-      - name: Patch monitor VDEV response diagnostics
+      - name: Inspect monitor VDEV response source
         shell: bash
         run: |
           set -euo pipefail
 
           FILE="kernel/drivers/staging/qcacld-3.0/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
-          test -f "$FILE" || {
-            echo "::error::Source file not found: $FILE"
-            exit 1
-          }
 
-          python3 - "$FILE" <<'PY'
-          import re
-          import sys
-          from pathlib import Path
+          test -f "$FILE"
 
-          p = Path(sys.argv[1])
-          s = p.read_text()
+          echo "=== PE-session lookup ==="
+          sed -n '2898,2935p' "$FILE"
 
-          if "MON_VDEV_TRACE:" not in s:
-              pattern = re.compile(
-                  r'(?P<indent>^[ \t]*)pe_session\s*=\s*'
-                  r'pe_find_session_by_vdev_id\(mac,\s*rsp->vdev_id\);'
-                  r'\n(?P<body>(?:[ \t]*\n|[ \t]+if\s*\(!pe_session\)'
-                  r'[\s\S]*?^[ \t]+})',
-                  re.MULTILINE
-              )
-              match = pattern.search(s)
-              if not match:
-                  print("ERROR: Could not safely identify PE-session lookup.")
-                  sys.exit(1)
+          echo "=== Monitor response handler ==="
+          sed -n '2848,2885p' "$FILE"
 
-              block = match.group(0)
-              if "if (!pe_session)" not in block or "return;" not in block:
-                  print("ERROR: Lookup block did not pass safety checks.")
-                  sys.exit(1)
-
-              replacement = block.replace(
-                  'if (!pe_session) {',
-                  'if (!pe_session) {\n'
-                  '                pe_err("MON_VDEV_TRACE: no PE session for vdev_id=%d",\n'
-                  '                       rsp->vdev_id);',
-                  1
-              )
-              if replacement == block:
-                  print("ERROR: Expected null-session condition not found.")
-                  sys.exit(1)
-              s = s.replace(block, replacement, 1)
-
-          if "MON_VDEV_TRACE: response vdev=%d status=%d" not in s:
-              marker = "channelChangeReasonCode = pe_session->channelChangeReasonCode;"
-              if s.count(marker) != 1:
-                  print("ERROR: Expected one channel-change reason assignment.")
-                  sys.exit(1)
-
-              trace = (
-                  'pe_err("MON_VDEV_TRACE: response vdev=%d status=%d reason=%d bssType=%d opmode=%d",\n'
-                  '       rsp->vdev_id, status, pe_session->channelChangeReasonCode,\n'
-                  '       pe_session->bssType, pe_session->opmode);\n        '
-              )
-              s = s.replace(marker, trace + marker, 1)
-
-          if s.count("MON_VDEV_TRACE:") < 2:
-              print("ERROR: Both diagnostic messages were not verified.")
-              sys.exit(1)
-
-          p.write_text(s)
-          print("PASS: Both monitor-response diagnostics are present.")
-          PY
-
-          grep -n "MON_VDEV_TRACE:" "$FILE"
-        
+          echo "=== Channel-change reason dispatch ==="
+          grep -n -A 30 -B 5 \
+            'case LIM_SWITCH_CHANNEL_MONITOR' "$FILE"
 
 
           
