@@ -9970,52 +9970,91 @@
 
           python3 - "$FILE" <<'PY'
           import pathlib
+          import re
           import sys
 
           path = pathlib.Path(sys.argv[1])
           text = path.read_text()
 
-          lookup = "pe_session = pe_find_session_by_vdev_id(mac, rsp->vdev_id);"
-          if lookup not in text:
-              raise SystemExit("ERROR: PE-session lookup statement not found")
-
-          missing = 'pe_err("MON_VDEV_TRACE: no PE session'
-          if missing not in text:
-              old = '''if (!pe_session) {
-                          pe_err("session does not exist for given sessionId");
-                          return;
-                  }'''
-              new = '''if (!pe_session) {
-                          pe_err("MON_VDEV_TRACE: no PE session for vdev_id=%d",
-                                 rsp->vdev_id);
-                          pe_err("session does not exist for given sessionId");
-                          return;
-                  }'''
-
-              # Match the actual block independent of indentation.
-              start = text.find(lookup)
-              end = text.find("channelChangeReasonCode =", start)
-              if end < 0:
-                  raise SystemExit("ERROR: channel-change reason assignment not found")
-
-              section = text[start:end]
-              import re
-              pattern = r'if\s*\(!pe_session\)\s*\{\s*pe_err\("session does not exist for given sessionId"\);\s*return;\s*\}'
-              updated, count = re.subn(pattern, new, section, count=1)
-
+          def replace_once(source, pattern, replacement, label):
+              updated, count = re.subn(
+                  pattern, replacement, source, count=1, flags=re.M
+              )
               if count != 1:
-                  print("=== Actual PE-session lookup section ===")
-                  print(section)
-                  raise SystemExit("ERROR: PE-session block not matched; no changes written")
+                  raise SystemExit(
+                      f"ERROR: expected exactly one match for {label}; "
+                      f"found {count}. No file written."
+                  )
+              return updated
 
-              text = text[:start] + updated + text[end:]
+          # Trace A: missing PE session.
+          if "MON_VDEV_TRACE: no PE session for vdev_id=%d" not in text:
+              text = replace_once(
+                  text,
+                  r'(?P<i>^[ \t]*)pe_session = pe_find_session_by_vdev_id\(mac, rsp->vdev_id\);\n'
+                  r'(?P=i)if \(!pe_session\) \{\n'
+                  r'(?P<i>[ \t]*)pe_err\("session does not exist for given sessionId"\);',
+                  lambda m: (
+                      f'{m.group("i")}pe_session = pe_find_session_by_vdev_id(mac, rsp->vdev_id);\n'
+                      f'{m.group("i")}if (!pe_session) {{\n'
+                      f'{m.group("i")}\tpe_err("MON_VDEV_TRACE: no PE session for vdev_id=%d",\n'
+                      f'{m.group("i")}\t       rsp->vdev_id);\n'
+                      f'{m.group("i")}\tpe_err("session does not exist for given sessionId");'
+                  ),
+                  "missing-session trace",
+              )
+
+          # Trace B: response status, reason, and session mode.
+          if "MON_VDEV_TRACE: response vdev=%d status=%d reason=%d" not in text:
+              text = replace_once(
+                  text,
+                  r'(?P<i>^[ \t]*)channelChangeReasonCode = pe_session->channelChangeReasonCode;',
+                  lambda m: (
+                      f'{m.group("i")}channelChangeReasonCode = pe_session->channelChangeReasonCode;\n'
+                      f'{m.group("i")}pe_err("MON_VDEV_TRACE: response vdev=%d status=%d reason=%d bssType=%d opmode=%d",\n'
+                      f'{m.group("i")}\t       rsp->vdev_id, status, channelChangeReasonCode,\n'
+                      f'{m.group("i")}\t       pe_session->bssType, pe_session->opmode);'
+                  ),
+                  "response status/reason trace",
+              )
+
+          # Trace C: entry into the monitor response handler.
+          if "MON_VDEV_TRACE: monitor response status=%d vdev=%d bssType=%d" not in text:
+              handler = "static void lim_handle_mon_switch_channel_rsp("
+              start = text.find(handler)
+              if start < 0:
+                  raise SystemExit("ERROR: monitor response handler not found")
+
+              brace = text.find("{", start)
+              if brace < 0:
+                  raise SystemExit("ERROR: monitor handler opening brace not found")
+
+              # Insert at the beginning of the handler body.
+              insertion = (
+                  '\n\tpe_err("MON_VDEV_TRACE: monitor response status=%d vdev=%d bssType=%d",\n'
+                  '\t       status, session->vdev_id, session->bssType);\n'
+              )
+              text = text[:brace + 1] + insertion + text[brace + 1:]
+
+          # Validate all three traces before writing.
+          required = [
+              "MON_VDEV_TRACE: no PE session for vdev_id=%d",
+              "MON_VDEV_TRACE: response vdev=%d status=%d reason=%d",
+              "MON_VDEV_TRACE: monitor response status=%d vdev=%d bssType=%d",
+          ]
+          for marker in required:
+              if text.count(marker) != 1:
+                  raise SystemExit(
+                      f"ERROR: expected exactly one occurrence of {marker!r}; "
+                      f"found {text.count(marker)}. No file written."
+                  )
 
           path.write_text(text)
-          print("PASS: PE-session diagnostic patch applied or already present")
+          print("PASS: all three monitor VDEV diagnostic trace points verified")
           PY
 
-          echo "=== Verify monitor diagnostics ==="
-          grep -n -A 5 -B 3 'MON_VDEV_TRACE:' "$FILE"
+          echo "=== Verify monitor diagnostic trace points ==="
+          grep -n -A 3 -B 2 'MON_VDEV_TRACE:' "$FILE"
 
           
       - name: Build kernel
