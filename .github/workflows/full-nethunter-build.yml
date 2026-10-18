@@ -9933,28 +9933,72 @@
 
 
 
-
-
-      - name: Locate monitor VDEV response source
+      - name: Patch monitor VDEV response diagnostics
         shell: bash
         run: |
-          set -eu
+          set -euo pipefail
 
-          echo "Workspace: $GITHUB_WORKSPACE"
-          echo "Current directory: $PWD"
-          echo "Searching for monitor response source..."
+          FILE="kernel/drivers/staging/qcacld-3.0/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
 
-          find "$GITHUB_WORKSPACE" \
-            -type f \
-            -name 'lim_process_mlm_rsp_messages.c' \
-            -print
+          if [ ! -f "$FILE" ]; then
+            echo "::error::Monitor response source not found: $FILE"
+            exit 1
+          fi
 
-          echo "Searching for QCACLD3 source directories..."
+          python3 - "$FILE" <<'PY'
+          import sys
+          from pathlib import Path
 
-          find "$GITHUB_WORKSPACE" \
-            -type d \
-            -path '*/core/mac/src/pe/lim' \
-            -print
+          p = Path(sys.argv[1])
+          s = p.read_text()
+
+          old = '''        pe_session = pe_find_session_by_vdev_id(mac, rsp->vdev_id);
+          if (!pe_session) {
+                  pe_err("session does not exist for given sessionId");
+                  return;
+          }'''
+
+          new = '''        pe_session = pe_find_session_by_vdev_id(mac, rsp->vdev_id);
+          if (!pe_session) {
+                  pe_err("MON_VDEV_TRACE: no PE session for vdev_id=%d",
+                         rsp->vdev_id);
+                  pe_err("session does not exist for given sessionId");
+                  return;
+          }'''
+
+          if "MON_VDEV_TRACE: no PE session for vdev_id=%d" not in s:
+              if old not in s:
+                  raise SystemExit(
+                      "ERROR: PE-session lookup block did not match; "
+                      "no source changes made."
+                  )
+              s = s.replace(old, new, 1)
+
+          marker = '''        channelChangeReasonCode = pe_session->channelChangeReasonCode;
+          pe_session->chainMask = rsp->chain_mask;'''
+
+          replacement = '''        pe_err("MON_VDEV_TRACE: response vdev=%d status=%d reason=%d bssType=%d opmode=%d",
+               rsp->vdev_id, status, pe_session->channelChangeReasonCode,
+               pe_session->bssType, pe_session->opmode);
+          channelChangeReasonCode = pe_session->channelChangeReasonCode;
+          pe_session->chainMask = rsp->chain_mask;'''
+
+          if "MON_VDEV_TRACE: response vdev=%d status=%d" not in s:
+              if marker not in s:
+                  raise SystemExit(
+                      "ERROR: Channel-response block did not match; "
+                      "source changes may be incomplete."
+                  )
+              s = s.replace(marker, replacement, 1)
+
+          p.write_text(s)
+
+          check = p.read_text()
+          assert "MON_VDEV_TRACE: no PE session for vdev_id=%d" in check
+          assert "MON_VDEV_TRACE: response vdev=%d status=%d" in check
+
+          print("PASS: Both monitor-response diagnostic messages are present.")
+          PY
       
                          
       - name: Build kernel
