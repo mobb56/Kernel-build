@@ -9966,99 +9966,125 @@
           set -euo pipefail
 
           FILE="kernel/drivers/staging/qcacld-3.0/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
-          test -f "$FILE"
+
+          if [ ! -f "$FILE" ]; then
+            echo "::error::Monitor response source not found: $FILE"
+            exit 1
+          fi
 
           python3 - "$FILE" <<'PY'
-          import pathlib
-          import re
+          from pathlib import Path
           import sys
 
-          path = pathlib.Path(sys.argv[1])
+          path = Path(sys.argv[1])
           text = path.read_text()
 
+          # Diagnostic 1: identify a missing PE session.
+          old_session = '''if (!pe_session) {
+                  pe_err("session does not exist for given sessionId");
+                  return;
+          }'''
 
+          new_session = '''if (!pe_session) {
+                  pe_err("MON_VDEV_TRACE: no PE session for vdev_id=%d",
+                         rsp->vdev_id);
+                  pe_err("session does not exist for given sessionId");
+                  return;
+          }'''
 
-           def replace_once(source, pattern, replacement, label):
-                updated, count = re.subn(
-                   pattern, replacement, source, count=1, flags=re.M
-                )
-              if count != 1:
-                   raise SystemExit(
-                  f"ERROR: expected exactly one match for {label}; "
-                  f"found {count}. No file written."
-                )
-                
-           return updated
-           
-
-          # Trace A: missing PE session.
           if "MON_VDEV_TRACE: no PE session for vdev_id=%d" not in text:
-              text = replace_once(
-                  text,
-                  r'(?P<i>^[ \t]*)pe_session = pe_find_session_by_vdev_id\(mac, rsp->vdev_id\);\n'
-                  r'(?P=i)if \(!pe_session\) \{\n'
-                  r'(?P<i>[ \t]*)pe_err\("session does not exist for given sessionId"\);',
-                  lambda m: (
-                      f'{m.group("i")}pe_session = pe_find_session_by_vdev_id(mac, rsp->vdev_id);\n'
-                      f'{m.group("i")}if (!pe_session) {{\n'
-                      f'{m.group("i")}\tpe_err("MON_VDEV_TRACE: no PE session for vdev_id=%d",\n'
-                      f'{m.group("i")}\t       rsp->vdev_id);\n'
-                      f'{m.group("i")}\tpe_err("session does not exist for given sessionId");'
-                  ),
-                  "missing-session trace",
-              )
-
-          # Trace B: response status, reason, and session mode.
-          if "MON_VDEV_TRACE: response vdev=%d status=%d reason=%d" not in text:
-              text = replace_once(
-                  text,
-                  r'(?P<i>^[ \t]*)channelChangeReasonCode = pe_session->channelChangeReasonCode;',
-                  lambda m: (
-                      f'{m.group("i")}channelChangeReasonCode = pe_session->channelChangeReasonCode;\n'
-                      f'{m.group("i")}pe_err("MON_VDEV_TRACE: response vdev=%d status=%d reason=%d bssType=%d opmode=%d",\n'
-                      f'{m.group("i")}\t       rsp->vdev_id, status, channelChangeReasonCode,\n'
-                      f'{m.group("i")}\t       pe_session->bssType, pe_session->opmode);'
-                  ),
-                  "response status/reason trace",
-              )
-
-          # Trace C: entry into the monitor response handler.
-          if "MON_VDEV_TRACE: monitor response status=%d vdev=%d bssType=%d" not in text:
-              handler = "static void lim_handle_mon_switch_channel_rsp("
-              start = text.find(handler)
-              if start < 0:
-                  raise SystemExit("ERROR: monitor response handler not found")
-
-              brace = text.find("{", start)
-              if brace < 0:
-                  raise SystemExit("ERROR: monitor handler opening brace not found")
-
-              # Insert at the beginning of the handler body.
-              insertion = (
-                  '\n\tpe_err("MON_VDEV_TRACE: monitor response status=%d vdev=%d bssType=%d",\n'
-                  '\t       status, session->vdev_id, session->bssType);\n'
-              )
-              text = text[:brace + 1] + insertion + text[brace + 1:]
-
-          # Validate all three traces before writing.
-          required = [
-              "MON_VDEV_TRACE: no PE session for vdev_id=%d",
-              "MON_VDEV_TRACE: response vdev=%d status=%d reason=%d",
-              "MON_VDEV_TRACE: monitor response status=%d vdev=%d bssType=%d",
-          ]
-          for marker in required:
-              if text.count(marker) != 1:
+              if old_session not in text:
                   raise SystemExit(
-                      f"ERROR: expected exactly one occurrence of {marker!r}; "
-                      f"found {text.count(marker)}. No file written."
+                      "ERROR: Expected PE-session block was not found. "
+                      "Source left unchanged."
                   )
+              text = text.replace(old_session, new_session, 1)
+              print("PASS: Added missing-session diagnostic.")
+          else:
+              print("PASS: Missing-session diagnostic already exists.")
+
+          # Diagnostic 2: log the response and its dispatch reason.
+          response_marker = (
+              "channelChangeReasonCode = "
+              "pe_session->channelChangeReasonCode;"
+          )
+
+          response_log = (
+              'pe_err("MON_VDEV_TRACE: response vdev=%d status=%d '
+              'reason=%d bssType=%d opmode=%d",\n'
+              '       rsp->vdev_id, status, channelChangeReasonCode,\n'
+              '       pe_session->bssType, pe_session->opmode);'
+          )
+
+          if "MON_VDEV_TRACE: response vdev=%d" not in text:
+              if text.count(response_marker) != 1:
+                  raise SystemExit(
+                      "ERROR: Expected channel-change reason assignment "
+                      "was not found exactly once. Source left unchanged."
+                  )
+              text = text.replace(
+                  response_marker,
+                  response_marker + "\n        " + response_log,
+                  1
+              )
+              print("PASS: Added response-dispatch diagnostic.")
+          else:
+              print("PASS: Response-dispatch diagnostic already exists.")
+
+          # Diagnostic 3: log entry into the monitor response handler.
+          handler_marker = (
+              "static void lim_handle_mon_switch_channel_rsp("
+          )
+
+          handler_start = text.find(handler_marker)
+
+          if handler_start < 0:
+              raise SystemExit(
+                  "ERROR: Monitor response handler was not found. "
+                  "Source left unchanged."
+              )
+
+          handler_body = text.find("{", handler_start)
+
+          if handler_body < 0:
+              raise SystemExit(
+                  "ERROR: Monitor response handler body was not found."
+              )
+
+          handler_log = (
+              '        pe_err("MON_VDEV_TRACE: monitor response '
+              'status=%d vdev=%d bssType=%d",\n'
+              '               status, session->vdev_id, '
+              'session->bssType);'
+          )
+
+          if "MON_VDEV_TRACE: monitor response status=%d" not in text:
+              text = (
+                  text[:handler_body + 1]
+                  + "\n"
+                  + handler_log
+                  + text[handler_body + 1:]
+              )
+              print("PASS: Added monitor-handler diagnostic.")
+          else:
+              print("PASS: Monitor-handler diagnostic already exists.")
 
           path.write_text(text)
-          print("PASS: all three monitor VDEV diagnostic trace points verified")
+          print("PASS: Monitor VDEV response diagnostics are installed.")
           PY
 
-          echo "=== Verify monitor diagnostic trace points ==="
+          echo "=== Verify monitor response diagnostics ==="
           grep -n -A 3 -B 2 'MON_VDEV_TRACE:' "$FILE"
+
+          echo "=== Verify monitor response handler and dispatch ==="
+          grep -n -A 8 \
+            'static void lim_handle_mon_switch_channel_rsp' "$FILE"
+
+          grep -n -A 5 \
+            'case LIM_SWITCH_CHANNEL_MONITOR:' "$FILE"
+
+          echo "PASS: Monitor VDEV diagnostic patch and checks completed."
+
 
           
       - name: Build kernel
