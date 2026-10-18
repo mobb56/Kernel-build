@@ -9936,25 +9936,93 @@
       
  
 
-      - name: Inspect monitor VDEV response source
+      
+      - name: Patch monitor VDEV response diagnostics
         shell: bash
         run: |
           set -euo pipefail
 
-          FILE="kernel/drivers/staging/qcacld-3.0/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
+          FILE="drivers/staging/qcacld-3.0/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
 
-          test -f "$FILE"
+          python3 - "$FILE" <<'PY'
+          from pathlib import Path
+          import sys
 
-          echo "=== PE-session lookup ==="
-          sed -n '2898,2935p' "$FILE"
+          path = Path(sys.argv[1])
 
-          echo "=== Monitor response handler ==="
-          sed -n '2848,2885p' "$FILE"
+          if not path.is_file():
+              raise SystemExit(f"ERROR: Source file not found: {path}")
 
-          echo "=== Channel-change reason dispatch ==="
-          grep -n -A 30 -B 5 \
-            'case LIM_SWITCH_CHANNEL_MONITOR' "$FILE"
+          source = path.read_text()
 
+          old = '''        pe_session = pe_find_session_by_vdev_id(mac, rsp->vdev_id);
+          if (!pe_session) {
+                  pe_err("session does not exist for given sessionId");
+                  return;
+          }'''
+
+          new = '''        pe_session = pe_find_session_by_vdev_id(mac, rsp->vdev_id);
+          if (!pe_session) {
+                  pe_err("MON_VDEV_TRACE: no PE session for vdev_id=%d",
+                         rsp->vdev_id);
+                  pe_err("session does not exist for given sessionId");
+                  return;
+          }'''
+
+          if "MON_VDEV_TRACE: no PE session for vdev_id=%d" in source:
+              print("PASS: PE-session diagnostic already exists.")
+          else:
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      f"ERROR: Expected exactly one PE-session block; found {count}. "
+                      "No source changes made."
+                  )
+              source = source.replace(old, new, 1)
+
+          marker = "MON_VDEV_TRACE: response vdev=%d status=%d reason=%d"
+          if marker not in source:
+              anchor = "        channelChangeReasonCode = pe_session->channelChangeReasonCode;"
+              if source.count(anchor) != 1:
+                  raise SystemExit(
+                      "ERROR: Could not uniquely locate channel-change reason assignment. "
+                      "No additional diagnostic inserted."
+                  )
+              insertion = '''        channelChangeReasonCode = pe_session->channelChangeReasonCode;
+                  pe_err("MON_VDEV_TRACE: response vdev=%d status=%d reason=%d bssType=%d opmode=%d",
+                         rsp->vdev_id, status, channelChangeReasonCode,
+                         pe_session->bssType, pe_session->opmode);'''
+              source = source.replace(anchor, insertion, 1)
+
+          handler = "static void lim_handle_mon_switch_channel_rsp(struct pe_session *session,"
+          start = source.find(handler)
+          if start < 0:
+              raise SystemExit("ERROR: Monitor response handler not found.")
+
+          opening = source.find("{", start)
+          if opening < 0:
+              raise SystemExit("ERROR: Monitor response handler body not found.")
+
+          body_anchor = "        struct scheduler_msg message = {0};"
+          body_pos = source.find(body_anchor, opening)
+          if body_pos < 0:
+              raise SystemExit("ERROR: Monitor response handler body anchor not found.")
+
+          if "MON_VDEV_TRACE: monitor response status=%d vdev=%d bssType=%d" not in source:
+              insertion = '''        pe_err("MON_VDEV_TRACE: monitor response status=%d vdev=%d bssType=%d",
+                 status, session->vdev_id, session->bssType);
+
+          struct scheduler_msg message = {0};'''
+              source = source[:body_pos] + source[body_pos:].replace(
+                  body_anchor, insertion, 1
+              )
+
+          path.write_text(source)
+          print("PASS: Monitor VDEV response diagnostics inserted.")
+          PY
+
+          echo "=== Verify diagnostic markers ==="
+          grep -n "MON_VDEV_TRACE:" "$FILE"
 
           
       - name: Build kernel
