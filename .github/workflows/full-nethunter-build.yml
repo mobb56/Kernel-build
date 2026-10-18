@@ -9975,81 +9975,47 @@
           path = pathlib.Path(sys.argv[1])
           text = path.read_text()
 
-          start = text.find("void lim_process_switch_channel_rsp(")
-          if start < 0:
-              raise SystemExit("ERROR: lim_process_switch_channel_rsp not found")
+          lookup = "pe_session = pe_find_session_by_vdev_id(mac, rsp->vdev_id);"
+          if lookup not in text:
+              raise SystemExit("ERROR: PE-session lookup statement not found")
 
-          end = text.find("\n}", start)
-          if end < 0:
-              raise SystemExit("ERROR: end of switch-channel response function not found")
-          end += 2
+          missing = 'pe_err("MON_VDEV_TRACE: no PE session'
+          if missing not in text:
+              old = '''if (!pe_session) {
+                          pe_err("session does not exist for given sessionId");
+                          return;
+                  }'''
+              new = '''if (!pe_session) {
+                          pe_err("MON_VDEV_TRACE: no PE session for vdev_id=%d",
+                                 rsp->vdev_id);
+                          pe_err("session does not exist for given sessionId");
+                          return;
+                  }'''
 
-          fn = text[start:end]
-          changed = False
+              # Match the actual block independent of indentation.
+              start = text.find(lookup)
+              end = text.find("channelChangeReasonCode =", start)
+              if end < 0:
+                  raise SystemExit("ERROR: channel-change reason assignment not found")
 
-          old = """pe_session = pe_find_session_by_vdev_id(mac, rsp->vdev_id);
-          if (!pe_session) {
-                  pe_err("session does not exist for given sessionId");
-                  return;
-          }"""
+              section = text[start:end]
+              import re
+              pattern = r'if\s*\(!pe_session\)\s*\{\s*pe_err\("session does not exist for given sessionId"\);\s*return;\s*\}'
+              updated, count = re.subn(pattern, new, section, count=1)
 
-          new = """pe_session = pe_find_session_by_vdev_id(mac, rsp->vdev_id);
-          if (!pe_session) {
-                  pe_err("MON_VDEV_TRACE: no PE session for vdev_id=%d",
-                         rsp->vdev_id);
-                  pe_err("session does not exist for given sessionId");
-                  return;
-          }"""
+              if count != 1:
+                  print("=== Actual PE-session lookup section ===")
+                  print(section)
+                  raise SystemExit("ERROR: PE-session block not matched; no changes written")
 
-          if "MON_VDEV_TRACE: no PE session" not in fn:
-              if old not in fn:
-                  raise SystemExit(
-                      "ERROR: PE-session lookup block did not match; "
-                      "source left unchanged"
-                  )
-              fn = fn.replace(old, new, 1)
-              changed = True
+              text = text[:start] + updated + text[end:]
 
-          marker = "channelChangeReasonCode = pe_session->channelChangeReasonCode;"
-          trace = """pe_err("MON_VDEV_TRACE: response vdev=%d status=%d reason=%d bssType=%d opmode=%d",
-                 rsp->vdev_id, status, channelChangeReasonCode,
-                 pe_session->bssType, pe_session->opmode);
-          """
-
-          if "MON_VDEV_TRACE: response vdev=" not in fn:
-              if marker not in fn:
-                  raise SystemExit(
-                      "ERROR: channel-change reason marker not found; "
-                      "source left unchanged"
-                  )
-              # The reason is logged after it has been read from the session.
-              marker2 = """channelChangeReasonCode = pe_session->channelChangeReasonCode;
-          """
-              if marker2 not in fn:
-                  raise SystemExit(
-                      "ERROR: reason assignment formatting differed; "
-                      "source left unchanged"
-                  )
-              fn = fn.replace(
-                  marker2,
-                  marker2 + """          pe_err("MON_VDEV_TRACE: response vdev=%d status=%d reason=%d bssType=%d opmode=%d",
-                         rsp->vdev_id, status, channelChangeReasonCode,
-                         pe_session->bssType, pe_session->opmode);
-          """,
-                  1
-              )
-              changed = True
-
-          if changed:
-              path.write_text(text[:start] + fn + text[end:])
-              print("PASS: monitor response diagnostics inserted")
-          else:
-              print("PASS: monitor response diagnostics already present")
+          path.write_text(text)
+          print("PASS: PE-session diagnostic patch applied or already present")
           PY
 
-          echo "=== Verify diagnostic markers ==="
+          echo "=== Verify monitor diagnostics ==="
           grep -n -A 5 -B 3 'MON_VDEV_TRACE:' "$FILE"
-      
 
           
       - name: Build kernel
