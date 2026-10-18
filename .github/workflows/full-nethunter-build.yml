@@ -9979,14 +9979,15 @@
 
 
            def replace_once(source, pattern, replacement, label):
-           updated, count = re.subn(
-             pattern, replacement, source, count=1, flags=re.M
-            )
+                updated, count = re.subn(
+                   pattern, replacement, source, count=1, flags=re.M
+                )
               if count != 1:
-               raise SystemExit(
-            f"ERROR: expected exactly one match for {label}; "
-            f"found {count}. No file written."
-             )
+                   raise SystemExit(
+                  f"ERROR: expected exactly one match for {label}; "
+                  f"found {count}. No file written."
+                )
+                
            return updated
            
 
