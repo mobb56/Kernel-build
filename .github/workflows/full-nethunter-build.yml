@@ -9960,158 +9960,68 @@
 
 
 
-        
       - name: Patch monitor VDEV response diagnostics
         shell: bash
+        working-directory: kernel
         run: |
           set -euo pipefail
 
-          FILE="kernel/drivers/staging/qcacld-3.0/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
+          FILE="drivers/staging/qcacld-3.0/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c"
+          test -f "$FILE"
 
-          test -f "$FILE" || {
-            echo "::error::Monitor response source not found"
-            exit 1
-          }
+          echo "=== Verify monitor response source ==="
 
           python3 - "$FILE" <<'PY'
           from pathlib import Path
-          import re
           import sys
 
           path = Path(sys.argv[1])
           text = path.read_text()
 
-          # 1. Diagnose missing PE sessions.
-          if "MON_VDEV_TRACE: no PE session for vdev_id=" not in text:
-              pattern = re.compile(
-                  r'(?P<indent>[ \t]*)if\s*\(\s*!pe_session\s*\)\s*\{'
-                  r'(?P<body>.*?)'
-                  r'(?P=indent)\}',
-                  re.S
-              )
+          checks = {
+              "PE session lookup":
+                  "pe_find_session_by_vdev_id(mac, rsp->vdev_id)",
+              "Monitor response handler":
+                  "lim_handle_mon_switch_channel_rsp",
+              "Monitor dispatch":
+                  "case LIM_SWITCH_CHANNEL_MONITOR:",
+              "Monitor-up event":
+                  "eWNI_SME_MONITOR_MODE_VDEV_UP",
+          }
 
-              matches = list(pattern.finditer(text))
-              target = None
+          missing = []
+          for label, needle in checks.items():
+              count = text.count(needle)
+              if count:
+                  print(f"PASS: {label}: found {count} occurrence(s)")
+              else:
+                  print(f"FAIL: {label}: not found")
+                  missing.append(label)
 
-              for match in matches:
-                  body = match.group("body")
-                  if ("session does not exist for given sessionId" in body
-                          and "return;" in body):
-                      target = match
-                      break
-
-              if target is None:
-                  raise SystemExit(
-                      "ERROR: Could not safely identify the PE-session "
-                      "failure block. Source was not written."
-                  )
-
-              indent = target.group("indent")
-              replacement = (
-                  indent + "if (!pe_session) {\n"
-                  + indent + '        pe_err("MON_VDEV_TRACE: no PE session '
-                    'for vdev_id=%d",\n'
-                  + indent + "               rsp->vdev_id);\n"
-                  + indent + '        pe_err("session does not exist for '
-                    'given sessionId");\n'
-                  + indent + "        return;\n"
-                  + indent + "}"
-              )
-
-              text = text[:target.start()] + replacement + text[target.end():]
-              print("PASS: Added PE-session diagnostic.")
-          else:
-              print("PASS: PE-session diagnostic already exists.")
-
-          # 2. Diagnose response dispatch and channel-change reason.
-          reason_line = (
-              "channelChangeReasonCode = "
-              "pe_session->channelChangeReasonCode;"
-          )
-
-          if "MON_VDEV_TRACE: response vdev=" not in text:
-              if text.count(reason_line) != 1:
-                  raise SystemExit(
-                      "ERROR: Expected channel-change reason assignment "
-                      "was not unique. Source was not written."
-                  )
-
-              diagnostic = """
-                  pe_err("MON_VDEV_TRACE: response vdev=%d status=%d reason=%d bssType=%d opmode=%d",
-                         rsp->vdev_id, status, channelChangeReasonCode,
-                         pe_session->bssType, pe_session->opmode);
-              """
-
-              text = text.replace(
-                  reason_line,
-                  reason_line + "\n" + diagnostic.strip("\n"),
-                  1
-              )
-              print("PASS: Added response-dispatch diagnostic.")
-          else:
-              print("PASS: Response-dispatch diagnostic already exists.")
-
-          # 3. Diagnose entry into the monitor response handler.
-          handler = "lim_handle_mon_switch_channel_rsp("
-          handler_pos = text.find(handler)
-
-          if handler_pos < 0:
+          if missing:
               raise SystemExit(
-                  "ERROR: Monitor response handler not found."
+                  "ERROR: required source checks failed: "
+                  + ", ".join(missing)
               )
 
-          # Find the function definition, not an earlier call.
-          definitions = list(re.finditer(
-              r'static\s+void\s+lim_handle_mon_switch_channel_rsp\s*\(',
-              text
-          ))
-
-          if not definitions:
-              raise SystemExit(
-                  "ERROR: Monitor response handler definition not found."
-              )
-
-          definition = definitions[0]
-          body_start = text.find("{", definition.end())
-
-          if body_start < 0:
-              raise SystemExit(
-                  "ERROR: Monitor response handler body not found."
-              )
-
-          if "MON_VDEV_TRACE: monitor response status=" not in text:
-              diagnostic = """
-                  pe_err("MON_VDEV_TRACE: monitor response status=%d vdev=%d bssType=%d",
-                         status, session->vdev_id, session->bssType);
-              """
-
-              text = (
-                  text[:body_start + 1]
-                  + "\n"
-                  + diagnostic.strip("\n")
-                  + text[body_start + 1:]
-              )
-              print("PASS: Added monitor-handler diagnostic.")
-          else:
-              print("PASS: Monitor-handler diagnostic already exists.")
-
-          path.write_text(text)
-          print("PASS: All monitor VDEV diagnostics installed.")
+          print("PASS: source checks completed without modifying C code")
           PY
 
-          echo "=== Verify diagnostic markers ==="
-          grep -n -A 2 -B 2 'MON_VDEV_TRACE:' "$FILE"
+          echo "=== PE-session lookup and response routing ==="
+          grep -n -A 16 -B 5 \
+            'pe_find_session_by_vdev_id(mac, rsp->vdev_id)' "$FILE"
 
-          echo "=== Verify monitor handler ==="
-          grep -n -A 12 \
+          echo "=== Monitor response handler ==="
+          grep -n -A 38 \
             'static void lim_handle_mon_switch_channel_rsp' "$FILE"
 
-          echo "=== Verify monitor dispatch ==="
-          grep -n -A 5 -B 2 \
+          echo "=== Monitor response dispatch ==="
+          grep -n -A 8 \
             'case LIM_SWITCH_CHANNEL_MONITOR:' "$FILE"
 
-          echo "PASS: Monitor VDEV diagnostic checks completed."
-       
+          echo "PASS: monitor VDEV source verification completed"
+
+          
 
           
       - name: Build kernel
