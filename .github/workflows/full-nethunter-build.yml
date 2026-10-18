@@ -10021,6 +10021,35 @@
 
           echo "PASS: monitor VDEV source verification completed"
 
+
+    
+      - name: Trace monitor VDEV timeout completion path
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== WMA channel-switch response ==="
+          grep -n -A 65 -B 8 \
+          'wma_handle_channel_switch_resp' \
+          drivers/staging/qcacld-3.0/core/wma/src/wma_dev_if.c
+
+            echo "=== LIM monitor response handler ==="
+             grep -n -A 55 -B 8 \
+             'lim_handle_mon_switch_channel_rsp' \
+           drivers/staging/qcacld-3.0/core/mac/src/pe/lim/lim_process_mlm_rsp_messages.c
+
+           echo "=== Monitor VDEV-up event processing ==="
+          grep -R -n -A 18 -B 8 \
+          'sme_process_monitor_mode_vdev_up_evt' \
+           drivers/staging/qcacld-3.0/core/sme \
+           drivers/staging/qcacld-3.0/core/hdd
+
+           echo "=== Monitor callback implementation and registration ==="
+           grep -R -n -A 35 -B 8 \
+          'hdd_sme_monitor_mode_callback' \
+           drivers/staging/qcacld-3.0/core/hdd/src
+
           
 
           
