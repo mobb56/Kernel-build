@@ -10610,54 +10610,188 @@
 
              
       - name: Verify module ABI configuration
-        working-directory: kernel
         shell: bash
         run: |
-          set -euo pipefail
+            set -euo pipefail
 
-          CONFIG="${OUT_DIR}/.config"
+            CONFIG="${OUT_DIR}/.config"
+            MODULE_SYMVERS="${OUT_DIR}/Module.symvers"
+            ABI_REPORT="${OUT_DIR}/all-modules-abi-report.txt"
+            PYTHON="${PYTHON:-python3}"
+            READ_ELF="${LLVM_DIR}/bin/llvm-readelf"
 
-          echo "=== CONFIG_MODVERSIONS ==="
+            EXPECTED_RELEASE="4.19.325-cip135-st19-perf-g39bcecd5c63d"
+            EXPECTED_VERMAGIC="${EXPECTED_RELEASE} SMP preempt mod_unload modversions aarch64"
 
-          grep -Fxq \
-            "CONFIG_MODVERSIONS=y" \
-            "${CONFIG}"
+             echo "=== Verify module ABI configuration ==="
 
-          grep -Fxq \
-            "CONFIG_MODVERSIONS=y" \
-            "${GITHUB_WORKSPACE}/cebu-stock.config"
+              test -s "${CONFIG}"
+              test -s "${MODULE_SYMVERS}"
+              test -x "${READ_ELF}"
+              command -v "${PYTHON}" >/dev/null
 
-          echo "CONFIG_MODVERSIONS=y preserved in stock and final configs."
+               grep -qx 'CONFIG_MODVERSIONS=y' "${CONFIG}"
+               echo "PASS: CONFIG_MODVERSIONS=y"
 
-          echo
-          echo "=== Module version data ==="
+                test -d "${OUT_DIR}"
+                MODULE_COUNT=0
 
-          QCA_MODULE="${OUT_DIR}/drivers/staging/qcacld-3.0/wlan.ko"
+                 while IFS= read -r -d '' module; do
+                 MODULE_COUNT=$((MODULE_COUNT + 1))
 
-          test -s "${QCA_MODULE}"
+             vermagic="$("${READ_ELF}" -p .modinfo "${module}" 2>/dev/null \
+               | sed -n 's/.*vermagic=//p' \
+               | head -n 1 \
+               | tr -d '\r')"
 
-          echo "Checking QCACLD3 module for __versions section..."
+             if [[ "${vermagic}" != "${EXPECTED_VERMAGIC}" ]]; then
+                echo "ERROR: vermagic mismatch: ${module}"
+                echo "Expected: ${EXPECTED_VERMAGIC}"
+                echo "Actual:   ${vermagic:-MISSING}"
+             exit 1
+            fi
+              done < <(find "${OUT_DIR}" -type f -name '*.ko' -print0)
 
-          if ! "${LLVM_BIN}/llvm-readelf" -S "${QCA_MODULE}" |
-            grep -q '__versions'; then
-            echo "ERROR: QCACLD3 wlan.ko has no __versions section."
-            exit 1
-          fi
+                if [[ "${MODULE_COUNT}" -eq 0 ]]; then
+               echo "ERROR: no compiled .ko modules found"
+             exit 1
+            fi
 
-          echo "OK: QCACLD3 wlan.ko contains __versions."
+             echo "PASS: vermagic checked for ${MODULE_COUNT} compiled modules"
 
-          echo
-          echo "Checking Module.symvers..."
+               cat > "${OUT_DIR}/check_all_module_abi.py" <<'PY'
+              import pathlib
+              import subprocess
+              import sys
 
-          MODULE_SYMVERS="${OUT_DIR}/Module.symvers"
+             symvers_path = pathlib.Path(sys.argv[1])
+             out_dir = pathlib.Path(sys.argv[2])
+             report_path = pathlib.Path(sys.argv[3])
 
-          test -s "${MODULE_SYMVERS}"
+             # Module.symvers format:
+             # CRC  Symbol  Module  Export-type  Namespace(optional)
+              exports = {}
+              with symvers_path.open() as f:
+               for line in f:
+            fields = line.split()
+            if len(fields) < 2:
+                continue
+            crc, symbol = fields[0], fields[1]
+            try:
+                value = int(crc, 0)
+            except ValueError:
+                try:
+                    value = int(crc, 16)
+                except ValueError:
+                    continue
+            exports.setdefault(symbol, set()).add(value)
 
-          echo "OK: Module.symvers exists and is non-empty."
- 
-          echo
-          echo "Module ABI configuration audit passed."
+             if not exports:
+            print("ERROR: no exported symbol CRCs found in Module.symvers")
+             sys.exit(1)
 
+            modules = sorted(out_dir.rglob("*.ko"))
+             if not modules:
+                print("ERROR: no .ko modules found")
+               sys.exit(1)
+
+             report = []
+            errors = []
+
+                for module in modules:
+            result = subprocess.run(
+             ["modprobe", "--dump-modversions", str(module)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            )
+
+            if result.returncode != 0:
+            errors.append(
+                f"{module}: unable to read imported symbol versions: "
+                f"{result.stderr.strip()}"
+            )
+            continue
+
+             checked = 0
+             missing = []
+             mismatched = []
+
+             for line in result.stdout.splitlines():
+              fields = line.split()
+              if len(fields) < 2:
+                continue
+
+            # kmod output normally contains CRC then symbol name.
+            crc_text, symbol = fields[0], fields[1]
+
+            try:
+                crc = int(crc_text, 0)
+            except ValueError:
+                try:
+                    crc = int(crc_text, 16)
+                except ValueError:
+                    continue
+
+            checked += 1
+            expected = exports.get(symbol)
+
+            if expected is None:
+                missing.append(symbol)
+            elif crc not in expected:
+                mismatched.append(
+                    f"{symbol}: module=0x{crc:x}, "
+                    f"Module.symvers="
+                    f"{','.join('0x%x' % x for x in sorted(expected))}"
+                )
+
+              report.append(
+              f"{module}: checked={checked}, "
+               f"missing_exports={len(missing)}, "
+               f"crc_mismatches={len(mismatched)}"
+            )
+
+             if checked == 0:
+             errors.append(
+                f"{module}: no imported symbol-version records found"
+            )
+             if missing:
+              errors.append(
+                f"{module}: symbols absent from Module.symvers: "
+                + ", ".join(missing)
+            )
+              if mismatched:
+              errors.append(
+                f"{module}: CRC mismatches: " + "; ".join(mismatched)
+            )
+
+             report_path.write_text(
+              "\n".join(report + ["", "ERROR DETAILS:"] + errors) + "\n"
+            )
+
+             print("\n".join(report))
+             print(f"\nABI report: {report_path}")
+
+             if errors:
+              print("\nERROR: all-modules ABI verification FAILED")
+              print("\n".join(errors))
+              sys.exit(1)
+
+            print("\nPASS: all module symbol CRCs match this build's Module.symvers")
+            PY
+
+             command -v modprobe >/dev/null || {
+              echo "ERROR: modprobe is required for module ABI inspection"
+             exit 1
+             }
+
+             "${PYTHON}" "${OUT_DIR}/check_all_module_abi.py" \
+             "${MODULE_SYMVERS}" \
+             "${OUT_DIR}" \
+             "${ABI_REPORT}"
+
+             echo "Module ABI configuration audit passed."
+       
 
 
 
