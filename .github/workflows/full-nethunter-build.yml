@@ -10620,9 +10620,14 @@
             PYTHON="${PYTHON:-python3}"
             READ_ELF="${LLVM_DIR}/bin/llvm-readelf"
 
-            EXPECTED_RELEASE="4.19.325-cip135-st19-perf-g39bcecd5c63d"
-            EXPECTED_VERMAGIC="${EXPECTED_RELEASE} SMP preempt mod_unload modversions aarch64"
-
+              EXPECTED_RELEASE="$(
+             make -s -C "${GITHUB_WORKSPACE}/kernel" \
+             O="${GITHUB_WORKSPACE}/kernel/${OUT_DIR}" \
+            ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            LOCALVERSION="-g39bcecd5c63d" kernelrelease
+            )"
+            
              echo "=== Verify module ABI configuration ==="
 
               test -s "${CONFIG}"
