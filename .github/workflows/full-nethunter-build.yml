@@ -10723,9 +10723,17 @@
              mismatched = []
 
              for line in result.stdout.splitlines():
-              fields = line.split()
-              if len(fields) < 2:
-                continue
+             fields = line.split()
+
+             if not fields:
+             continue
+
+             if len(fields) != 2:
+               errors.append(
+            f"{module}: unexpected modprobe --dump-modversions "
+            f"output: {line!r}"
+            )
+              continue
 
             # kmod output normally contains CRC then symbol name.
             crc_text, symbol = fields[0], fields[1]
