@@ -10736,15 +10736,19 @@
               continue
 
             # kmod output normally contains CRC then symbol name.
-            crc_text, symbol = fields[0], fields[1]
+             crc_text, symbol = fields[0], fields[1]
 
-            try:
-                crc = int(crc_text, 0)
-            except ValueError:
-                try:
-                    crc = int(crc_text, 16)
-                except ValueError:
-                    continue
+             try:
+               crc = int(crc_text, 0)
+                 except ValueError:
+             try:
+                crc = int(crc_text, 16)
+               except ValueError:
+                errors.append(
+            f"{module}: invalid CRC {crc_text!r} "
+            f"for symbol {symbol!r}"
+              )
+              continue
 
             checked += 1
             expected = exports.get(symbol)
