@@ -588,37 +588,39 @@ jobs:
 
           grep -n 'hdd_init_frame_injection\|hdd_deinit_frame_injection' "$MC" || true
 
+
+
       - name: Route injection completion in wma_mgmt.c
         working-directory: kernel
         shell: bash
         run: |
-          set -euo pipefail
-          WM="drivers/staging/qcacld-3.0/core/wma/src/wma_mgmt.c"
-          test -f "$WM"
+           set -euo pipefail
+           WM="drivers/staging/qcacld-3.0/core/wma/src/wma_mgmt.c"
+           test -f "$WM"
 
-          if grep -q 'NETHUNTER_INJECTION_COMPLETION_BRIDGE' "$WM"; then
+            if grep -q 'NETHUNTER_INJECTION_COMPLETION_BRIDGE' "$WM"; then
             echo "PASS: bridge already present."
             exit 0
-          fi
+           fi
 
-          if ! grep -Fq '#include "wma_frame_inject.h"' "$WM"; then
+            if ! grep -Fq '#include "../inc/wma_frame_inject.h"' "$WM"; then
             cat > /tmp/add_inc2.awk <<'AWK'
-          BEGIN { inserted = 0 }
-          {
+            BEGIN { inserted = 0 }
+           {
               if (!inserted && $0 ~ /^#include[[:space:]]+/) {
-                  print "#include \"wma_frame_inject.h\""
-                  inserted = 1
-              }
-              print
-          }
-          AWK
-            awk -f /tmp/add_inc2.awk "$WM" > "${WM}.new"
-            mv "${WM}.new" "$WM"
-          fi
+            print "#include \"../inc/wma_frame_inject.h\""
+            inserted = 1
+           }
+             print
+           }
+            AWK
+             awk -f /tmp/add_inc2.awk "$WM" > "${WM}.new"
+             mv "${WM}.new" "$WM"
+           fi
 
-          cat > /tmp/bridge.awk <<'AWK'
-          BEGIN { inserted = 0 }
-          !inserted && /mgmt_txrx_get_nbuf[[:space:]]*\(/ {
+            cat > /tmp/bridge.awk <<'AWK'
+            BEGIN { inserted = 0 }
+           !inserted && /mgmt_txrx_get_nbuf[[:space:]]*\(/ {
               print "        /* NETHUNTER_INJECTION_COMPLETION_BRIDGE */"
               print "#ifdef FEATURE_FRAME_INJECTION_SUPPORT"
               print "        if (WMA_IS_INJECTION_DESC_ID(desc_id)) {"
@@ -629,21 +631,21 @@ jobs:
               print "                return 0;"
               print "        }"
               print "#endif"
-              inserted = 1
-          }
-          { print }
-          END {
-              if (!inserted) {
-                  print "WARN: mgmt_txrx_get_nbuf call not found; bridge not inserted." > "/dev/stderr"
-              }
-          }
-          AWK
+             inserted = 1
+           }
+           { print }
+           END {
+               if (!inserted) {
+              print "WARN: mgmt_txrx_get_nbuf call not found; bridge not inserted." > "/dev/stderr"
+            }
+           }
+           AWK
 
-          awk -f /tmp/bridge.awk "$WM" > "${WM}.new"
-          mv "${WM}.new" "$WM"
+             awk -f /tmp/bridge.awk "$WM" > "${WM}.new"
+             mv "${WM}.new" "$WM"
 
-          grep -n 'NETHUNTER_INJECTION_COMPLETION_BRIDGE' "$WM" || true
-
+              grep -n 'NETHUNTER_INJECTION_COMPLETION_BRIDGE' "$WM" || true
+    
       - name: Fix monitor VDEV policy-manager lookup
         working-directory: kernel
         shell: bash
