@@ -504,45 +504,37 @@ jobs:
 
 
 
-
+      
       - name: Remove un-exported get_task_cred API from injection security
         working-directory: kernel
         shell: bash
         run: |
            set -euo pipefail
-           SEC="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c"
-           test -f "$SEC"
+            SEC="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c"
+            test -f "$SEC"
 
-           echo "=== Patching $SEC ==="
+             echo "=== Patching $SEC ==="
 
-           # Remove the declaration
-           sed -i '/const struct cred \*cred;/d' "$SEC"
-           sed -i '/struct cred \*cred;/d' "$SEC"
+           # We use Perl to safely replace the entire function body.
+           # This avoids bash/sed syntax errors with nested braces.
+             perl -0777 -i -pe 's/QDF_STATUS hdd_check_injection_capability\(struct task_struct \*task\)\s*\{.*?\n\}/QDF_STATUS hdd_check_injection_capability(struct task_struct *task)\n{\n\treturn capable(CAP_NET_RAW) ? QDF_STATUS_SUCCESS : QDF_STATUS_E_PERM;\n\}/s' "$SEC"
 
-           # Remove the lookup
-            sed -i '/cred = get_task_cred(/d' "$SEC"
-            sed -i '/cred = get_task_cred /d' "$SEC"
-
-            # Remove the NULL check block that follows it
-            sed -i '/if (!cred) {/,/}/d' "$SEC"
-
-            # Remove the put_cred call
-            sed -i '/put_cred(cred);/d' "$SEC"
-
-             echo "=== Verifying removal ==="
-            if grep -q 'get_task_cred\|put_cred' "$SEC"; the 
-             echo "ERROR: get_task_cred or put_cred still present."
-              grep -n 'get_task_cred\|put_cred' "$SEC"
-             exit 1
-           fi
-           
-           # Ensure the CAP_NET_RAW check is still there
-             if ! grep -q 'capable(CAP_NET_RAW)' "$SEC"; then
-            echo "ERROR: capable(CAP_NET_RAW) check is missing!"
+             echo "=== Verifying replacement ==="
+    
+            # Check if the dangerous APIs are gone
+            if grep -q 'get_task_cred\|put_cred' "$SEC"; then
+            echo "ERROR: get_task_cred or put_cred still present."
+            grep -n 'get_task_cred\|put_cred' "$SEC"
             exit 1
            fi
 
-           echo "PASS: un-exported APIs removed, capability check intact."
+             # Check if our safe CAP_NET_RAW check is there
+              if ! grep -q 'capable(CAP_NET_RAW)' "$SEC"; then
+              echo "ERROR: capable(CAP_NET_RAW) check is missing!"
+             exit 1
+           fi
+
+            echo "PASS: security file patched safely."
 
       - name: Integrate frame-injection init and deinit
         working-directory: kernel
