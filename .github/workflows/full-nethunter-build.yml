@@ -10270,6 +10270,163 @@
 
              echo "Kernel modules built successfully."
 
+
+
+
+      - name: Diagnose QCACLD3 Undefined Station Ops Symbol
+        if: always()
+        shell: bash
+        working-directory: kernel
+        env:
+          OUT_DIR: ${{ env.OUT_DIR }}
+          LLVM_DIR: ${{ env.LLVM_DIR }}
+        run: |
+          set +e
+
+          echo
+          echo "=========================================================="
+          echo " QCACLD3 UNDEFINED SYMBOL DIAGNOSTIC"
+          echo "=========================================================="
+          echo "Target symbol: __hdd_set_station_ops"
+          echo "Related symbol: hdd_set_station_ops"
+          echo
+
+          SYMBOL="__hdd_set_station_ops"
+          RELATED_SYMBOL="hdd_set_station_ops"
+          QCACLD_DIR="${GITHUB_WORKSPACE}/kernel/drivers/staging/qcacld-3.0"
+
+          if [[ "${OUT_DIR}" = /* ]]; then
+            BUILD_OUT="${OUT_DIR}"
+          else
+            BUILD_OUT="${GITHUB_WORKSPACE}/kernel/${OUT_DIR}"
+          fi
+
+          LLVM_NM="${LLVM_DIR}/bin/llvm-nm"
+          LLVM_READELF="${LLVM_DIR}/bin/llvm-readelf"
+
+          echo "Source directory: ${QCACLD_DIR}"
+          echo "Build output:     ${BUILD_OUT}"
+          echo
+
+          if [[ ! -d "${QCACLD_DIR}" ]]; then
+            echo "ERROR: QCACLD3 source directory not found."
+            exit 0
+          fi
+
+          if [[ ! -x "${LLVM_NM}" ]]; then
+            LLVM_NM="$(command -v llvm-nm 2>/dev/null)"
+          fi
+
+          if [[ -z "${LLVM_NM}" || ! -x "${LLVM_NM}" ]]; then
+            echo "ERROR: llvm-nm not found; cannot inspect object symbols."
+            exit 0
+          fi
+
+          echo "Using llvm-nm: ${LLVM_NM}"
+          echo
+
+          echo "=== 1. Search QCACLD3 source and build files ==="
+
+          grep -R -n \
+            --include='*.c' \
+            --include='*.h' \
+            --include='*.cc' \
+            --include='*.cpp' \
+            --include='Makefile' \
+            --include='Kbuild' \
+            --include='*.mk' \
+            -E '(__hdd_set_station_ops|hdd_set_station_ops)' \
+            "${QCACLD_DIR}" 2>/dev/null \
+            || echo "No matching text found in QCACLD3 source/build files."
+
+          echo
+          echo "=== 2. Inspect compiled QCACLD3 objects ==="
+
+          if [[ ! -d "${BUILD_OUT}/drivers/staging/qcacld-3.0" ]]; then
+            echo "ERROR: compiled QCACLD3 output directory not found."
+            echo "Expected: ${BUILD_OUT}/drivers/staging/qcacld-3.0"
+          else
+            OBJECT_COUNT=0
+            REFERENCE_COUNT=0
+            DEFINITION_COUNT=0
+
+            while IFS= read -r -d '' OBJ; do
+              OBJECT_COUNT=$((OBJECT_COUNT + 1))
+
+              SYMBOL_OUTPUT="$("${LLVM_NM}" --undefined-only "${OBJ}" 2>/dev/null)"
+              if printf '%s\n' "${SYMBOL_OUTPUT}" |
+                awk -v s="${SYMBOL}" '$NF == s { found=1 } END { exit !found }'; then
+                echo "UNDEFINED REFERENCE: ${OBJ}"
+                printf '%s\n' "${SYMBOL_OUTPUT}" |
+                  awk -v s="${SYMBOL}" '$NF == s'
+                REFERENCE_COUNT=$((REFERENCE_COUNT + 1))
+              fi
+
+              SYMBOL_OUTPUT="$("${LLVM_NM}" --defined-only "${OBJ}" 2>/dev/null)"
+              if printf '%s\n' "${SYMBOL_OUTPUT}" |
+                awk -v s="${SYMBOL}" '$NF == s { found=1 } END { exit !found }'; then
+                echo "DEFINITION FOUND: ${OBJ}"
+                printf '%s\n' "${SYMBOL_OUTPUT}" |
+                  awk -v s="${SYMBOL}" '$NF == s'
+                DEFINITION_COUNT=$((DEFINITION_COUNT + 1))
+              fi
+            done < <(
+              find "${BUILD_OUT}/drivers/staging/qcacld-3.0" \
+                -type f -name '*.o' -print0 2>/dev/null
+            )
+
+            echo
+            echo "Compiled object count: ${OBJECT_COUNT}"
+            echo "Objects referencing ${SYMBOL}: ${REFERENCE_COUNT}"
+            echo "Objects defining ${SYMBOL}: ${DEFINITION_COUNT}"
+          fi
+
+          echo
+          echo "=== 3. Inspect QCACLD3 WLAN module if present ==="
+
+          WLAN_MODULE="${BUILD_OUT}/drivers/staging/qcacld-3.0/wlan.ko"
+
+          if [[ -f "${WLAN_MODULE}" ]]; then
+            echo "Module: ${WLAN_MODULE}"
+
+            "${LLVM_NM}" "${WLAN_MODULE}" 2>/dev/null |
+              grep -E "(${SYMBOL}|${RELATED_SYMBOL})" \
+              || echo "Neither symbol found by llvm-nm."
+
+            if [[ -x "${LLVM_READELF}" ]]; then
+              "${LLVM_READELF}" -s "${WLAN_MODULE}" 2>/dev/null |
+                grep -E "(${SYMBOL}|${RELATED_SYMBOL})" \
+                || true
+            fi
+          else
+            echo "wlan.ko does not exist at the expected build path."
+            echo "This may be because the build stopped before linking it."
+          fi
+
+          echo
+          echo "=== 4. Search all compiled kernel objects ==="
+
+          if [[ -d "${BUILD_OUT}" ]]; then
+            while IFS= read -r -d '' OBJ; do
+              SYMBOL_OUTPUT="$("${LLVM_NM}" --defined-only "${OBJ}" 2>/dev/null)"
+              if printf '%s\n' "${SYMBOL_OUTPUT}" |
+                awk -v s="${SYMBOL}" '$NF == s { found=1 } END { exit !found }'; then
+                echo "DEFINITION OUTSIDE QCACLD3: ${OBJ}"
+                printf '%s\n' "${SYMBOL_OUTPUT}" |
+                  awk -v s="${SYMBOL}" '$NF == s'
+              fi
+            done < <(
+              find "${BUILD_OUT}" -type f -name '*.o' -print0 2>/dev/null
+            )
+          fi
+
+          echo
+          echo "=== 5. Diagnostic summary ==="
+          echo "No source or object files have been modified."
+          echo "No dummy function or symbol alias has been added."
+          echo "This diagnostic does not alter the build result."
+          echo "=========================================================="
+
              
 
 
