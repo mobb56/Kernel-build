@@ -10381,6 +10381,44 @@
             echo "Objects defining ${SYMBOL}: ${DEFINITION_COUNT}"
           fi
 
+
+           
+           echo
+           echo "=== Inspect station-ops symbol spellings ==="
+
+            find "${OUT_DIR}/drivers/staging/qcacld-3.0" \
+            -type f \( -name '*.o' -o -name '*.ko' \) -print0 |
+             while IFS= read -r -d '' obj; do
+             matches=$(
+              "${LLVM_DIR}/bin/llvm-nm" --undefined-only --format=posix "$obj" 2>/dev/null |
+               grep -E '(^|[[:space:]])_+hdd_set_station_ops$' || true
+           )
+
+              if [ -n "$matches" ]; then
+             printf '\nUNDEFINED in %s\n%s\n' "$obj" "$matches"
+           fi
+
+             matches=$(
+              "${LLVM_DIR}/bin/llvm-nm" --defined-only --format=posix "$obj" 2>/dev/null |
+               grep -E '(^|[[:space:]])_+hdd_set_station_ops$' || true
+            )
+
+               if [ -n "$matches" ]; then
+             printf '\nDEFINED in %s\n%s\n' "$obj" "$matches"
+            fi
+          done
+
+            echo
+            echo "=== Station-ops source conditions ==="
+
+           grep -n -B 12 -A 20 \
+           'hdd_set_station_ops' \
+           "${KERNEL_SRC}/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c" \
+           "${KERNEL_SRC}/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_cfg80211.c" \
+           "${KERNEL_SRC}/drivers/staging/qcacld-3.0/core/hdd/inc/wlan_hdd_main.h" \
+            || true
+
+            
           echo
           echo "=== 3. Inspect QCACLD3 WLAN module if present ==="
 
