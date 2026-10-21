@@ -301,6 +301,42 @@ jobs:
           test -f "${K}/core/hdd/inc/wlan_hdd_frame_inject.h"
           test -f "${K}/core/wma/inc/wma_frame_inject.h"
 
+
+
+
+      - name: Fix relative includes in imported injection files
+        working-directory: kernel
+        shell: bash
+        run: |
+           set -euo pipefail
+           
+           echo "=== Fixing HDD injection .c include paths ==="
+           HDD_SRC="drivers/staging/qcacld-3.0/core/hdd/src"
+    
+            # Fix all imported HDD injection C files
+              for f in wlan_hdd_frame_inject.c wlan_hdd_frame_validate.c wlan_hdd_inject_security.c wlan_hdd_frame_inject_debug.c; do
+               if [ -f "${HDD_SRC}/${f}" ]; then
+               echo "Patching ${f}..."
+            # Replace the flat include with the relative path
+               sed -i 's|#include "wlan_hdd_frame_inject.h"|#include "../inc/wlan_hdd_frame_inject.h"|g' "${HDD_SRC}/${f}"
+               sed -i 's|#include "wlan_hdd_frame_validate.h"|#include "../inc/wlan_hdd_frame_validate.h"|g' "${HDD_SRC}/${f}"
+               sed -i 's|#include "wlan_hdd_inject_security.h"|#include "../inc/wlan_hdd_inject_security.h"|g' "${HDD_SRC}/${f}"
+              fi
+           done
+
+             echo "=== Fixing WMA injection .c include paths ==="
+              WMA_SRC="drivers/staging/qcacld-3.0/core/wma/src"
+    
+               if [ -f "${WMA_SRC}/wma_frame_inject.c" ]; then
+               echo "Patching wma_frame_inject.c..."
+               sed -i 's|#include "wma_frame_inject.h"|#include "../inc/wma_frame_inject.h"|g' "${WMA_SRC}/wma_frame_inject.c"
+             fi
+
+             echo
+             echo "=== Verify include lines ==="
+               grep -n '#include.*\.h' "${HDD_SRC}/wlan_hdd_frame_inject.c" | head -10
+               grep -n '#include.*\.h' "${WMA_SRC}/wma_frame_inject.c" | head -10
+
       - name: Remove duplicate injection helper definitions
         working-directory: kernel
         shell: bash
