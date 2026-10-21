@@ -595,56 +595,62 @@ jobs:
         shell: bash
         run: |
            set -euo pipefail
-           WM="drivers/staging/qcacld-3.0/core/wma/src/wma_mgmt.c"
+            WM="drivers/staging/qcacld-3.0/core/wma/src/wma_mgmt.c"
            test -f "$WM"
 
-            if grep -q 'NETHUNTER_INJECTION_COMPLETION_BRIDGE' "$WM"; then
-            echo "PASS: bridge already present."
-            exit 0
+            echo "=== Patching $WM ==="
+
+           if grep -q 'NETHUNTER_INJECTION_COMPLETION_BRIDGE' "$WM"; then
+              echo "PASS: bridge already present."
+               exit 0
            fi
 
+            # 1. Add the include with a relative path
             if ! grep -Fq '#include "../inc/wma_frame_inject.h"' "$WM"; then
-            cat > /tmp/add_inc2.awk <<'AWK'
-            BEGIN { inserted = 0 }
-           {
-              if (!inserted && $0 ~ /^#include[[:space:]]+/) {
-            print "#include \"../inc/wma_frame_inject.h\""
-            inserted = 1
-           }
-             print
-           }
-            AWK
-             awk -f /tmp/add_inc2.awk "$WM" > "${WM}.new"
-             mv "${WM}.new" "$WM"
+            # Insert right after the first #include line
+            sed -i '0,/^#include/s//#include "..\/inc\/wma_frame_inject.h"\n&/' "$WM"
+            echo "Inserted wma_frame_inject.h include."
            fi
 
-            cat > /tmp/bridge.awk <<'AWK'
-            BEGIN { inserted = 0 }
-           !inserted && /mgmt_txrx_get_nbuf[[:space:]]*\(/ {
-              print "        /* NETHUNTER_INJECTION_COMPLETION_BRIDGE */"
-              print "#ifdef FEATURE_FRAME_INJECTION_SUPPORT"
-              print "        if (WMA_IS_INJECTION_DESC_ID(desc_id)) {"
-              print "                QDF_STATUS inj_status = wma_handle_injection_fw_response("
-              print "                        wma_handle, desc_id, status);"
-              print "                if (QDF_IS_STATUS_ERROR(inj_status))"
-              print "                        wma_err(\"injection completion failed: %d\", inj_status);"
-              print "                return 0;"
-              print "        }"
-              print "#endif"
-             inserted = 1
-           }
-           { print }
-           END {
-               if (!inserted) {
-              print "WARN: mgmt_txrx_get_nbuf call not found; bridge not inserted." > "/dev/stderr"
-            }
-           }
-           AWK
+            # 2. Insert the completion bridge
+            # We look for the line containing mgmt_txrx_get_nbuf and insert
+            # the block right before it using standard sed.
+            cat > /tmp/bridge.txt <<'EOF'
+               /* NETHUNTER_INJECTION_COMPLETION_BRIDGE */
+            #ifdef FEATURE_FRAME_INJECTION_SUPPORT
+                  if (WMA_IS_INJECTION_DESC_ID(desc_id)) {
+                    QDF_STATUS inj_status = wma_handle_injection_fw_response(
+                            wma_handle, desc_id, status);
+                    if (QDF_IS_STATUS_ERROR(inj_status))
+                            wma_err("injection completion failed: %d", inj_status);
+                    return 0;
+                }
+               #endif
+            EOF
 
-             awk -f /tmp/bridge.awk "$WM" > "${WM}.new"
-             mv "${WM}.new" "$WM"
+              # Find the line number of the target function call
+           TARGET_LINE=$(grep -n 'mgmt_txrx_get_nbuf[[:space:]]*(' "$WM" | head -n1 | cut -d: -f1 || true)
 
-              grep -n 'NETHUNTER_INJECTION_COMPLETION_BRIDGE' "$WM" || true
+               if [ -n "$TARGET_LINE" ]; then
+             # Insert the file contents before the target line
+             sed -i "${TARGET_LINE}e cat /tmp/bridge.txt" "$WM"
+             # Wait, sed 'e' appends *after*. We want it before.
+             # Let's fix this:
+             # Actually, `sed -i "${TARGET_LINE}r /tmp/bridge.txt"` appends after.
+             # To insert before, we use the 'i' command but it only takes one line.
+             # Better approach: head + cat + tail
+                head -n $((TARGET_LINE - 1)) "$WM" > "${WM}.tmp"
+                cat /tmp/bridge.txt >> "${WM}.tmp"
+                tail -n +$TARGET_LINE "$WM" >> "${WM}.tmp"
+                mv "${WM}.tmp" "$WM"
+             echo "Inserted completion bridge at line $TARGET_LINE."
+            else
+            echo "WARN: mgmt_txrx_get_nbuf not found. Bridge not inserted."
+           fi
+
+            echo "=== Verifying patch ==="
+            grep -n 'NETHUNTER_INJECTION_COMPLETION_BRIDGE' "$WM" || true
+        
     
       - name: Fix monitor VDEV policy-manager lookup
         working-directory: kernel
