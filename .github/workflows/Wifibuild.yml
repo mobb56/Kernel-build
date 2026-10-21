@@ -502,6 +502,48 @@ jobs:
 
           grep -Fq 'wlan_hdd_frame_inject.h' "$MC"
 
+
+
+
+      - name: Remove un-exported get_task_cred API from injection security
+        working-directory: kernel
+        shell: bash
+        run: |
+           set -euo pipefail
+           SEC="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_inject_security.c"
+           test -f "$SEC"
+
+           echo "=== Patching $SEC ==="
+
+           # Remove the declaration
+           sed -i '/const struct cred \*cred;/d' "$SEC"
+           sed -i '/struct cred \*cred;/d' "$SEC"
+
+           # Remove the lookup
+            sed -i '/cred = get_task_cred(/d' "$SEC"
+            sed -i '/cred = get_task_cred /d' "$SEC"
+
+            # Remove the NULL check block that follows it
+            sed -i '/if (!cred) {/,/}/d' "$SEC"
+
+            # Remove the put_cred call
+            sed -i '/put_cred(cred);/d' "$SEC"
+
+             echo "=== Verifying removal ==="
+            if grep -q 'get_task_cred\|put_cred' "$SEC"; the 
+             echo "ERROR: get_task_cred or put_cred still present."
+              grep -n 'get_task_cred\|put_cred' "$SEC"
+             exit 1
+           fi
+           
+           # Ensure the CAP_NET_RAW check is still there
+             if ! grep -q 'capable(CAP_NET_RAW)' "$SEC"; then
+            echo "ERROR: capable(CAP_NET_RAW) check is missing!"
+            exit 1
+           fi
+
+           echo "PASS: un-exported APIs removed, capability check intact."
+
       - name: Integrate frame-injection init and deinit
         working-directory: kernel
         shell: bash
