@@ -1147,6 +1147,22 @@ jobs:
               grep -n '#include.*frame_inject' \
              drivers/staging/qcacld-3.0/core/wma/src/wma_frame_inject.c || true
 
+
+      - name: Force Cesium Socket Registration
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          HDD="drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c"
+    
+          # Force the socket to open during adapter open
+            if ! grep -q 'hdd_open_cesium_nl_sock();' "$HDD"; then
+            sed -i '/hdd_init_frame_injection(adapter);/a\
+            if (hdd_open_cesium_nl_sock() != QDF_STATUS_SUCCESS) {\
+              hdd_err("Failed to open Cesium socket");\
+           }' "$HDD"
+          fi
+
       - name: Build kernel
         working-directory: kernel
         shell: bash
