@@ -1457,6 +1457,28 @@ jobs:
           (cd "$ART" && find . -type f ! -name SHA256SUMS -print0 | \
             sort -z | xargs -0 sha256sum) > "${ART}/SHA256SUMS"
 
+
+
+      - name: Package into AnyKernel3 Flashable ZIP
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+            # Download AnyKernel3 template
+            git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git anykernel
+    
+             # Copy our built Image into the AnyKernel3 folder
+             cp ${OUT_DIR}/arch/arm64/boot/Image anykernel/Image
+    
+             # Update the AnyKernel3 config with the exact device codename
+             sed -i 's/^device.name1=.*/device.name1=cebu/' anykernel/anykernel.sh
+             sed -i 's/^device.name2=.*/device.name2=cebu/' anykernel/anykernel.sh
+             sed -i 's/^device.name3=.*/device.name3=cebu/' anykernel/anykernel.sh
+    
+             # Zip it up
+             cd anykernel
+             zip -r9 ../artifacts/nethunter-cebu/cebu-nethunter-AnyKernel3.zip * -x .git README.md *placeholder
+
       - name: Upload verified kernel artifacts
         uses: actions/upload-artifact@v4
         with:
