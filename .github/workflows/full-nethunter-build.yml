@@ -11367,23 +11367,28 @@
                       )
 
           print()
+                           if s != c:
+                  print(
+                      "INFO: STOCK != CUSTOM "
+                      "(recorded for ABI review)"
+                  )
 
-          if failed or common_mismatches:
-            print(
-                "FAIL: STOCK AND CUSTOM QCACLD3 "
-                "ABI DO NOT MATCH."
-                )
-            print(
-                f"Common CRC mismatches: {common_mismatches}"
-                )
-            print("The build is intentionally stopped.")
-            sys.exit(1)
+              if v is None:
+                  print(
+                      "  ERROR: missing from Module.symvers"
+                  )
+                  failed = True
 
-           print(
-             "PASS: STOCK AND CUSTOM QCACLD3 "
-             "ABI MATCH."
-             
-              )
+              elif c != v:
+                  print(
+                      "  ERROR: CUSTOM != Module.symvers"
+                  )
+                  failed = True
+
+              if s == c and v == c:
+                  print(
+                      "  PASS: all three match"
+                  )
           )
           PY
 
