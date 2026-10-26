@@ -11372,16 +11372,17 @@
             print(
                 "FAIL: STOCK AND CUSTOM QCACLD3 "
                 "ABI DO NOT MATCH."
-            )
+                )
             print(
                 f"Common CRC mismatches: {common_mismatches}"
-            )
+                )
             print("The build is intentionally stopped.")
             sys.exit(1)
 
-          print(
-            "PASS: STOCK AND CUSTOM QCACLD3 "
-            "ABI MATCH."
+           print(
+             "PASS: STOCK AND CUSTOM QCACLD3 "
+             "ABI MATCH."
+             
               )
           )
           PY
