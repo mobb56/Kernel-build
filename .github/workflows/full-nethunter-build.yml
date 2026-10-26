@@ -2593,6 +2593,7 @@
           echo "${OUT_DIR}"
 
 
+
       - name: Build independent stock ABI baseline
         working-directory: kernel
         shell: bash
@@ -2600,50 +2601,54 @@
           set -euo pipefail
 
           STOCK_OUT="${GITHUB_WORKSPACE}/out-stock-abi"
+          STOCK_ARTIFACTS="${GITHUB_WORKSPACE}/artifacts/stock-abi"
 
-          echo "=== Prepare independent stock ABI build ==="
-
+          mkdir -p "${STOCK_ARTIFACTS}"
           rm -rf "${STOCK_OUT}"
           mkdir -p "${STOCK_OUT}"
 
-          cp \
-            "${GITHUB_WORKSPACE}/cebu-stock.config" \
-            "${STOCK_OUT}/.config"
+          echo "=== Prepare independent stock ABI build ==="
+
+          cp "${GITHUB_WORKSPACE}/cebu-stock.config" \
+             "${STOCK_OUT}/.config"
 
           make O="${STOCK_OUT}" \
             ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
+            KCFLAGS="-Wno-error=format -Wno-error=missing-attributes -Wno-error=unused-variable -Wno-error=unused-function" \
             olddefconfig
 
           echo "=== Build stock-config kernel baseline ==="
 
           make O="${STOCK_OUT}" \
             ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
-            KCFLAGS="-Wno-error=unused-variable -Wno-error=unused-function" \
+            KCFLAGS="-Wno-error=format -Wno-error=missing-attributes -Wno-error=unused-variable -Wno-error=unused-function" \
             -j"$(nproc)" \
             Image modules
+
+          echo "=== Verify ABI baseline outputs ==="
 
           test -s "${STOCK_OUT}/.config"
           test -s "${STOCK_OUT}/Module.symvers"
 
-          mkdir -p "${GITHUB_WORKSPACE}/artifacts/stock-abi"
+          cp "${STOCK_OUT}/Module.symvers" \
+             "${STOCK_ARTIFACTS}/Module.symvers"
 
-          cp \
-            "${STOCK_OUT}/Module.symvers" \
-            "${GITHUB_WORKSPACE}/artifacts/stock-abi/Module.symvers"
-
-          cp \
-            "${STOCK_OUT}/.config" \
-            "${GITHUB_WORKSPACE}/artifacts/stock-abi/stock.config"
+          cp "${STOCK_OUT}/.config" \
+             "${STOCK_ARTIFACTS}/stock.config"
 
           sha256sum \
-            "${STOCK_OUT}/Module.symvers" \
-            "${STOCK_OUT}/.config" \
-            > "${GITHUB_WORKSPACE}/artifacts/stock-abi/SHA256SUMS"
+            "${STOCK_ARTIFACTS}/Module.symvers" \
+            "${STOCK_ARTIFACTS}/stock.config" \
+            > "${STOCK_ARTIFACTS}/SHA256SUMS"
 
-          echo "Independent stock-config ABI baseline built."
-
+          echo "=== Stock ABI baseline completed successfully ==="
+          ls -lh "${STOCK_ARTIFACTS}"
 
 
       - name: Upload stock ABI baseline immediately
