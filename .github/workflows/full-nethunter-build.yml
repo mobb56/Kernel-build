@@ -2620,6 +2620,7 @@
           make O="${STOCK_OUT}" \
             ARCH=arm64 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
+            KCFLAGS="-Wno-error=unused-variable -Wno-error=unused-function" \
             -j"$(nproc)" \
             Image modules
 
