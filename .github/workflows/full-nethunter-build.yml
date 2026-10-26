@@ -2595,46 +2595,92 @@
 
 
       - name: Build independent stock ABI baseline
-        working-directory: kernel
         shell: bash
+        env:
+          STOCK_ABI_OUT: ${{ github.workspace }}/out-stock-abi
+          STOCK_ABI_ARTIFACTS: ${{ github.workspace }}/artifacts/stock-abi
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
 
-          STOCK_OUT="${GITHUB_WORKSPACE}/out-stock-abi"
-          STOCK_ARTIFACTS="${GITHUB_WORKSPACE}/artifacts/stock-abi"
+          KERNEL_DIR="${GITHUB_WORKSPACE}/kernel"
+          STOCK_CONFIG="${GITHUB_WORKSPACE}/cebu-stock.config"
+          STOCK_OUT="${STOCK_ABI_OUT}"
+          STOCK_ARTIFACTS="${STOCK_ABI_ARTIFACTS}"
 
           mkdir -p "${STOCK_ARTIFACTS}"
+
+          echo "=== Validate stock ABI build inputs ==="
+
+          test -d "${KERNEL_DIR}" || {
+            echo "ERROR: Kernel source directory is missing: ${KERNEL_DIR}"
+            exit 1
+          }
+
+          test -s "${STOCK_CONFIG}" || {
+            echo "ERROR: Stock config is missing or empty: ${STOCK_CONFIG}"
+            exit 1
+          }
+
+          test -f "${KERNEL_DIR}/Makefile" || {
+            echo "ERROR: Kernel Makefile is missing."
+            exit 1
+          }
+
+          echo "Kernel directory: ${KERNEL_DIR}"
+          echo "Stock configuration: ${STOCK_CONFIG}"
+          echo "Stock output directory: ${STOCK_OUT}"
+
+          echo "=== Verify make and compiler versions ==="
+          make --version | head -n 1
+          clang --version | head -n 1
+
+          echo "=== Prepare independent stock ABI output ==="
+
           rm -rf "${STOCK_OUT}"
           mkdir -p "${STOCK_OUT}"
 
-          echo "=== Prepare independent stock ABI build ==="
+          cp "${STOCK_CONFIG}" "${STOCK_OUT}/.config"
 
-          cp "${GITHUB_WORKSPACE}/cebu-stock.config" \
-             "${STOCK_OUT}/.config"
+          echo "=== Resolve stock configuration ==="
 
-          make O="${STOCK_OUT}" \
-            ARCH=arm64 \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            CROSS_COMPILE="${CROSS_COMPILE}" \
-            KCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=unused-function
-            olddefconfig
+          if ! make -C "${KERNEL_DIR}" \
+              O="${STOCK_OUT}" \
+              ARCH=arm64 \
+              LLVM=1 \
+              LLVM_IAS=1 \
+              olddefconfig \
+              2>&1 | tee "${STOCK_ARTIFACTS}/olddefconfig.log"; then
+            echo "ERROR: Stock olddefconfig failed."
+            exit 1
+          fi
 
-          echo "=== Build stock-config kernel baseline ==="
+          test -s "${STOCK_OUT}/.config" || {
+            echo "ERROR: Resolved stock configuration was not generated."
+            exit 1
+          }
 
-          make O="${STOCK_OUT}" \
-            ARCH=arm64 \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            CROSS_COMPILE="${CROSS_COMPILE}" \
-            KCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=unused-function
-            -j"$(nproc)" \
-            Image modules
+          echo "=== Build independent stock ABI baseline ==="
 
-          echo "=== Verify ABI baseline outputs ==="
+          if ! make -C "${KERNEL_DIR}" \
+              O="${STOCK_OUT}" \
+              ARCH=arm64 \
+              LLVM=1 \
+              LLVM_IAS=1 \
+              KCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=unused-function" \
+              -j"$(nproc)" \
+              Image modules \
+              2>&1 | tee "${STOCK_ARTIFACTS}/build.log"; then
+            echo "ERROR: Stock ABI baseline compilation failed."
+            echo "Inspect artifacts/stock-abi/build.log for the first compiler error."
+            exit 1
+          fi
 
-          test -s "${STOCK_OUT}/.config"
-          test -s "${STOCK_OUT}/Module.symvers"
+          echo "=== Verify required ABI outputs ==="
+
+          test -s "${STOCK_OUT}/Module.symvers" || {
+            echo "ERROR: Module.symvers was not generated."
+            exit 1
+          }
 
           cp "${STOCK_OUT}/Module.symvers" \
              "${STOCK_ARTIFACTS}/Module.symvers"
@@ -2647,8 +2693,10 @@
             "${STOCK_ARTIFACTS}/stock.config" \
             > "${STOCK_ARTIFACTS}/SHA256SUMS"
 
-          echo "=== Stock ABI baseline completed successfully ==="
+          echo "=== Stock ABI baseline completed ==="
           ls -lh "${STOCK_ARTIFACTS}"
+
+          
 
 
       - name: Upload stock ABI baseline immediately
