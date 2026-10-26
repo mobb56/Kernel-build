@@ -11962,6 +11962,7 @@
           require_module "dummy.ko"
           require_module "macvlan.ko"
           require_module "ipvlan.ko"
+          
 
           
           
@@ -12169,6 +12170,10 @@
                   "drivers/net/can/usb/gs_usb.ko"
                   "drivers/net/can/usb/kvaser_usb/kvaser_usb.ko"
                   "drivers/net/can/usb/peak_usb/peak_usb.ko"
+
+                  "drivers/usb/serial/usb_wwan.ko"
+                  "drivers/net/mii.ko"
+                  "drivers/net/can/dev/can-dev.ko"
               )
 
           for RELATIVE_MODULE in "${REQUIRED_MODULES[@]}"; do
@@ -12357,6 +12362,23 @@
           install_runtime_module \
             "drivers/net/can/usb/peak_usb/peak_usb.ko" \
             "peak_usb.ko"
+
+
+          # USB WWAN dependency
+            install_runtime_module \
+            "drivers/usb/serial/usb_wwan.ko" \
+            "usb_wwan.ko"
+
+          # MII dependency for USB networking
+            install_runtime_module \
+            "drivers/net/mii.ko" \
+            "mii.ko"
+
+          # Shared CAN driver dependency
+            install_runtime_module \
+            "drivers/net/can/dev/can-dev.ko" \
+            "can-dev.ko"
+            
             
           echo
           echo "=== Install custom QCACLD3 WLAN ==="
