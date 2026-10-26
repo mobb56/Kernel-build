@@ -10273,6 +10273,117 @@
 
 
 
+
+
+      - name: Build CAN ISO-TP external module
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== Prepare CAN ISO-TP source ==="
+
+          ISOTP_DIR="${GITHUB_WORKSPACE}/can-isotp"
+          KERNEL_DIR="${GITHUB_WORKSPACE}/kernel"
+          OUT_DIR="${KERNEL_DIR}/out"
+          LLVM_BIN="${LLVM_DIR}/bin"
+
+          test -f "${KERNEL_DIR}/Makefile"
+          test -f "${OUT_DIR}/.config"
+          test -f "${OUT_DIR}/Module.symvers"
+
+          git clone \
+            --depth 1 \
+            https://github.com/hartkopp/can-isotp.git \
+            "${ISOTP_DIR}"
+
+          echo "=== Record ISO-TP source revision ==="
+
+          git -C "${ISOTP_DIR}" rev-parse HEAD \
+            | tee "${GITHUB_WORKSPACE}/isotp-source-commit.txt"
+
+          export PATH="${LLVM_BIN}:${PATH}"
+          hash -r
+
+          echo "=== Build ISO-TP against the existing kernel ==="
+
+          make -C "${KERNEL_DIR}" \
+            O="${OUT_DIR}" \
+            M="${ISOTP_DIR}" \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            LOCALVERSION="-g39bcecd5c63d" \
+            modules
+
+          ISOTP_MODULE="${ISOTP_DIR}/net/can/can-isotp.ko"
+
+          if [ ! -s "${ISOTP_MODULE}" ]; then
+            echo "ERROR: ISO-TP build completed without can-isotp.ko"
+            exit 1
+          fi
+
+          echo "=== Verify ISO-TP module architecture ==="
+
+          "${LLVM_BIN}/llvm-readelf" -h "${ISOTP_MODULE}"
+
+          MACHINE="$(
+            "${LLVM_BIN}/llvm-readelf" -h "${ISOTP_MODULE}" |
+              awk -F: '/Machine:/ {gsub(/^[[:space:]]+/, "", $2); print $2}'
+          )"
+
+          if [ "${MACHINE}" != "AArch64" ]; then
+            echo "ERROR: Unexpected ISO-TP architecture: ${MACHINE}"
+            exit 1
+          fi
+
+          echo "=== Verify ISO-TP vermagic ==="
+
+          MODINFO="${GITHUB_WORKSPACE}/kernel/scripts/mod/modpost"
+
+          if ! command -v modinfo >/dev/null 2>&1; then
+            echo "ERROR: modinfo is unavailable; cannot verify module metadata"
+            exit 1
+          fi
+
+          modinfo "${ISOTP_MODULE}" | tee "${GITHUB_WORKSPACE}/isotp-modinfo.txt"
+
+          ACTUAL_RELEASE="$(
+            modinfo -F vermagic "${ISOTP_MODULE}" | awk '{print $1}'
+          )"
+
+          EXPECTED_RELEASE="4.19.325-cip135-st19-perf-g39bcecd5c63d"
+
+          if [ "${ACTUAL_RELEASE}" != "${EXPECTED_RELEASE}" ]; then
+            echo "ERROR: ISO-TP vermagic does not match the target kernel"
+            echo "Expected: ${EXPECTED_RELEASE}"
+            echo "Actual:   ${ACTUAL_RELEASE}"
+            exit 1
+          fi
+
+          echo "=== Check ISO-TP undefined symbols ==="
+
+          "${LLVM_BIN}/llvm-nm" -u "${ISOTP_MODULE}" \
+            | tee "${GITHUB_WORKSPACE}/isotp-undefined-symbols.txt"
+
+          
+          echo "=== Stage ISO-TP module in kernel output ==="
+
+          mkdir -p "${OUT_DIR}/can-isotp/net/can"
+
+          install -m 0644 \
+            "${ISOTP_MODULE}" \
+            "${OUT_DIR}/can-isotp/net/can/can-isotp.ko"
+
+          test -s "${OUT_DIR}/can-isotp/net/can/can-isotp.ko"
+
+          sha256sum \
+            "${OUT_DIR}/can-isotp/net/can/can-isotp.ko" \
+            | tee "${GITHUB_WORKSPACE}/isotp-module.sha256"
+
+
+
       - name: Diagnose QCACLD3 Undefined Station Ops Symbol
         if: always()
         shell: bash
@@ -12160,6 +12271,7 @@
                   "net/can/can-raw.ko"
                   "net/can/can-bcm.ko"
                   "net/can/can-gw.ko"
+                  "can-isotp/net/can/can-isotp.ko"
 
                   # Virtual and serial CAN
                   "drivers/net/can/vcan.ko"
@@ -12319,6 +12431,11 @@
           install_runtime_module \
             "net/can/can.ko" \
             "can.ko"
+
+          # CAN ISO-TP transport protocol
+          install_runtime_module \
+            "can-isotp/net/can/can-isotp.ko" \
+            "can-isotp.ko"
 
           install_runtime_module \
             "net/can/can-raw.ko" \
