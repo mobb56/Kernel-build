@@ -11367,7 +11367,7 @@
                       )
 
           print()
-                           if s != c:
+              if s != c:
                   print(
                       "INFO: STOCK != CUSTOM "
                       "(recorded for ABI review)"
@@ -11389,8 +11389,8 @@
                   print(
                       "  PASS: all three match"
                   )
-          )
-          PY
+              )
+              PY
 
           test -s "${REPORT}"
 
