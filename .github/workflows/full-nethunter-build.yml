@@ -2592,6 +2592,71 @@
           echo "Kernel output directory:"
           echo "${OUT_DIR}"
 
+
+      - name: Build independent stock ABI baseline
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          STOCK_OUT="${GITHUB_WORKSPACE}/out-stock-abi"
+
+          echo "=== Prepare independent stock ABI build ==="
+
+          rm -rf "${STOCK_OUT}"
+          mkdir -p "${STOCK_OUT}"
+
+          cp \
+            "${GITHUB_WORKSPACE}/cebu-stock.config" \
+            "${STOCK_OUT}/.config"
+
+          make O="${STOCK_OUT}" \
+            ARCH=arm64 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            olddefconfig
+
+          echo "=== Build stock-config kernel baseline ==="
+
+          make O="${STOCK_OUT}" \
+            ARCH=arm64 \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            -j"$(nproc)" \
+            Image modules
+
+          test -s "${STOCK_OUT}/.config"
+          test -s "${STOCK_OUT}/Module.symvers"
+
+          mkdir -p "${GITHUB_WORKSPACE}/artifacts/stock-abi"
+
+          cp \
+            "${STOCK_OUT}/Module.symvers" \
+            "${GITHUB_WORKSPACE}/artifacts/stock-abi/Module.symvers"
+
+          cp \
+            "${STOCK_OUT}/.config" \
+            "${GITHUB_WORKSPACE}/artifacts/stock-abi/stock.config"
+
+          sha256sum \
+            "${STOCK_OUT}/Module.symvers" \
+            "${STOCK_OUT}/.config" \
+            > "${GITHUB_WORKSPACE}/artifacts/stock-abi/SHA256SUMS"
+
+          echo "Independent stock-config ABI baseline built."
+
+
+
+      - name: Upload stock ABI baseline immediately
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: cebu-stock-abi-baseline
+          path: |
+            artifacts/stock-abi/Module.symvers
+            artifacts/stock-abi/stock.config
+            artifacts/stock-abi/SHA256SUMS
+          if-no-files-found: warn
+          retention-days: 14
+
       # ============================================================
       # 17. LOAD THE VERIFIED STOCK CEBU CONFIGURATION
       #
@@ -10304,6 +10369,19 @@
 
           export PATH="${LLVM_BIN}:${PATH}"
           hash -r
+
+
+
+          echo "=== Inspect ISO-TP unused ioctl helper ==="
+
+          grep -n -B 8 -A 12 \
+            "isotp_sock_no_ioctlcmd" \
+            "${ISOTP_DIR}/net/can/isotp.c"
+
+          echo "=== Check ISO-TP source references ==="
+
+          grep -n "isotp_sock_no_ioctlcmd" \
+            "${ISOTP_DIR}/net/can/isotp.c"
 
           echo "=== Build ISO-TP against the existing kernel ==="
 
