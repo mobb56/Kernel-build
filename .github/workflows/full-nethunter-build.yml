@@ -2617,7 +2617,7 @@
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
-            KCFLAGS="-Wno-error=format -Wno-error=missing-attributes -Wno-error=unused-variable -Wno-error=unused-function" \
+            KCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=unused-function
             olddefconfig
 
           echo "=== Build stock-config kernel baseline ==="
@@ -2627,7 +2627,7 @@
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
-            KCFLAGS="-Wno-error=format -Wno-error=missing-attributes -Wno-error=unused-variable -Wno-error=unused-function" \
+            KCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=unused-function
             -j"$(nproc)" \
             Image modules
 
