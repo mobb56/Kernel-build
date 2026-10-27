@@ -2666,8 +2666,7 @@
               ARCH=arm64 \
               LLVM=1 \
               LLVM_IAS=1 \
-              KCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=unused-function" \
-              -j"$(nproc)" \
+              KCFLAGS="-Wno-error=format -Wno-error=unused-variable -Wno-error=unused-function -Wno-error=unknown-warning-option" \
               Image modules \
               2>&1 | tee "${STOCK_ARTIFACTS}/build.log"; then
             echo "ERROR: Stock ABI baseline compilation failed."
