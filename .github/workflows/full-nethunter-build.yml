@@ -10584,6 +10584,41 @@
             exit 1
           fi
 
+
+
+          echo "=== Diagnose ISO-TP header compatibility ==="
+
+           echo "--- Kernel ISO-TP headers ---"
+            find "${KERNEL_DIR}/include" \
+            -path '*can/isotp.h' \
+            -o -path '*can.h' \
+             | head -50
+
+          echo "--- ISO-TP source header references ---"
+          grep -nE '#include <linux/can/.*\.h>|#include ".*\.h"' \
+           "${ISOTP_DIR}/net/can/isotp.c" \
+           | head -80
+
+          echo "--- Kernel CAN header availability ---"
+          for header in \
+           "${KERNEL_DIR}/include/linux/can.h" \
+           "${KERNEL_DIR}/include/uapi/linux/can.h" \
+           "${KERNEL_DIR}/include/uapi/linux/can/isotp.h" \
+           "${OUT_DIR}/include/generated/uapi/linux/can/isotp.h"
+          do
+           if [ -f "${header}" ]; then
+            echo "FOUND: ${header}"
+          else
+            echo "MISSING: ${header}"
+           fi
+            done
+
+            echo "--- ISO-TP source revision ---"
+            git -C "${ISOTP_DIR}" log -1 --format='%H %s'
+
+            echo "--- Kernel source revision ---"
+            git -C "${KERNEL_DIR}" rev-parse HEAD
+
           echo "=== Verify ISO-TP module architecture ==="
 
           "${LLVM_BIN}/llvm-readelf" -h "${ISOTP_MODULE}" \
