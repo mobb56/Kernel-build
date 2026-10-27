@@ -2696,6 +2696,132 @@
           echo "=== Stock ABI baseline completed ==="
           ls -lh "${STOCK_ARTIFACTS}"
 
+
+
+
+
+   
+
+      - name: Diagnose stock ABI baseline make environment
+        working-directory: kernel
+        shell: bash
+        run: |
+           set +e
+
+           echo "============================================================"
+           echo " STOCK ABI BASELINE MAKE DIAGNOSTICS"
+           echo "============================================================"
+
+           echo
+           echo "=== 1. Working directory ==="
+           pwd
+           ls -ld .
+           ls -l Makefile scripts/Makefile 2>/dev/null || true
+
+           echo
+           echo "=== 2. Build tool versions ==="
+           make --version | head -n 2
+           gcc --version | head -n 1
+           clang --version 2>/dev/null | head -n 1 || true
+
+           echo
+           echo "=== 3. Relevant build variables ==="
+           printf 'ARCH=<%s>\n' "${ARCH-UNSET}"
+           printf 'CROSS_COMPILE=<%s>\n' "${CROSS_COMPILE-UNSET}"
+           printf 'LLVM_DIR=<%s>\n' "${LLVM_DIR-UNSET}"
+           printf 'OUT_DIR=<%s>\n' "${OUT_DIR-UNSET}"
+           printf 'GITHUB_WORKSPACE=<%s>\n' "${GITHUB_WORKSPACE-UNSET}"
+
+           echo
+           echo "=== 4. Make-related environment variables ==="
+
+           for name in MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEOVERRIDES; do
+            if printenv "$name" >/dev/null 2>&1; then
+             printf '%s=<%s>\n' "$name" "$(printenv "$name")"
+           else
+             printf '%s=<UNSET>\n' "$name"
+            fi
+           done
+
+           echo
+           echo "=== 5. Suspicious empty Make variable assignments ==="
+
+           grep -nE '^[[:space:]]*(-[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=|[[:space:]]*=)' \
+            Makefile scripts/Makefile 2>/dev/null || true
+
+           echo
+           echo "=== 6. Stock configuration file ==="
+
+           if [ -f "${GITHUB_WORKSPACE}/cebu-stock.config" ]; then
+             ls -lh "${GITHUB_WORKSPACE}/cebu-stock.config"
+           sha256sum "${GITHUB_WORKSPACE}/cebu-stock.config"
+           else
+            echo "ERROR: cebu-stock.config is missing."
+           fi
+
+           echo
+           echo "=== 7. Output directory and configuration ==="
+
+            STOCK_OUT="${GITHUB_WORKSPACE}/out-stock-abi"
+
+            printf 'STOCK_OUT=<%s>\n' "$STOCK_OUT"
+
+           if [ -d "$STOCK_OUT" ]; then
+           ls -ld "$STOCK_OUT"
+           ls -la "$STOCK_OUT" | head -n 25
+           else
+            echo "Stock output directory does not exist yet."
+           fi
+
+           echo
+           echo "=== 8. Inspect Makefile references to MAKEFLAGS ==="
+
+           grep -n -E 'MAKEFLAGS|MFLAGS|GNUMAKEFLAGS|MAKEOVERRIDES' \
+             Makefile scripts/Makefile 2>/dev/null | head -n 80 || true
+
+           echo
+           echo "=== 9. Test basic GNU Make parsing ==="
+
+           printf 'diagnostic_target:\n\t@echo MAKE_PARSE_OK\n' \
+             > /tmp/cebu-make-diagnostic.mk
+
+           make -f /tmp/cebu-make-diagnostic.mk diagnostic_target
+              BASIC_MAKE_STATUS=$?
+
+           echo "Basic Make test exit status: ${BASIC_MAKE_STATUS}"
+
+           echo
+            echo "=== 10. Test kernel Makefile parsing ==="
+
+           make -n \
+            O="${STOCK_OUT}" \
+            ARCH=arm64 \
+            CROSS_COMPILE="${CROSS_COMPILE-}" \
+            olddefconfig \
+            > /tmp/cebu-kernel-make.stdout \
+            2> /tmp/cebu-kernel-make.stderr
+
+           KERNEL_MAKE_STATUS=$?
+
+           echo "Kernel Make parse/test exit status: ${KERNEL_MAKE_STATUS}"
+
+           echo
+           echo "--- Kernel Make stdout (last 60 lines) ---"
+           tail -n 60 /tmp/cebu-kernel-make.stdout 2>/dev/null || true
+
+           echo
+           echo "--- Kernel Make stderr (last 100 lines) ---"
+           tail -n 100 /tmp/cebu-kernel-make.stderr 2>/dev/null || true
+
+           echo
+           echo "============================================================"
+           echo " DIAGNOSTICS COMPLETE"
+           echo "============================================================"
+
+           # This step only collects evidence. Let the actual build
+           # step determine whether the workflow succeeds.
+           exit 0
+
           
 
 
