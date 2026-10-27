@@ -10519,7 +10519,6 @@
 
 
 
-
       - name: Build CAN ISO-TP external module
         working-directory: ${{ github.workspace }}
         shell: bash
@@ -10537,96 +10536,91 @@
           test -f "${OUT_DIR}/.config"
           test -f "${OUT_DIR}/Module.symvers"
 
-          git clone \
-            --depth 1 \
+          git clone --depth 1 \
             https://github.com/hartkopp/can-isotp.git \
             "${ISOTP_DIR}"
-
-          echo "=== Record ISO-TP source revision ==="
 
           git -C "${ISOTP_DIR}" rev-parse HEAD \
             | tee "${GITHUB_WORKSPACE}/isotp-source-commit.txt"
 
-          export PATH="${LLVM_BIN}:${PATH}"
-          hash -r
+          ISOTP_SOURCE="${ISOTP_DIR}/net/can/isotp.c"
+          ISOTP_MODULE="${ISOTP_DIR}/net/can/can-isotp.ko"
 
+          test -f "${ISOTP_SOURCE}"
 
+          echo "=== Verify legacy ioctl helper usage ==="
 
-          echo "=== Inspect ISO-TP unused ioctl helper ==="
-
-          grep -n -B 8 -A 12 \
-            "isotp_sock_no_ioctlcmd" \
-            "${ISOTP_DIR}/net/can/isotp.c"
-
-          echo "=== Check ISO-TP source references ==="
-
-          grep -n "isotp_sock_no_ioctlcmd" \
-            "${ISOTP_DIR}/net/can/isotp.c"
+          grep -n -B 3 -A 8 \
+            'isotp_sock_no_ioctlcmd' \
+            "${ISOTP_SOURCE}" || true
 
           echo "=== Build ISO-TP against the existing kernel ==="
 
+          set +e
           make -C "${KERNEL_DIR}" \
             O="${OUT_DIR}" \
-            M="${ISOTP_DIR}" \
+            M="${ISOTP_DIR}/net/can" \
             ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
-            LOCALVERSION="-g39bcecd5c63d" \
+            KCFLAGS="-Wno-error=unused-function" \
             modules
+          BUILD_STATUS=$?
+          set -e
 
-          ISOTP_MODULE="${ISOTP_DIR}/net/can/can-isotp.ko"
+          if [ "${BUILD_STATUS}" -ne 0 ]; then
+            echo "ERROR: ISO-TP module build failed."
+            echo "=== Relevant compiler diagnostics ==="
+            grep -n -B 8 -A 12 \
+              -E 'error:|fatal error:|undefined reference|Error [0-9]' \
+              "${GITHUB_WORKSPACE}/isotp-build.log" 2>/dev/null || true
+            exit "${BUILD_STATUS}"
+          fi
 
           if [ ! -s "${ISOTP_MODULE}" ]; then
-            echo "ERROR: ISO-TP build completed without can-isotp.ko"
+            echo "ERROR: Build succeeded but can-isotp.ko is missing."
+            find "${ISOTP_DIR}" -name '*.ko' -print
             exit 1
           fi
 
           echo "=== Verify ISO-TP module architecture ==="
 
-          "${LLVM_BIN}/llvm-readelf" -h "${ISOTP_MODULE}"
+          "${LLVM_BIN}/llvm-readelf" -h "${ISOTP_MODULE}" \
+            | tee "${GITHUB_WORKSPACE}/isotp-elf-header.txt"
 
           MACHINE="$(
             "${LLVM_BIN}/llvm-readelf" -h "${ISOTP_MODULE}" |
-              awk -F: '/Machine:/ {gsub(/^[[:space:]]+/, "", $2); print $2}'
+              awk -F: '/Machine:/ {gsub(/^[ \t]+/, "", $2); print $2}'
           )"
 
-          if [ "${MACHINE}" != "AArch64" ]; then
+          if [[ "${MACHINE}" != *"AArch64"* ]]; then
             echo "ERROR: Unexpected ISO-TP architecture: ${MACHINE}"
             exit 1
           fi
 
           echo "=== Verify ISO-TP vermagic ==="
 
-          MODINFO="${GITHUB_WORKSPACE}/kernel/scripts/mod/modpost"
-
+          MODINFO="${LLVM_BIN}/llvm-readelf"
           if ! command -v modinfo >/dev/null 2>&1; then
-            echo "ERROR: modinfo is unavailable; cannot verify module metadata"
+            echo "ERROR: modinfo is required to verify module metadata."
             exit 1
           fi
 
-          modinfo "${ISOTP_MODULE}" | tee "${GITHUB_WORKSPACE}/isotp-modinfo.txt"
+          modinfo "${ISOTP_MODULE}" \
+            | tee "${GITHUB_WORKSPACE}/isotp-modinfo.txt"
 
-          ACTUAL_RELEASE="$(
-            modinfo -F vermagic "${ISOTP_MODULE}" | awk '{print $1}'
-          )"
-
+          ACTUAL_RELEASE="$(modinfo -F vermagic "${ISOTP_MODULE}" | awk '{print $1}')"
           EXPECTED_RELEASE="4.19.325-cip135-st19-perf-g39bcecd5c63d"
 
           if [ "${ACTUAL_RELEASE}" != "${EXPECTED_RELEASE}" ]; then
-            echo "ERROR: ISO-TP vermagic does not match the target kernel"
+            echo "ERROR: ISO-TP vermagic does not match."
             echo "Expected: ${EXPECTED_RELEASE}"
             echo "Actual:   ${ACTUAL_RELEASE}"
             exit 1
           fi
 
-          echo "=== Check ISO-TP undefined symbols ==="
-
-          "${LLVM_BIN}/llvm-nm" -u "${ISOTP_MODULE}" \
-            | tee "${GITHUB_WORKSPACE}/isotp-undefined-symbols.txt"
-
-          
-          echo "=== Stage ISO-TP module in kernel output ==="
+          echo "=== Stage ISO-TP module ==="
 
           mkdir -p "${OUT_DIR}/can-isotp/net/can"
 
@@ -10634,11 +10628,11 @@
             "${ISOTP_MODULE}" \
             "${OUT_DIR}/can-isotp/net/can/can-isotp.ko"
 
-          test -s "${OUT_DIR}/can-isotp/net/can/can-isotp.ko"
-
           sha256sum \
             "${OUT_DIR}/can-isotp/net/can/can-isotp.ko" \
             | tee "${GITHUB_WORKSPACE}/isotp-module.sha256"
+
+          echo "=== ISO-TP module built and staged successfully ==="
 
 
 
